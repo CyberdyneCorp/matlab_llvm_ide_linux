@@ -413,6 +413,7 @@ version = "0.1.0"
 dependencies = [
  "gtk4",
  "matforge-core",
+ "serde_json",
 ]
 
 [[package]]

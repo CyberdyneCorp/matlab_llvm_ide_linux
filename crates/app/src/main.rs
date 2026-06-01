@@ -14,11 +14,18 @@ use matforge_core::services::filesystem::RealFileSystem;
 use matforge_core::services::settings::Settings;
 use matforge_core::viewmodels::MainViewModel;
 
+mod app_state;
+mod editor_view;
+mod flow_render;
+mod flowchart_view;
 mod highlight;
+mod plot_render;
+mod process;
 mod runner;
 mod services_impl;
 mod ui;
 
+use app_state::AppState;
 use services_impl::{GtkClipboard, NoopFilePicker};
 
 const APP_ID: &str = "org.matlab_llvm.MatForge";
@@ -47,23 +54,39 @@ fn build_main_window(app: &Application) {
         Rc::new(NoopFilePicker),
         settings.clone(),
     ));
+    let app = AppState::new(vm, settings.clone());
 
-    ui::build(&window, vm.clone());
+    ui::build(&window, app.clone());
 
     // Optional startup open (used for demos / verification):
-    //   MATFORGE_OPEN=<folder>  MATFORGE_FILE=<file>
+    //   MATFORGE_OPEN=<folder>  MATFORGE_FILE=<file>  MATFORGE_COMPILE=1
     if let Ok(folder) = std::env::var("MATFORGE_OPEN") {
-        let _ = vm.open_folder(std::path::Path::new(&folder));
+        let _ = app.vm.open_folder(std::path::Path::new(&folder));
     }
     if let Ok(file) = std::env::var("MATFORGE_FILE") {
-        ui::open_file_path(&vm, std::path::Path::new(&file));
+        ui::open_file_path(&app, std::path::Path::new(&file));
     }
     if std::env::var("MATFORGE_COMPILE").is_ok() {
-        runner::compile(&vm);
+        runner::compile(&app.vm);
+    }
+    if let Ok(cmd) = std::env::var("MATFORGE_REPL") {
+        app.repl_send(&cmd);
+    }
+    if std::env::var("MATFORGE_DEBUG").is_ok() {
+        app.start_debug();
+    }
+    if std::env::var("MATFORGE_PLOT").is_ok() {
+        use matforge_core::models::{PlotFigure, PlotKind};
+        let xs: Vec<f64> = (0..240).map(|i| i as f64 * 0.05).collect();
+        let ys: Vec<f64> = xs.iter().map(|x| (x * 1.5).sin() * (-x * 0.1).exp()).collect();
+        app.vm.plots.add(PlotFigure::series(1, "damped sine", PlotKind::Line2D, xs, ys));
+    }
+    if let Ok(kind) = std::env::var("MATFORGE_NEWFLOW") {
+        ui::open_demo_flowchart(&app, kind == "signal");
     }
 
     if !runner::matlabc_available(&settings) {
-        vm.status_bar.set_message(format!(
+        app.vm.status_bar.set_message(format!(
             "matlabc not found at {} — set $MATLABC_PATH",
             settings.matlabc_path.display()
         ));

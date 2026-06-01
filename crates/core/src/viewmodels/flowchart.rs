@@ -87,6 +87,18 @@ impl FlowchartViewModel {
     /// Move a node (drag commit). Snapshots for undo.
     pub fn move_node(&self, id: &str, x: f64, y: f64) {
         self.push_undo();
+        self.set_node_position(id, x, y);
+    }
+
+    /// Take an undo snapshot of the current document — call once at the start of
+    /// an interactive gesture (e.g. a canvas drag) whose individual steps use
+    /// [`set_node_position`](Self::set_node_position).
+    pub fn begin_edit(&self) {
+        self.push_undo();
+    }
+
+    /// Set a node's position without snapshotting undo (for smooth drags).
+    pub fn set_node_position(&self, id: &str, x: f64, y: f64) {
         self.document.update(|d| {
             if let Some(flow) = d.flows.first_mut() {
                 if let Some(node) = flow.nodes.iter_mut().find(|n| n.id == id) {
@@ -316,6 +328,26 @@ mod tests {
         assert!(!vm.is_dirty.get());
         let back = flowchart_codec::decode_str(&json).unwrap();
         assert_eq!(back, vm.document.get());
+    }
+
+    #[test]
+    fn begin_edit_then_drag_is_one_undo_step() {
+        let vm = FlowchartViewModel::empty("D", SchemaKind::ControlFlow);
+        // Simulate a drag: one snapshot, several position updates.
+        vm.begin_edit();
+        vm.set_node_position("main_end", 300.0, 300.0);
+        vm.set_node_position("main_end", 310.0, 320.0);
+        let pos = vm.document.with(|d| {
+            d.flows[0].nodes.iter().find(|n| n.id == "main_end").unwrap().ui.position
+        });
+        assert_eq!((pos.x, pos.y), (310.0, 320.0));
+        assert!(vm.is_dirty.get());
+        // A single undo restores the pre-drag position.
+        vm.undo();
+        let pos = vm.document.with(|d| {
+            d.flows[0].nodes.iter().find(|n| n.id == "main_end").unwrap().ui.position
+        });
+        assert_eq!((pos.x, pos.y), (240.0, 220.0));
     }
 
     #[test]

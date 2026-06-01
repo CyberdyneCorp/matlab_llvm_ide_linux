@@ -43,8 +43,12 @@ verification:
 | Variable | Effect |
 |----------|--------|
 | `MATFORGE_OPEN=<folder>` | open the folder in the Explorer on launch |
-| `MATFORGE_FILE=<file>` | open the file in the editor on launch |
+| `MATFORGE_FILE=<file>` | open the file in the editor (`.m`) or flowchart canvas (`.mflow`) |
 | `MATFORGE_COMPILE=1` | compile the opened file once on launch |
+| `MATFORGE_REPL=<cmd>` | start the live REPL and run `<cmd>` on launch |
+| `MATFORGE_DEBUG=1` | start a debug session on the opened file |
+| `MATFORGE_PLOT=1` | add a sample figure to the Plots panel |
+| `MATFORGE_NEWFLOW=control\|signal` | open a demo flowchart on the canvas |
 
 ## Test
 

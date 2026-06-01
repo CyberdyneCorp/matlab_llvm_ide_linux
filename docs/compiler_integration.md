@@ -49,12 +49,14 @@ Linux has no `build_and_run.sh`; the Run pipeline reproduces
 
 ## REPL (`matlabc -repl`)
 
-The REPL view model records history/transcript and routes stdout through the
-[`SentinelRouter`](../crates/core/src/services/sentinels.rs), which separates
-console text from structured payloads wrapped in `___MF_WS___` / `___MF_VAL___` /
-`___MF_FIG___` sentinels (workspace tables, value matrices, rendered figures).
-The live subprocess streaming is wired in a later phase; the routing + parsing are
-complete and tested.
+The live REPL is wired end-to-end. `app/src/process.rs::ReplSession` spawns
+`matlabc -repl`, reads its stdout/stderr on background threads, and marshals each
+line to the GTK main loop. Submitting a command also sends the workspace-sync
+probe (`disp('___MF_WS_BEGIN___'); whos; disp('___MF_WS_END___')`). Output is
+routed through the [`SentinelRouter`](../crates/core/src/services/sentinels.rs),
+which separates console text from structured payloads wrapped in `___MF_WS___` /
+`___MF_VAL___` / `___MF_FIG___` sentinels — so typing a command updates the
+console **and** the Workspace table automatically.
 
 ## Debug (`matlabc -dap`)
 
@@ -62,5 +64,16 @@ DAP speaks JSON-RPC bodies in `Content-Length` frames over stdio. The pure frami
 codec, sequence/request builder, and message parser live in
 [`dap.rs`](../crates/core/src/services/dap.rs); the
 [`DebugViewModel`](../crates/core/src/viewmodels/debug.rs) is the client-side state
-machine (idle → launching → running → paused → terminated) driven by decoded
-events. The transport process wiring is a later phase.
+machine (idle → launching → running → paused → terminated). The transport
+(`app/src/process.rs::DapSession`) spawns `matlabc -dap`, de-frames responses, and
+`app/src/app_state.rs` drives the protocol: `initialize → launch → setBreakpoints
+→ configurationDone`, then on `stopped` fetches `stackTrace → scopes → variables`
+to populate the call stack, locals, and the editor's execution-line marker.
+Stepping (continue/pause/next/stepIn/stepOut/stepBack) and gutter-click
+breakpoints are all wired.
+
+> **Compiler-side blocker:** the shipped `matlabc -dap` currently **segfaults**
+> before sending a `stopped` event (verified with a standalone JSON-RPC driver,
+> not just the IDE), so pausing/locals can't be exercised yet. The IDE handles
+> the adapter exiting gracefully (`DAP_EXIT` → tear down + status message). Once
+> the adapter is fixed the existing client + UI work without changes.
