@@ -69,6 +69,14 @@ pub mod name {
     pub const LAYOUTS: &str = "view-grid-symbolic";
     pub const HELP: &str = "help-about-symbolic";
 
+    // Debug transport
+    pub const CONTINUE: &str = "media-playback-start-symbolic";
+    pub const PAUSE: &str = "media-playback-pause-symbolic";
+    pub const STEP_OVER: &str = "media-seek-forward-symbolic";
+    pub const STEP_IN: &str = "go-down-symbolic";
+    pub const STEP_OUT: &str = "go-up-symbolic";
+    pub const STEP_BACK: &str = "media-seek-backward-symbolic";
+
     pub const EXPLORER: &str = "folder-symbolic";
     pub const SEARCH: &str = "system-search-symbolic";
     pub const HDL: &str = "mf-hdl-symbolic";

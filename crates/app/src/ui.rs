@@ -148,6 +148,24 @@ fn build_toolbar(window: &ApplicationWindow, app: &Rc<AppState>) -> GtkBox {
     row.append(&stop_btn);
     row.append(&sep());
 
+    // Debug transport controls — shown while a debug session is active.
+    let debug_controls = GtkBox::new(Orientation::Horizontal, 4);
+    for (icon, label, cmd) in [
+        (ic::CONTINUE, "Continue", "continue"),
+        (ic::PAUSE, "Pause", "pause"),
+        (ic::STEP_OVER, "Step Over", "next"),
+        (ic::STEP_IN, "Step In", "stepIn"),
+        (ic::STEP_OUT, "Step Out", "stepOut"),
+        (ic::STEP_BACK, "Step Back", "stepBack"),
+    ] {
+        let b = tool_button(icon, label, None);
+        let app = app.clone();
+        b.connect_clicked(move |_| app.debug_command(cmd));
+        debug_controls.append(&b);
+    }
+    debug_controls.append(&sep());
+    row.append(&debug_controls);
+
     // Target + Compile.
     row.append(&field_label("Target:"));
     let target_dd = DropDown::from_strings(&CompilerTarget::ALL.iter().map(|t| t.label()).collect::<Vec<_>>());
