@@ -3,8 +3,9 @@
 //! figures. Pure drawing — reads a figure, paints a `cairo::Context`.
 
 use gtk::cairo;
+use gtk::prelude::*;
 
-use matforge_core::models::{PlotFigure, PlotKind};
+use matforge_core::models::{MatrixView, PlotFigure, PlotKind};
 use matforge_core::theme::{palette, Rgb};
 
 const MARGIN: f64 = 40.0;
@@ -13,15 +14,15 @@ const MARGIN: f64 = 40.0;
 pub fn draw_figure(ctx: &cairo::Context, w: f64, h: f64, figure: &PlotFigure) {
     fill(ctx, palette::EDITOR_BACKGROUND, 0.0, 0.0, w, h);
 
-    // Runtime PNG figure: the bytes are the source of truth. (Decoding the PNG
-    // for in-canvas blit needs cairo's `png` feature, which the bundled cairo
-    // doesn't enable; we surface a labeled placeholder instead.)
-    if figure.png_data.is_some() {
+    // Runtime PNG figure: decode via GDK (no cairo `png` feature needed) and
+    // blit. GDK downloads in cairo's native ARGB32 layout.
+    if let Some(png) = &figure.png_data {
+        if blit_png(ctx, w, h, png) {
+            return;
+        }
         set_color(ctx, palette::TEXT_SECONDARY);
-        ctx.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
-        ctx.set_font_size(13.0);
         ctx.move_to(MARGIN, h / 2.0);
-        ctx.show_text(&format!("[rendered figure: {}]", figure.title)).ok();
+        ctx.show_text(&format!("[figure: {}]", figure.title)).ok();
         return;
     }
 
@@ -156,6 +157,63 @@ fn draw_area(ctx: &cairo::Context, xs: &[f64], ys: &[f64], map: &impl Fn(f64, f6
     ctx.close_path();
     ctx.fill().ok();
     draw_line(ctx, xs, ys, map, palette::ACCENT_MAGENTA);
+}
+
+/// Render a matrix as a cold→hot heatmap (blue → red) for the Matrix Viewer.
+pub fn draw_heatmap(ctx: &cairo::Context, w: f64, h: f64, m: &MatrixView) {
+    fill(ctx, palette::EDITOR_BACKGROUND, 0.0, 0.0, w, h);
+    if m.rows == 0 || m.cols == 0 {
+        return;
+    }
+    let Some((lo, hi)) = m.value_range() else { return };
+    let bar_w = 14.0;
+    let grid_w = (w - bar_w - 12.0).max(1.0);
+    let cw = grid_w / m.cols as f64;
+    let ch = (h / m.rows as f64).max(1.0);
+    let (cold, hot) = (palette::ACCENT_BLUE, palette::ACCENT_RED);
+    for (r, row) in m.cells.iter().enumerate() {
+        for (c, &v) in row.iter().enumerate() {
+            let t = if (hi - lo).abs() < 1e-12 { 0.5 } else { (v - lo) / (hi - lo) };
+            set_color(ctx, cold.blend(hot, t));
+            ctx.rectangle(c as f64 * cw, r as f64 * ch, (cw - 1.0).max(1.0), (ch - 1.0).max(1.0));
+            ctx.fill().ok();
+        }
+    }
+    // Colorbar.
+    let steps = 32;
+    for i in 0..steps {
+        let t = i as f64 / (steps - 1) as f64;
+        set_color(ctx, cold.blend(hot, 1.0 - t));
+        ctx.rectangle(w - bar_w, t * h, bar_w, h / steps as f64 + 1.0);
+        ctx.fill().ok();
+    }
+}
+
+/// Decode PNG bytes with GDK and paint them centered + scaled to fit.
+fn blit_png(ctx: &cairo::Context, w: f64, h: f64, png: &[u8]) -> bool {
+    let bytes = gtk::glib::Bytes::from(png);
+    let Ok(texture) = gtk::gdk::Texture::from_bytes(&bytes) else { return false };
+    let (iw, ih) = (texture.width(), texture.height());
+    if iw <= 0 || ih <= 0 {
+        return false;
+    }
+    let stride = iw * 4;
+    let mut data = vec![0u8; (ih * stride) as usize];
+    texture.download(&mut data, stride as usize);
+    let Ok(surface) =
+        cairo::ImageSurface::create_for_data(data, cairo::Format::ARgb32, iw, ih, stride)
+    else {
+        return false;
+    };
+    let scale = (w / iw as f64).min(h / ih as f64).min(1.0);
+    ctx.save().ok();
+    ctx.translate((w - iw as f64 * scale) / 2.0, (h - ih as f64 * scale) / 2.0);
+    ctx.scale(scale, scale);
+    if ctx.set_source_surface(&surface, 0.0, 0.0).is_ok() {
+        ctx.paint().ok();
+    }
+    ctx.restore().ok();
+    true
 }
 
 fn range(v: &[f64]) -> (f64, f64) {

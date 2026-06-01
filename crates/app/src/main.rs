@@ -17,6 +17,7 @@ use matforge_core::viewmodels::MainViewModel;
 mod app_state;
 mod editor_view;
 mod flow_render;
+mod icons;
 mod flowchart_view;
 mod highlight;
 mod plot_render;
@@ -32,7 +33,10 @@ const APP_ID: &str = "org.matlab_llvm.MatForge";
 
 fn main() -> glib::ExitCode {
     let app = Application::builder().application_id(APP_ID).build();
-    app.connect_startup(|_| install_css());
+    app.connect_startup(|_| {
+        install_css();
+        icons::install();
+    });
     app.connect_activate(build_main_window);
     app.run()
 }
@@ -68,6 +72,9 @@ fn build_main_window(app: &Application) {
     }
     if std::env::var("MATFORGE_COMPILE").is_ok() {
         runner::compile(&app.vm);
+    }
+    if std::env::var("MATFORGE_RUN").is_ok() {
+        runner::run(&app.vm, &settings);
     }
     if let Ok(cmd) = std::env::var("MATFORGE_REPL") {
         app.repl_send(&cmd);

@@ -54,7 +54,12 @@ pub fn run(vm: &MainViewModel, settings: &Settings) {
     }
 
     // 3. execute and stream stdout to the REPL transcript via the sentinel path.
-    match Command::new(&plan.bin_path).output() {
+    //    MATLAB_LLVM_IDE_FIGURES makes the matlab_plot runtime emit figures as
+    //    ___MF_FIG_*___ sentinels so they land in the Plots panel.
+    match Command::new(&plan.bin_path)
+        .env("MATLAB_LLVM_IDE_FIGURES", "1")
+        .output()
+    {
         Ok(o) => {
             let stdout = String::from_utf8_lossy(&o.stdout);
             for line in stdout.lines() {

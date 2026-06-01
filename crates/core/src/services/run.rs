@@ -49,7 +49,8 @@ impl RunPlan {
             runtime_archive.to_string_lossy().into_owned(),
             "-ldl".to_string(),
             "-lpthread".to_string(),
-            "-Wl,-dead_strip".to_string(),
+            // GNU ld dead-strip (the doc's macOS `-Wl,-dead_strip` equivalent).
+            "-Wl,--gc-sections".to_string(),
             "-o".to_string(),
             self.bin_path.to_string_lossy().into_owned(),
         ];
@@ -95,7 +96,7 @@ mod tests {
         assert_eq!(args[0], "-std=c++20");
         assert!(args.contains(&"-Wno-override-module".to_string()));
         assert!(args.contains(&"/rt/libMatlabRuntime.a".to_string()));
-        assert!(args.contains(&"-Wl,-dead_strip".to_string()));
+        assert!(args.contains(&"-Wl,--gc-sections".to_string()));
         // ends with -o <bin>
         assert_eq!(args[args.len() - 2], "-o");
         assert_eq!(args[args.len() - 1], "/tmp/diff");

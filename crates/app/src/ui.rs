@@ -7,18 +7,19 @@ use std::rc::Rc;
 
 use gtk::prelude::*;
 use gtk::{
-    gio, ApplicationWindow, Box as GtkBox, Button, DropDown, Entry, Label, ListBox, Notebook,
-    Orientation, ScrolledWindow, Stack, TextView,
+    gio, ApplicationWindow, Box as GtkBox, Button, DropDown, Entry, Image, Label, ListBox,
+    Notebook, Orientation, ScrolledWindow, Stack, TextView,
 };
 
 use matforge_core::models::{
-    CompilerTarget, ConsoleLevel, NodeFileKind, OptimizationProfile, ProjectNode,
+    CompilerTarget, ConsoleLevel, NodeFileKind, NumericMode, OptimizationProfile, ProjectNode,
 };
 use matforge_core::services::highlighter::Language;
 use matforge_core::viewmodels::{ActivityItem, DebugState, FlowchartViewModel};
 
 use crate::app_state::AppState;
 use crate::editor_view;
+use crate::icons::name as ic;
 use crate::runner;
 
 /// Build the full window content and attach it to `window`.
@@ -43,71 +44,51 @@ pub fn build(window: &ApplicationWindow, app: Rc<AppState>) {
 // ---- Toolbar ---------------------------------------------------------------
 
 fn build_toolbar(window: &ApplicationWindow, app: &Rc<AppState>) -> GtkBox {
-    let toolbar = GtkBox::new(Orientation::Vertical, 2);
+    let toolbar = GtkBox::new(Orientation::Vertical, 4);
     toolbar.add_css_class("mf-toolbar");
     toolbar.set_margin_top(4);
-    toolbar.set_margin_bottom(4);
+    toolbar.set_margin_bottom(2);
     toolbar.set_margin_start(8);
     toolbar.set_margin_end(8);
 
-    let brand = Label::new(Some("⬣ MatForge IDE"));
+    // Brand row.
+    let brand_row = GtkBox::new(Orientation::Horizontal, 6);
+    let logo = Label::new(Some("M"));
+    logo.add_css_class("mf-logo");
+    let brand = Label::new(Some("MatForge IDE"));
     brand.add_css_class("mf-brand");
-    brand.set_halign(gtk::Align::Start);
-    toolbar.append(&brand);
+    brand_row.append(&logo);
+    brand_row.append(&brand);
+    toolbar.append(&brand_row);
 
-    let row = GtkBox::new(Orientation::Horizontal, 6);
+    // Control row.
+    let row = GtkBox::new(Orientation::Horizontal, 4);
+    row.set_margin_top(2);
 
-    let open_btn = Button::with_label("Open Folder");
-    open_btn.add_css_class("mf-toolbar-button");
+    // File group.
+    let new_btn = tool_button(ic::NEW, "New", None);
+    {
+        let app = app.clone();
+        new_btn.connect_clicked(move |_| new_untitled(&app));
+    }
+    let open_btn = tool_button(ic::OPEN, "Open", None);
     {
         let app = app.clone();
         let window = window.clone();
         open_btn.connect_clicked(move |_| pick_folder(&window, &app));
     }
-    row.append(&open_btn);
-
-    let save_btn = Button::with_label("Save");
-    save_btn.add_css_class("mf-toolbar-button");
+    let save_btn = tool_button(ic::SAVE, "Save", None);
     {
         let app = app.clone();
         save_btn.connect_clicked(move |_| save_active(&app));
     }
+    row.append(&new_btn);
+    row.append(&open_btn);
     row.append(&save_btn);
     row.append(&sep());
 
-    let target_labels: Vec<&str> = CompilerTarget::ALL.iter().map(|t| t.label()).collect();
-    let target_dd = DropDown::from_strings(&target_labels);
-    {
-        let app = app.clone();
-        target_dd.connect_selected_notify(move |dd| {
-            app.vm.toolbar.set_target(CompilerTarget::ALL[dd.selected() as usize]);
-        });
-    }
-    row.append(&Label::new(Some("Target:")));
-    row.append(&target_dd);
-
-    let opt_labels: Vec<&str> = OptimizationProfile::ALL.iter().map(|o| o.label()).collect();
-    let opt_dd = DropDown::from_strings(&opt_labels);
-    {
-        let app = app.clone();
-        opt_dd.connect_selected_notify(move |dd| {
-            app.vm.toolbar.set_optimization(OptimizationProfile::ALL[dd.selected() as usize]);
-        });
-    }
-    row.append(&opt_dd);
-    row.append(&sep());
-
-    let compile_btn = Button::with_label("Compile");
-    compile_btn.add_css_class("mf-toolbar-button");
-    {
-        let app = app.clone();
-        compile_btn.connect_clicked(move |_| runner::compile(&app.vm));
-    }
-    row.append(&compile_btn);
-
-    let run_btn = Button::with_label("▶ Run");
-    run_btn.add_css_class("mf-run");
-    run_btn.add_css_class("mf-toolbar-button");
+    // Run / Debug / Stop group.
+    let run_btn = tool_button(ic::RUN, "Run", Some("mf-run"));
     {
         let app = app.clone();
         run_btn.connect_clicked(move |_| {
@@ -115,65 +96,225 @@ fn build_toolbar(window: &ApplicationWindow, app: &Rc<AppState>) -> GtkBox {
             runner::run(&app.vm, &settings);
         });
     }
-    row.append(&run_btn);
-
-    let debug_btn = Button::with_label("🐞 Debug");
-    debug_btn.add_css_class("mf-debug");
-    debug_btn.add_css_class("mf-toolbar-button");
+    let debug_btn = tool_button(ic::DEBUG, "Debug", Some("mf-debug"));
     {
         let app = app.clone();
-        debug_btn.connect_clicked(move |_| {
-            app.vm.activity_bar.select(ActivityItem::Debug);
-            app.start_debug();
+        debug_btn.connect_clicked(move |_| app.start_debug());
+    }
+    let stop_btn = tool_button(ic::STOP, "Stop", Some("mf-stop"));
+    {
+        let app = app.clone();
+        stop_btn.connect_clicked(move |_| {
+            app.stop_debug();
+            app.vm.toolbar.is_running.set(false);
         });
     }
+    row.append(&run_btn);
     row.append(&debug_btn);
+    row.append(&stop_btn);
+    row.append(&sep());
 
-    let stop_btn = Button::with_label("⏹ Stop");
-    stop_btn.add_css_class("mf-stop");
-    stop_btn.add_css_class("mf-toolbar-button");
+    // Target + Compile.
+    row.append(&field_label("Target:"));
+    let target_dd = DropDown::from_strings(&CompilerTarget::ALL.iter().map(|t| t.label()).collect::<Vec<_>>());
     {
         let app = app.clone();
-        stop_btn.connect_clicked(move |_| app.stop_debug());
+        target_dd.connect_selected_notify(move |dd| {
+            app.vm.toolbar.set_target(CompilerTarget::ALL[dd.selected() as usize]);
+        });
     }
-    row.append(&stop_btn);
+    row.append(&target_dd);
+    let compile_btn = tool_button(ic::COMPILE, "Compile", Some("mf-compile-cta"));
+    {
+        let app = app.clone();
+        compile_btn.connect_clicked(move |_| runner::compile(&app.vm));
+    }
+    row.append(&compile_btn);
+    row.append(&sep());
+
+    // Optimization + Numeric Mode (stacked labeled dropdowns).
+    let opt_col = labeled_dropdown(
+        "Optimization:",
+        &OptimizationProfile::ALL.iter().map(|o| o.label()).collect::<Vec<_>>(),
+        {
+            let app = app.clone();
+            move |i| app.vm.toolbar.set_optimization(OptimizationProfile::ALL[i])
+        },
+    );
+    let num_col = labeled_dropdown(
+        "Numeric Mode:",
+        &NumericMode::ALL.iter().map(|n| n.label()).collect::<Vec<_>>(),
+        {
+            let app = app.clone();
+            move |i| app.vm.toolbar.set_numeric_mode(NumericMode::ALL[i])
+        },
+    );
+    row.append(&opt_col);
+    row.append(&num_col);
+
+    // Right-aligned Layouts + Help.
+    let spacer = GtkBox::new(Orientation::Horizontal, 0);
+    spacer.set_hexpand(true);
+    row.append(&spacer);
+    let layouts = tool_button(ic::LAYOUTS, "Layouts", None);
+    {
+        let app = app.clone();
+        layouts.connect_clicked(move |_| app.vm.layout.toggle_plots());
+    }
+    let help = tool_button(ic::HELP, "Help", None);
+    row.append(&layouts);
+    row.append(&help);
 
     toolbar.append(&row);
     toolbar
 }
 
+/// An icon-over-label flat toolbar button.
+fn tool_button(icon: &str, label: &str, css: Option<&str>) -> Button {
+    let btn = Button::new();
+    btn.set_has_frame(false);
+    btn.add_css_class("mf-tool");
+    if let Some(c) = css {
+        btn.add_css_class(c);
+    }
+    let v = GtkBox::new(Orientation::Vertical, 1);
+    v.set_halign(gtk::Align::Center);
+    let img = Image::from_icon_name(icon);
+    img.set_pixel_size(18);
+    let lbl = Label::new(Some(label));
+    lbl.add_css_class("mf-tool-label");
+    v.append(&img);
+    v.append(&lbl);
+    btn.set_child(Some(&v));
+    btn
+}
+
+fn field_label(text: &str) -> Label {
+    let l = Label::new(Some(text));
+    l.add_css_class("mf-text-secondary");
+    l
+}
+
+fn labeled_dropdown(label: &str, items: &[&str], on_change: impl Fn(usize) + 'static) -> GtkBox {
+    let col = GtkBox::new(Orientation::Vertical, 1);
+    let l = Label::new(Some(label));
+    l.add_css_class("mf-tool-label");
+    l.set_halign(gtk::Align::Start);
+    let dd = DropDown::from_strings(items);
+    dd.connect_selected_notify(move |dd| on_change(dd.selected() as usize));
+    col.append(&l);
+    col.append(&dd);
+    col
+}
+
 fn sep() -> gtk::Separator {
-    gtk::Separator::new(Orientation::Vertical)
+    let s = gtk::Separator::new(Orientation::Vertical);
+    s.set_margin_start(4);
+    s.set_margin_end(4);
+    s
 }
 
 // ---- Activity bar ----------------------------------------------------------
 
 fn build_activity_bar(app: &Rc<AppState>) -> GtkBox {
-    let bar = GtkBox::new(Orientation::Vertical, 4);
+    let bar = GtkBox::new(Orientation::Vertical, 2);
     bar.add_css_class("mf-activity-bar");
-    bar.set_size_request(56, -1);
+    bar.set_size_request(60, -1);
     bar.set_margin_top(6);
     for item in ActivityItem::ALL {
-        let btn = Button::with_label(short_caption(item));
-        btn.add_css_class("mf-activity-item");
+        let btn = Button::new();
         btn.set_has_frame(false);
-        let app = app.clone();
-        btn.connect_clicked(move |_| app.vm.activity_bar.select(item));
+        btn.add_css_class("mf-activity-item");
+        let v = GtkBox::new(Orientation::Vertical, 1);
+        v.set_halign(gtk::Align::Center);
+        let img = Image::from_icon_name(activity_icon(item));
+        img.set_pixel_size(20);
+        let lbl = Label::new(Some(item.caption()));
+        lbl.add_css_class("mf-tool-label");
+        v.append(&img);
+        v.append(&lbl);
+        btn.set_child(Some(&v));
+        {
+            let app = app.clone();
+            btn.connect_clicked(move |_| app.vm.activity_bar.select(item));
+        }
+        // Selection highlight.
+        let btn2 = btn.clone();
+        app.vm.activity_bar.selected.bind(move |sel| {
+            if *sel == item {
+                btn2.add_css_class("selected");
+            } else {
+                btn2.remove_css_class("selected");
+            }
+        });
         bar.append(&btn);
     }
     bar
 }
 
-fn short_caption(item: ActivityItem) -> &'static str {
+fn activity_icon(item: ActivityItem) -> &'static str {
     match item {
-        ActivityItem::Explorer => "Files",
-        ActivityItem::Search => "Find",
-        ActivityItem::Run => "Run",
-        ActivityItem::Compiler => "Comp",
-        ActivityItem::Hdl => "HDL",
-        ActivityItem::Debug => "Dbg",
-        ActivityItem::Docs => "Docs",
-        ActivityItem::Flowchart => "Flow",
+        ActivityItem::Explorer => ic::EXPLORER,
+        ActivityItem::Search => ic::SEARCH,
+        ActivityItem::Run => ic::RUN,
+        ActivityItem::Compiler => ic::COMPILE,
+        ActivityItem::Hdl => ic::HDL,
+        ActivityItem::Debug => ic::DEBUG,
+        ActivityItem::Docs => ic::DOCS,
+        ActivityItem::Flowchart => ic::FLOWCHART,
+    }
+}
+
+fn new_untitled(app: &Rc<AppState>) {
+    let id = app.vm.editor.open_text("untitled.m", "Matlab", "");
+    EDITOR_NB.with(|nb| {
+        let nb = nb.borrow();
+        if let Some(nb) = nb.as_ref() {
+            let view = editor_view::build_code_view(app, id, "", Language::Matlab);
+            let label = tab_label(&view, "untitled.m", app, Some(id));
+            let page = nb.append_page(&view, Some(&label));
+            nb.set_current_page(Some(page));
+        }
+    });
+}
+
+/// A notebook tab label: file-kind icon + name + close button.
+fn tab_label(content: &impl IsA<gtk::Widget>, name: &str, app: &Rc<AppState>, id: Option<u64>) -> GtkBox {
+    let row = GtkBox::new(Orientation::Horizontal, 5);
+    row.add_css_class("mf-tab-label");
+    let icon = Image::from_icon_name(tab_icon(name));
+    icon.set_pixel_size(13);
+    let lbl = Label::new(Some(name));
+    let close = Button::from_icon_name(ic::CLOSE);
+    close.set_has_frame(false);
+    close.add_css_class("mf-tab-close");
+    {
+        let content = content.clone().upcast::<gtk::Widget>();
+        let app = app.clone();
+        close.connect_clicked(move |_| {
+            EDITOR_NB.with(|nb| {
+                if let Some(nb) = nb.borrow().as_ref() {
+                    if let Some(p) = nb.page_num(&content) {
+                        nb.remove_page(Some(p));
+                    }
+                }
+            });
+            if let Some(id) = id {
+                app.vm.editor.close(id);
+            }
+        });
+    }
+    row.append(&icon);
+    row.append(&lbl);
+    row.append(&close);
+    row
+}
+
+fn tab_icon(name: &str) -> &'static str {
+    if name.ends_with(".mflow") {
+        ic::FLOWCHART
+    } else {
+        ic::FILE
     }
 }
 
@@ -196,9 +337,15 @@ fn build_sidebar(app: &Rc<AppState>) -> Stack {
 }
 
 fn build_explorer(app: &Rc<AppState>) -> GtkBox {
-    let panel = GtkBox::new(Orientation::Vertical, 4);
-    let header = section_header("EXPLORER");
-    panel.append(&header);
+    let panel = GtkBox::new(Orientation::Vertical, 0);
+    let refresh = header_action(ic::REFRESH);
+    {
+        let app = app.clone();
+        refresh.connect_clicked(move |_| {
+            let _ = app.vm.project.refresh(app.vm.fs());
+        });
+    }
+    panel.append(&panel_header("EXPLORER", &[refresh]));
 
     let list = ListBox::new();
     let scroll = ScrolledWindow::new();
@@ -215,27 +362,92 @@ fn build_explorer(app: &Rc<AppState>) -> GtkBox {
             }
         }
     });
+
+    // CURRENT FOLDER picker.
+    panel.append(&sub_header("CURRENT FOLDER"));
+    let folder_lbl = Label::new(Some("—"));
+    folder_lbl.add_css_class("mf-text-secondary");
+    folder_lbl.set_halign(gtk::Align::Start);
+    folder_lbl.set_margin_start(8);
+    folder_lbl.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+    let fl = folder_lbl.clone();
+    app.vm.project.root_url.bind(move |url| {
+        fl.set_text(&url.as_ref().map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|| "—".into()));
+    });
+    panel.append(&folder_lbl);
+
+    // DETAILS panel.
+    panel.append(&sub_header("DETAILS"));
+    let details = Label::new(Some("No file selected"));
+    details.add_css_class("mf-text-muted");
+    details.set_halign(gtk::Align::Start);
+    details.set_margin_start(8);
+    details.set_margin_bottom(8);
+    details.set_wrap(true);
+    let d = details.clone();
+    let app2 = app.clone();
+    app.vm.project.selected_id.bind(move |_| {
+        d.set_text(&describe_selection(&app2));
+    });
+    panel.append(&details);
+
     panel
 }
 
-fn append_node_rows(list: &ListBox, node: &ProjectNode, depth: i32, app: &Rc<AppState>) {
-    let row = GtkBox::new(Orientation::Horizontal, 4);
-    row.set_margin_start(8 + depth * 12);
-    let glyph = if node.is_folder() {
-        if node.is_expanded { "▾ 📁" } else { "▸ 📁" }
-    } else {
-        file_glyph(node.kind)
+fn describe_selection(app: &Rc<AppState>) -> String {
+    let Some(node) = app.vm.project.selected_node() else {
+        return "No file selected".into();
     };
-    let btn = Button::with_label(&format!("{glyph} {}", node.name));
+    let kind = match node.kind {
+        NodeFileKind::Matlab => "MATLAB Script",
+        NodeFileKind::Header => "C/C++ Header",
+        NodeFileKind::Source => "Source",
+        NodeFileKind::Build => "Build Artifact",
+        NodeFileKind::Flowchart => "Flowchart",
+        NodeFileKind::Folder => "Folder",
+        NodeFileKind::Generic => "File",
+    };
+    let mut out = format!("Name:  {}\nType:  {}", node.name, kind);
+    if let Some(url) = &node.url {
+        if let Ok(meta) = std::fs::metadata(url) {
+            out.push_str(&format!("\nSize:  {:.1} KB", meta.len() as f64 / 1024.0));
+        }
+    }
+    out
+}
+
+fn append_node_rows(list: &ListBox, node: &ProjectNode, depth: i32, app: &Rc<AppState>) {
+    let row = GtkBox::new(Orientation::Horizontal, 5);
+    row.set_margin_start(6 + depth * 12);
+    let btn = Button::new();
     btn.set_has_frame(false);
     btn.set_halign(gtk::Align::Start);
     btn.add_css_class("mf-row");
+
+    let inner = GtkBox::new(Orientation::Horizontal, 5);
+    if node.is_folder() {
+        let tri = Image::from_icon_name(if node.is_expanded {
+            "pan-down-symbolic"
+        } else {
+            "pan-end-symbolic"
+        });
+        tri.set_pixel_size(10);
+        inner.append(&tri);
+    }
+    let icon = Image::from_icon_name(file_icon(node.kind));
+    icon.set_pixel_size(14);
+    icon.add_css_class(file_icon_class(node.kind));
+    inner.append(&icon);
+    inner.append(&Label::new(Some(&node.name)));
+    btn.set_child(Some(&inner));
+
     {
         let app = app.clone();
         let id = node.id;
         let url = node.url.clone();
         let is_folder = node.is_folder();
         btn.connect_clicked(move |_| {
+            app.vm.project.select(id);
             if is_folder {
                 app.vm.project.toggle_expand(id);
             } else if let Some(path) = &url {
@@ -253,14 +465,22 @@ fn append_node_rows(list: &ListBox, node: &ProjectNode, depth: i32, app: &Rc<App
     }
 }
 
-fn file_glyph(kind: NodeFileKind) -> &'static str {
+fn file_icon(kind: NodeFileKind) -> &'static str {
     match kind {
-        NodeFileKind::Matlab => "ƒ",
-        NodeFileKind::Header => "h",
-        NodeFileKind::Source => "</>",
-        NodeFileKind::Build => "⚒",
-        NodeFileKind::Flowchart => "◇",
-        _ => "·",
+        NodeFileKind::Folder => ic::FOLDER,
+        NodeFileKind::Flowchart => ic::FLOWCHART,
+        _ => ic::FILE,
+    }
+}
+
+fn file_icon_class(kind: NodeFileKind) -> &'static str {
+    match kind {
+        NodeFileKind::Folder => "mf-ic-folder",
+        NodeFileKind::Matlab => "mf-ic-matlab",
+        NodeFileKind::Header => "mf-ic-header",
+        NodeFileKind::Source => "mf-ic-source",
+        NodeFileKind::Flowchart => "mf-ic-flow",
+        _ => "mf-ic-generic",
     }
 }
 
@@ -386,7 +606,8 @@ fn open_file_in_editor(app: &Rc<AppState>, path: &Path) {
         let Some(nb) = nb.as_ref() else { return };
         let language = Language::from_label(&tab.language);
         let view = editor_view::build_code_view(app, id, &tab.contents, language);
-        let page = nb.append_page(&view, Some(&Label::new(Some(&tab.name))));
+        let label = tab_label(&view, &tab.name, app, Some(id));
+        let page = nb.append_page(&view, Some(&label));
         nb.set_current_page(Some(page));
     });
 }
@@ -419,7 +640,8 @@ pub fn open_demo_flowchart(app: &Rc<AppState>, signal: bool) {
     EDITOR_NB.with(|nb| {
         let nb = nb.borrow();
         if let Some(nb) = nb.as_ref() {
-            let page = nb.append_page(&view, Some(&Label::new(Some("Demo.mflow"))));
+            let label = tab_label(&view, "Demo.mflow", app, None);
+            let page = nb.append_page(&view, Some(&label));
             nb.set_current_page(Some(page));
         }
     });
@@ -447,7 +669,8 @@ fn open_flowchart(app: &Rc<AppState>, path: &Path) {
     EDITOR_NB.with(|nb| {
         let nb = nb.borrow();
         if let Some(nb) = nb.as_ref() {
-            let page = nb.append_page(&view, Some(&Label::new(Some(&name))));
+            let label = tab_label(&view, &name, app, None);
+            let page = nb.append_page(&view, Some(&label));
             nb.set_current_page(Some(page));
         }
     });
@@ -610,30 +833,176 @@ fn build_right_column(app: &Rc<AppState>) -> Notebook {
 }
 
 fn build_workspace(app: &Rc<AppState>) -> GtkBox {
-    let panel = GtkBox::new(Orientation::Vertical, 4);
-    panel.append(&section_header("WORKSPACE"));
-    let list = ListBox::new();
-    let scroll = ScrolledWindow::new();
-    scroll.set_vexpand(true);
-    scroll.set_child(Some(&list));
-    panel.append(&scroll);
-    app.vm.workspace.variables.bind(move |vars| {
-        clear_list(&list);
-        for v in vars {
-            list.append(&row_label(&format!(
-                "{:<12} {:<8} {}",
-                v.name,
-                v.size,
-                v.dtype.display_name()
-            )));
+    let panel = GtkBox::new(Orientation::Vertical, 0);
+
+    // Header with refresh action.
+    let refresh = Button::from_icon_name(ic::REFRESH);
+    refresh.set_has_frame(false);
+    refresh.add_css_class("mf-header-action");
+    {
+        // A bare comment evaluates to nothing but still triggers the trailing
+        // `whos` workspace-sync probe in ReplSession::send.
+        let app = app.clone();
+        refresh.connect_clicked(move |_| app.repl_send("% refresh"));
+    }
+    panel.append(&panel_header("WORKSPACE", &[refresh]));
+
+    // Column header.
+    panel.append(&ws_columns_header());
+
+    // Table / empty-state stack.
+    let table = ListBox::new();
+    let tscroll = ScrolledWindow::new();
+    tscroll.set_vexpand(true);
+    tscroll.set_child(Some(&table));
+    let empty = empty_state(
+        ic::COMPILE,
+        "No variables yet",
+        "Start the REPL and assign a value to see it here.",
+    );
+    let body = Stack::new();
+    body.set_vexpand(true);
+    body.add_named(&tscroll, Some("table"));
+    body.add_named(&empty, Some("empty"));
+    panel.append(&body);
+
+    {
+        let body = body.clone();
+        let app2 = app.clone();
+        app.vm.workspace.variables.bind(move |vars| {
+            clear_list(&table);
+            for v in vars {
+                let btn = ws_variable_row(v);
+                let app3 = app2.clone();
+                let name = v.name.clone();
+                btn.connect_clicked(move |_| app3.vm.workspace.select(name.clone()));
+                table.append(&btn);
+            }
+            body.set_visible_child_name(if vars.is_empty() { "empty" } else { "table" });
+        });
+    }
+
+    // Inspector tabs.
+    let insp = Notebook::new();
+    insp.set_size_request(-1, 180);
+    insp.append_page(&build_variable_inspector(app), Some(&Label::new(Some("VARIABLE INSPECTOR"))));
+    insp.append_page(&build_matrix_viewer(app), Some(&Label::new(Some("MATRIX VIEWER"))));
+    panel.append(&insp);
+
+    panel
+}
+
+fn ws_columns_header() -> GtkBox {
+    let row = GtkBox::new(Orientation::Horizontal, 0);
+    row.add_css_class("mf-col-header");
+    for (text, chars, expand) in [("NAME", 12, false), ("VALUE", 0, true), ("TYPE", 10, false), ("SIZE", 8, false)] {
+        let l = Label::new(Some(text));
+        l.add_css_class("mf-col-title");
+        l.set_xalign(0.0);
+        if expand {
+            l.set_hexpand(true);
+        } else {
+            l.set_width_chars(chars);
+        }
+        row.append(&l);
+    }
+    row
+}
+
+fn ws_variable_row(v: &matforge_core::models::WorkspaceVariable) -> Button {
+    let btn = Button::new();
+    btn.set_has_frame(false);
+    btn.add_css_class("mf-row");
+    let row = GtkBox::new(Orientation::Horizontal, 0);
+    let cells = [
+        (v.name.clone(), 12, false),
+        (if v.preview.is_empty() { "—".into() } else { v.preview.clone() }, 0, true),
+        (v.dtype.display_name(), 10, false),
+        (v.size.clone(), 8, false),
+    ];
+    for (text, chars, expand) in cells {
+        let l = Label::new(Some(&text));
+        l.set_xalign(0.0);
+        l.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        if expand {
+            l.set_hexpand(true);
+        } else {
+            l.set_width_chars(chars);
+        }
+        row.append(&l);
+    }
+    btn.set_child(Some(&row));
+    btn
+}
+
+fn build_variable_inspector(app: &Rc<AppState>) -> GtkBox {
+    let v = GtkBox::new(Orientation::Vertical, 4);
+    let placeholder = empty_state(ic::COMPILE, "", "Select a variable in the table above to inspect its value.");
+    let label = Label::new(None);
+    label.set_halign(gtk::Align::Start);
+    label.set_margin_start(8);
+    label.set_margin_top(8);
+    label.set_wrap(true);
+    v.append(&label);
+    v.append(&placeholder);
+    let label2 = label.clone();
+    let placeholder2 = placeholder.clone();
+    app.vm.workspace.selected_name.bind(move |sel| match sel {
+        Some(name) => {
+            label2.set_text(&format!("{name}\n\nMetadata inspection drills in via DAP when debugging."));
+            placeholder2.set_visible(false);
+            label2.set_visible(true);
+        }
+        None => {
+            label2.set_visible(false);
+            placeholder2.set_visible(true);
         }
     });
-    panel
+    v
+}
+
+fn build_matrix_viewer(app: &Rc<AppState>) -> GtkBox {
+    let v = GtkBox::new(Orientation::Vertical, 0);
+    let canvas = gtk::DrawingArea::new();
+    canvas.set_vexpand(true);
+    canvas.set_hexpand(true);
+    {
+        let app = app.clone();
+        canvas.set_draw_func(move |_a, ctx, w, h| {
+            app.vm.workspace.inspected_matrix.with(|m| match m {
+                Some(matrix) => crate::plot_render::draw_heatmap(ctx, w as f64, h as f64, matrix),
+                None => {}
+            });
+        });
+    }
+    {
+        let canvas = canvas.clone();
+        app.vm.workspace.inspected_matrix.subscribe(move |_| canvas.queue_draw());
+    }
+    v.append(&canvas);
+    v
 }
 
 fn build_plots(app: &Rc<AppState>) -> GtkBox {
     let panel = GtkBox::new(Orientation::Vertical, 4);
-    panel.append(&section_header("PLOTS"));
+
+    let add = header_action(ic::ADD);
+    let refresh = header_action(ic::REFRESH);
+    let trash = header_action(ic::TRASH);
+    let clear = header_action(ic::CLEAR);
+    {
+        let app = app.clone();
+        trash.connect_clicked(move |_| {
+            if let Some(id) = app.vm.plots.selected_id.get() {
+                app.vm.plots.remove(id);
+            }
+        });
+    }
+    {
+        let app = app.clone();
+        clear.connect_clicked(move |_| app.vm.plots.remove_all());
+    }
+    panel.append(&panel_header("PLOTS", &[add, refresh, trash, clear]));
 
     let list = ListBox::new();
     let list_scroll = ScrolledWindow::new();
@@ -720,6 +1089,57 @@ fn section_header(text: &str) -> Label {
     l.set_margin_start(8);
     l.set_margin_top(6);
     l
+}
+
+/// A panel header with a title and right-aligned action buttons.
+fn panel_header(title: &str, actions: &[Button]) -> GtkBox {
+    let row = GtkBox::new(Orientation::Horizontal, 2);
+    row.add_css_class("mf-panel-header-row");
+    row.set_margin_start(8);
+    row.set_margin_end(4);
+    row.set_margin_top(5);
+    row.set_margin_bottom(3);
+    let l = Label::new(Some(title));
+    l.add_css_class("mf-panel-header");
+    l.set_halign(gtk::Align::Start);
+    l.set_hexpand(true);
+    row.append(&l);
+    for b in actions {
+        row.append(b);
+    }
+    row
+}
+
+/// A small flat icon button for a panel header.
+fn header_action(icon: &str) -> Button {
+    let b = Button::from_icon_name(icon);
+    b.set_has_frame(false);
+    b.add_css_class("mf-header-action");
+    b
+}
+
+/// A centered empty-state placeholder (icon + optional title + subtitle).
+fn empty_state(icon: &str, title: &str, subtitle: &str) -> GtkBox {
+    let v = GtkBox::new(Orientation::Vertical, 6);
+    v.set_valign(gtk::Align::Center);
+    v.set_halign(gtk::Align::Center);
+    v.set_vexpand(true);
+    let img = Image::from_icon_name(icon);
+    img.set_pixel_size(36);
+    img.add_css_class("mf-empty-icon");
+    v.append(&img);
+    if !title.is_empty() {
+        let t = Label::new(Some(title));
+        t.add_css_class("mf-empty-title");
+        v.append(&t);
+    }
+    let s = Label::new(Some(subtitle));
+    s.add_css_class("mf-text-muted");
+    s.set_wrap(true);
+    s.set_justify(gtk::Justification::Center);
+    s.set_max_width_chars(28);
+    v.append(&s);
+    v
 }
 
 fn sub_header(text: &str) -> Label {

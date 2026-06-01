@@ -61,29 +61,46 @@ window.mf-root,
 .mf-activity-bar { background-color: @mf_chrome; }
 .mf-activity-item {
     color: @mf_text_secondary;
-    padding: 6px 4px;
+    padding: 6px 2px;
     border-left: 2px solid transparent;
+    border-radius: 0;
 }
 .mf-activity-item:hover { background-color: @mf_hover; color: @mf_text_primary; }
 .mf-activity-item.selected {
-    color: @mf_text_primary;
-    border-left: 2px solid @mf_blue;
+    color: @mf_orange;
+    background-color: @mf_panel;
+    border-left: 2px solid @mf_orange;
 }
 
 /* Toolbar */
 .mf-toolbar { background-color: @mf_chrome; }
-.mf-brand   { color: @mf_orange; font-weight: 700; font-size: 13px; }
-.mf-toolbar-button {
-    background: transparent;
-    border: 1px solid transparent;
-    color: @mf_text_primary;
-    padding: 4px 8px;
-    border-radius: 4px;
+.mf-brand   { color: @mf_text_primary; font-weight: 600; font-size: 13px; }
+.mf-logo {
+    background: linear-gradient(160deg, #f0a85a, #d9772f);
+    color: #1a1206;
+    font-weight: 800;
+    border-radius: 5px;
+    padding: 1px 7px;
+    margin-right: 2px;
 }
-.mf-toolbar-button:hover { background-color: @mf_hover; }
+/* Icon-over-label toolbar buttons */
+.mf-tool {
+    color: @mf_text_secondary;
+    padding: 3px 8px;
+    border-radius: 5px;
+    min-width: 46px;
+}
+.mf-tool:hover { background-color: @mf_hover; }
+.mf-tool-label { font-size: 9px; color: @mf_text_secondary; }
 .mf-run  { color: @mf_green; }
 .mf-stop { color: @mf_red; }
-.mf-debug { color: @mf_blue; }
+.mf-debug { color: @mf_red; }
+.mf-compile-cta {
+    color: @mf_text_primary;
+    background-color: @mf_card;
+    border: 1px solid @mf_border;
+}
+.mf-compile-cta:hover { background-color: @mf_selection; }
 
 /* Tabs */
 .mf-tabbar { background-color: @mf_panel; }
@@ -94,6 +111,15 @@ window.mf-root,
 }
 .mf-tab.active { color: @mf_text_primary; background-color: @mf_editor_bg; }
 .mf-tab-dirty { color: @mf_orange; }
+.mf-tab-label { color: @mf_text_secondary; }
+.mf-tab-label image { color: @mf_orange; }
+.mf-tab-close {
+    color: @mf_text_muted;
+    min-height: 16px;
+    min-width: 16px;
+    padding: 0;
+}
+.mf-tab-close:hover { color: @mf_red; background-color: @mf_hover; }
 
 /* Editor */
 .mf-code, textview.mf-code text {
@@ -122,6 +148,36 @@ window.mf-root,
 .mf-log-warning { color: @mf_yellow; }
 .mf-log-success { color: @mf_green; }
 .mf-log-command { color: @mf_text_secondary; }
+
+/* Panel headers + actions */
+.mf-header-action {
+    color: @mf_text_muted;
+    min-height: 18px;
+    min-width: 18px;
+    padding: 0 2px;
+}
+.mf-header-action:hover { color: @mf_text_primary; background-color: @mf_hover; }
+
+/* Table column headers */
+.mf-col-header { padding: 3px 8px; border-bottom: 1px solid @mf_border_soft; }
+.mf-col-title {
+    font-size: 9px;
+    font-weight: 700;
+    color: @mf_text_muted;
+    letter-spacing: 1px;
+}
+
+/* File-kind icon colors (Explorer) */
+.mf-ic-folder  { color: @mf_amber; }
+.mf-ic-matlab  { color: @mf_orange; }
+.mf-ic-header  { color: @mf_blue; }
+.mf-ic-source  { color: @mf_cyan; }
+.mf-ic-flow    { color: @mf_magenta; }
+.mf-ic-generic { color: @mf_text_secondary; }
+
+/* Empty states */
+.mf-empty-icon { color: @mf_border; opacity: 0.7; }
+.mf-empty-title { color: @mf_text_secondary; font-weight: 600; font-size: 13px; }
 
 /* Pills / badges */
 .mf-pill {
