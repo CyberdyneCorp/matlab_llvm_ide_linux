@@ -1,0 +1,18 @@
+[package]
+name = "matforge"
+description = "MatForge IDE — GTK4 desktop front-end for the matlab_llvm compiler."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+default-run = "matforge"
+
+[[bin]]
+name = "matforge"
+path = "src/main.rs"
+
+[dependencies]
+matforge-core = { workspace = true }
+gtk = { package = "gtk4", version = "0.9", features = ["v4_12"] }
