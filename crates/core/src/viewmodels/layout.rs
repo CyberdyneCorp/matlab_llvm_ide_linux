@@ -13,6 +13,7 @@ pub struct LayoutViewModel {
     pub left_sidebar_width: Property<i32>,
     pub workspace_width: Property<i32>,
     pub plots_width: Property<i32>,
+    pub sidebar_visible: Property<bool>,
     pub workspace_visible: Property<bool>,
     pub plots_visible: Property<bool>,
     pub center_mode: Property<CenterLayoutMode>,
@@ -30,10 +31,15 @@ impl LayoutViewModel {
             left_sidebar_width: Property::new(crate::theme::metrics::LEFT_SIDEBAR_WIDTH),
             workspace_width: Property::new(crate::theme::metrics::WORKSPACE_COLUMN_WIDTH),
             plots_width: Property::new(crate::theme::metrics::PLOTS_COLUMN_WIDTH),
+            sidebar_visible: Property::new(true),
             workspace_visible: Property::new(true),
             plots_visible: Property::new(false),
             center_mode: Property::new(CenterLayoutMode::Split),
         }
+    }
+
+    pub fn toggle_sidebar(&self) {
+        self.sidebar_visible.update(|v| *v = !*v);
     }
 
     pub fn toggle_workspace(&self) {
@@ -65,6 +71,7 @@ impl LayoutViewModel {
         self.left_sidebar_width.set(crate::theme::metrics::LEFT_SIDEBAR_WIDTH);
         self.workspace_width.set(crate::theme::metrics::WORKSPACE_COLUMN_WIDTH);
         self.plots_width.set(crate::theme::metrics::PLOTS_COLUMN_WIDTH);
+        self.sidebar_visible.set(true);
         self.workspace_visible.set(true);
         self.plots_visible.set(false);
         self.center_mode.set(CenterLayoutMode::Split);
@@ -90,6 +97,9 @@ mod tests {
         assert!(!vm.workspace_visible.get());
         vm.toggle_plots();
         assert!(vm.plots_visible.get());
+        assert!(vm.sidebar_visible.get());
+        vm.toggle_sidebar();
+        assert!(!vm.sidebar_visible.get());
     }
 
     #[test]

@@ -104,15 +104,17 @@ pub fn build_code_view(
         });
     }
 
-    // Click the gutter to toggle a breakpoint.
+    // Click the gutter to toggle a breakpoint. Only the y matters — the click x
+    // is inside the gutter strip (left of the text), which maps to a negative
+    // buffer x, so we sample the line at a small positive content x.
     let click = gtk::GestureClick::new();
     {
         let view = view.clone();
         let app = app.clone();
         let gutter2 = gutter.clone();
-        click.connect_released(move |_g, _n, x, y| {
-            let (bx, by) = view.window_to_buffer_coords(TextWindowType::Widget, x as i32, y as i32);
-            if let Some(it) = view.iter_at_location(bx, by) {
+        click.connect_released(move |_g, _n, _x, y| {
+            let (_, by) = view.window_to_buffer_coords(TextWindowType::Widget, 0, y as i32);
+            if let Some(it) = view.iter_at_location(1, by) {
                 app.vm.editor.toggle_breakpoint(tab_id, it.line() as usize + 1);
                 app.refresh_breakpoints();
                 gutter2.queue_draw();
@@ -120,6 +122,26 @@ pub fn build_code_view(
         });
     }
     gutter.add_controller(click);
+
+    // F9 toggles a breakpoint at the cursor line.
+    let keys = gtk::EventControllerKey::new();
+    {
+        let app = app.clone();
+        let buffer = buffer.clone();
+        let gutter3 = gutter.clone();
+        keys.connect_key_pressed(move |_c, keyval, _code, _state| {
+            if keyval == gtk::gdk::Key::F9 {
+                let it = buffer.iter_at_offset(buffer.cursor_position());
+                app.vm.editor.toggle_breakpoint(tab_id, it.line() as usize + 1);
+                app.refresh_breakpoints();
+                gutter3.queue_draw();
+                gtk::glib::Propagation::Stop
+            } else {
+                gtk::glib::Propagation::Proceed
+            }
+        });
+    }
+    view.add_controller(keys);
 
     let overlay = Overlay::new();
     overlay.set_child(Some(&scroll));

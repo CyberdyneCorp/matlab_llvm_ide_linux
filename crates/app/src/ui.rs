@@ -8,7 +8,7 @@ use std::rc::Rc;
 use gtk::prelude::*;
 use gtk::{
     gio, ApplicationWindow, Box as GtkBox, Button, DropDown, Entry, Image, Label, ListBox,
-    Notebook, Orientation, ScrolledWindow, Stack, TextView,
+    Notebook, Orientation, Paned, ScrolledWindow, Stack, TextView,
 };
 
 use matforge_core::models::{
@@ -32,11 +32,45 @@ pub fn build(window: &ApplicationWindow, app: Rc<AppState>) {
     let middle = GtkBox::new(Orientation::Horizontal, 0);
     middle.set_vexpand(true);
     middle.append(&build_activity_bar(&app));
-    middle.append(&build_sidebar(&app));
-    middle.append(&build_center(&app));
-    middle.append(&build_right_column(&app));
-    root.append(&middle);
 
+    let sidebar = build_sidebar(&app);
+    let center = build_center(&app);
+    let right = build_right_column(&app);
+
+    // center | right-column — draggable divider, right keeps its size.
+    let inner = Paned::new(Orientation::Horizontal);
+    inner.set_wide_handle(true);
+    inner.set_start_child(Some(&center));
+    inner.set_end_child(Some(&right));
+    inner.set_resize_start_child(true);
+    inner.set_resize_end_child(false);
+    inner.set_shrink_start_child(false);
+    inner.set_shrink_end_child(false);
+    inner.set_position(940);
+
+    // sidebar | (center|right) — draggable divider, sidebar keeps its size.
+    let outer = Paned::new(Orientation::Horizontal);
+    outer.set_wide_handle(true);
+    outer.set_hexpand(true);
+    outer.set_start_child(Some(&sidebar));
+    outer.set_end_child(Some(&inner));
+    outer.set_resize_start_child(false);
+    outer.set_resize_end_child(true);
+    outer.set_shrink_start_child(false);
+    outer.set_position(220);
+    middle.append(&outer);
+
+    // Hide/show bindings — closing a panel hands its space to the editor.
+    {
+        let right = right.clone();
+        app.vm.layout.workspace_visible.bind(move |v| right.set_visible(*v));
+    }
+    {
+        let sidebar = sidebar.clone();
+        app.vm.layout.sidebar_visible.bind(move |v| sidebar.set_visible(*v));
+    }
+
+    root.append(&middle);
     root.append(&build_status_bar(&app));
     window.set_child(Some(&root));
 }
@@ -159,7 +193,7 @@ fn build_toolbar(window: &ApplicationWindow, app: &Rc<AppState>) -> GtkBox {
     let layouts = tool_button(ic::LAYOUTS, "Layouts", None);
     {
         let app = app.clone();
-        layouts.connect_clicked(move |_| app.vm.layout.toggle_plots());
+        layouts.connect_clicked(move |_| app.vm.layout.toggle_workspace());
     }
     let help = tool_button(ic::HELP, "Help", None);
     row.append(&layouts);
@@ -236,7 +270,16 @@ fn build_activity_bar(app: &Rc<AppState>) -> GtkBox {
         btn.set_child(Some(&v));
         {
             let app = app.clone();
-            btn.connect_clicked(move |_| app.vm.activity_bar.select(item));
+            btn.connect_clicked(move |_| {
+                // Clicking an activity item reopens the sidebar if it was closed,
+                // or toggles it shut when re-clicking the active item.
+                if app.vm.activity_bar.is_selected(item) {
+                    app.vm.layout.toggle_sidebar();
+                } else {
+                    app.vm.layout.sidebar_visible.set(true);
+                    app.vm.activity_bar.select(item);
+                }
+            });
         }
         // Selection highlight.
         let btn2 = btn.clone();
@@ -345,7 +388,12 @@ fn build_explorer(app: &Rc<AppState>) -> GtkBox {
             let _ = app.vm.project.refresh(app.vm.fs());
         });
     }
-    panel.append(&panel_header("EXPLORER", &[refresh]));
+    let close = header_action(ic::CLOSE);
+    {
+        let app = app.clone();
+        close.connect_clicked(move |_| app.vm.layout.sidebar_visible.set(false));
+    }
+    panel.append(&panel_header("EXPLORER", &[refresh, close]));
 
     let list = ListBox::new();
     let scroll = ScrolledWindow::new();
@@ -835,17 +883,20 @@ fn build_right_column(app: &Rc<AppState>) -> Notebook {
 fn build_workspace(app: &Rc<AppState>) -> GtkBox {
     let panel = GtkBox::new(Orientation::Vertical, 0);
 
-    // Header with refresh action.
-    let refresh = Button::from_icon_name(ic::REFRESH);
-    refresh.set_has_frame(false);
-    refresh.add_css_class("mf-header-action");
+    // Header with refresh + close actions.
+    let refresh = header_action(ic::REFRESH);
     {
         // A bare comment evaluates to nothing but still triggers the trailing
         // `whos` workspace-sync probe in ReplSession::send.
         let app = app.clone();
         refresh.connect_clicked(move |_| app.repl_send("% refresh"));
     }
-    panel.append(&panel_header("WORKSPACE", &[refresh]));
+    let close = header_action(ic::CLOSE);
+    {
+        let app = app.clone();
+        close.connect_clicked(move |_| app.vm.layout.workspace_visible.set(false));
+    }
+    panel.append(&panel_header("WORKSPACE", &[refresh, close]));
 
     // Column header.
     panel.append(&ws_columns_header());
@@ -1002,7 +1053,12 @@ fn build_plots(app: &Rc<AppState>) -> GtkBox {
         let app = app.clone();
         clear.connect_clicked(move |_| app.vm.plots.remove_all());
     }
-    panel.append(&panel_header("PLOTS", &[add, refresh, trash, clear]));
+    let close = header_action(ic::CLOSE);
+    {
+        let app = app.clone();
+        close.connect_clicked(move |_| app.vm.layout.workspace_visible.set(false));
+    }
+    panel.append(&panel_header("PLOTS", &[add, refresh, trash, clear, close]));
 
     let list = ListBox::new();
     let list_scroll = ScrolledWindow::new();

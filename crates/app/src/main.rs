@@ -91,6 +91,14 @@ fn build_main_window(app: &Application) {
     if let Ok(kind) = std::env::var("MATFORGE_NEWFLOW") {
         ui::open_demo_flowchart(&app, kind == "signal");
     }
+    if let Ok(line) = std::env::var("MATFORGE_BP") {
+        if let (Ok(n), Some(tab)) = (line.parse::<usize>(), app.vm.editor.active_tab()) {
+            app.vm.editor.toggle_breakpoint(tab.id, n);
+        }
+    }
+    if std::env::var("MATFORGE_NORIGHT").is_ok() {
+        app.vm.layout.workspace_visible.set(false);
+    }
 
     if !runner::matlabc_available(&settings) {
         app.vm.status_bar.set_message(format!(

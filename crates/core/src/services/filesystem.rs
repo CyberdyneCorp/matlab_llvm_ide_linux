@@ -149,6 +149,9 @@ fn scan_children(fs: &dyn FileSystem, dir: &Path, depth: usize) -> io::Result<Ve
         }
         if entry.is_dir {
             let mut child = ProjectNode::folder(name, Vec::new()).with_url(entry.path.clone());
+            // Subfolders start collapsed; the user expands them on demand. The
+            // children are still scanned so expanding is instant.
+            child.is_expanded = false;
             if depth > 0 {
                 child.children = scan_children(fs, &entry.path, depth - 1)?;
             }
@@ -218,6 +221,16 @@ mod tests {
         let src = tree.children.iter().find(|c| c.name == "src").unwrap();
         let mflow = src.children.iter().find(|c| c.name == "diagram.mflow").unwrap();
         assert_eq!(mflow.kind, NodeFileKind::Flowchart);
+    }
+
+    #[test]
+    fn scanned_subfolders_start_collapsed() {
+        let fs = sample_fs();
+        let tree = scan_tree(&fs, Path::new("/proj"), 8).unwrap();
+        let src = tree.children.iter().find(|c| c.name == "src").unwrap();
+        assert!(!src.is_expanded, "subfolders should be collapsed by default");
+        // children are still scanned so expanding is instant
+        assert!(!src.children.is_empty());
     }
 
     #[test]
