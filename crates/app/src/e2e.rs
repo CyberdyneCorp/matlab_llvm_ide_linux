@@ -23,6 +23,12 @@ thread_local! {
     static REPL_ENTRY: RefCell<Option<gtk::Widget>> = const { RefCell::new(None) };
     static WORKSPACE_TABLE: RefCell<Option<gtk::Widget>> = const { RefCell::new(None) };
     static PLOTS_ADD: RefCell<Option<gtk::Widget>> = const { RefCell::new(None) };
+    static SEARCH_ENTRY: RefCell<Option<gtk::Widget>> = const { RefCell::new(None) };
+}
+
+/// Record the find-in-files entry (drive target).
+pub fn set_search_entry(w: &impl IsA<gtk::Widget>) {
+    SEARCH_ENTRY.with(|c| *c.borrow_mut() = Some(w.clone().upcast()));
 }
 
 /// Record the gutter of the most recently built code view (drive target).
@@ -77,6 +83,7 @@ pub fn install_state_dump(app: Rc<AppState>, path: PathBuf) {
                 m.as_ref().map(|mm| json!({"title": mm.title, "rows": mm.rows, "cols": mm.cols}))
             }),
             "plots": app.vm.plots.figures.with(|f| f.len()),
+            "search_results": app.vm.search.results.with(|r| r.len()),
             "problems": app.vm.console.problems.with(|p| p.len()),
             "console": app.vm.console.messages.with(|m| m.len()),
             "watch": app.vm.debug.evaluations.with(|e| e.len()),
@@ -88,6 +95,7 @@ pub fn install_state_dump(app: Rc<AppState>, path: PathBuf) {
             "repl_entry_rect": REPL_ENTRY.with(|c| c.borrow().as_ref().and_then(rect_in_window)),
             "workspace_table_rect": WORKSPACE_TABLE.with(|c| c.borrow().as_ref().and_then(rect_in_window)),
             "plots_add_rect": PLOTS_ADD.with(|c| c.borrow().as_ref().and_then(rect_in_window)),
+            "search_entry_rect": SEARCH_ENTRY.with(|c| c.borrow().as_ref().and_then(rect_in_window)),
         });
 
         let tmp = path.with_extension("json.tmp");

@@ -125,15 +125,20 @@ class App:
         xtest.fake_input(self.disp, X.ButtonPress, 1); self.disp.sync(); time.sleep(0.05)
         xtest.fake_input(self.disp, X.ButtonRelease, 1); self.disp.sync(); time.sleep(0.15)
 
-    def key(self, keysym_name, shift=False):
+    def key(self, keysym_name, shift=False, ctrl=False):
         code = self.disp.keysym_to_keycode(XK.string_to_keysym(keysym_name))
         sc = self.disp.keysym_to_keycode(XK.string_to_keysym("Shift_L"))
+        cc = self.disp.keysym_to_keycode(XK.string_to_keysym("Control_L"))
+        if ctrl:
+            xtest.fake_input(self.disp, X.KeyPress, cc); self.disp.sync()
         if shift:
             xtest.fake_input(self.disp, X.KeyPress, sc); self.disp.sync()
         xtest.fake_input(self.disp, X.KeyPress, code); self.disp.sync()
         xtest.fake_input(self.disp, X.KeyRelease, code); self.disp.sync()
         if shift:
             xtest.fake_input(self.disp, X.KeyRelease, sc); self.disp.sync()
+        if ctrl:
+            xtest.fake_input(self.disp, X.KeyRelease, cc); self.disp.sync()
         time.sleep(0.04)
 
     _CHARMAP = {" ": "space", "=": "equal", "[": "bracketleft", "]": "bracketright",

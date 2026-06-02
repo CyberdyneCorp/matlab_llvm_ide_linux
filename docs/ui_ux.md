@@ -25,8 +25,10 @@ metrics, and fonts are ported verbatim from `Theme.swift` into
 
 * **Activity bar** (56 px): Explorer · Search · Run · Compiler · HDL · Debug ·
   Docs · Flowchart.
-* **Left sidebar** (220 px): Explorer file tree (folders expand/collapse; files
-  open in the editor, classified + colored by kind).
+* **Left sidebar** (220 px): a `GtkStack` switched by the activity bar — the
+  Explorer file tree (folders expand/collapse; files open in the editor,
+  classified + colored by kind), the Search (find-in-files) panel, and the Debug
+  panel.
 * **Center**: editor tab notebook over a bottom console. The console tab strip is
   CONSOLE + PROBLEMS, and grows an artifact tab (LLVM IR / C++ / Python / … ) as
   each compile target is produced. A `>>` REPL input sits at the bottom.
@@ -83,6 +85,15 @@ driven by `win.*` `GSimpleAction`s registered on the window (see
 
 Toggling a breakpoint stays on `F9` in the focused editor (handled by the code
 view, not the menu) to match the gutter-click affordance.
+
+## Search panel (find in files)
+
+The activity bar's **Search** entry (or `Ctrl+F`) shows the find-in-files panel,
+backed by the tested [`SearchViewModel`](../crates/core/src/viewmodels/search.rs).
+It offers a query field, a match-mode selector (**File names** / **In files** /
+**Both**), a result count, and a result list. Each result shows `file:line` over a
+trimmed preview; clicking it opens the file and jumps to the line (reusing the
+PROBLEMS-pane goto path). The walk descends subfolders and skips dot-entries.
 
 ## Command-window mode
 

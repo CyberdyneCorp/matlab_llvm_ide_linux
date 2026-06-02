@@ -181,6 +181,10 @@ popover > contents { background-color: @mf_card; color: @mf_text_primary; }
 popover button { color: @mf_text_primary; }
 popover button:hover { background-color: @mf_hover; }
 
+/* Search (find in files) */
+.mf-search-loc { color: @mf_text_primary; font-size: 11px; font-weight: 600; }
+.mf-search-results > row { padding: 1px 4px; }
+
 /* Console levels */
 .mf-log-error   { color: @mf_red; }
 .mf-log-warning { color: @mf_yellow; }

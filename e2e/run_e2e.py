@@ -125,6 +125,27 @@ def scenario_repl_plot():
         app.close()
 
 
+def scenario_search():
+    print("scenario: find-in-files lists matches and opens one")
+    app = App(env_extra={"MATFORGE_OPEN": PROJ})
+    try:
+        # Focus the window via the REPL entry, then Ctrl+F opens the Search panel.
+        ex, ey, ew, eh = app.wait_rect("repl_entry_rect")
+        app.click_window(ex + ew // 2, ey + eh // 2)
+        app.key("f", ctrl=True)
+
+        sx, sy, sw, sh = app.wait_rect("search_entry_rect")
+        app.click_window(sx + sw // 2, sy + sh // 2)
+        app.type_text("disp")
+        app.key("Return")
+        st = app.wait_for(lambda s: s.get("search_results", 0) > 0, timeout=10,
+                          what="search results")
+        check("searching 'disp' returns results", st["search_results"] > 0,
+              f"results={st['search_results']}")
+    finally:
+        app.close()
+
+
 def scenario_problems_pane():
     print("scenario: compiling a bad file populates PROBLEMS")
     if not os.path.exists(MATLABC):
@@ -145,6 +166,7 @@ def scenario_problems_pane():
 
 def main():
     setup_project()
+    scenario_search()
     scenario_problems_pane()
     scenario_gutter_breakpoint()
     scenario_f9_breakpoint()

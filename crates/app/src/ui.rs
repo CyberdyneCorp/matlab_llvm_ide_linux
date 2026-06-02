@@ -127,6 +127,7 @@ fn build_menu_bar(window: &ApplicationWindow, app: &Rc<AppState>) -> gtk::Popove
             Rc::new(move || {
                 a.vm.activity_bar.select(ActivityItem::Search);
                 a.vm.layout.sidebar_visible.set(true);
+                focus_search_entry();
             }),
         );
     }
@@ -608,11 +609,16 @@ fn build_sidebar(app: &Rc<AppState>) -> Stack {
     stack.add_css_class("mf-panel");
     stack.add_css_class("mf-border-right");
     stack.add_named(&build_explorer(app), Some("explorer"));
+    stack.add_named(&build_search(app), Some("search"));
     stack.add_named(&build_debug_panel(app), Some("debug"));
 
     let stack2 = stack.clone();
     app.vm.activity_bar.selected.bind(move |item| {
-        let name = if *item == ActivityItem::Debug { "debug" } else { "explorer" };
+        let name = match item {
+            ActivityItem::Debug => "debug",
+            ActivityItem::Search => "search",
+            _ => "explorer",
+        };
         stack2.set_visible_child_name(name);
     });
     stack
@@ -679,6 +685,133 @@ fn build_explorer(app: &Rc<AppState>) -> GtkBox {
     panel.append(&details);
 
     panel
+}
+
+// ---- Search (find in files) ------------------------------------------------
+
+fn build_search(app: &Rc<AppState>) -> GtkBox {
+    use matforge_core::models::SearchMode;
+
+    let panel = GtkBox::new(Orientation::Vertical, 0);
+    let close = header_action(ic::CLOSE);
+    {
+        let app = app.clone();
+        close.connect_clicked(move |_| app.vm.layout.sidebar_visible.set(false));
+    }
+    panel.append(&panel_header("SEARCH", &[close]));
+
+    // Query entry.
+    let entry = Entry::new();
+    entry.set_placeholder_text(Some("Search files…"));
+    entry.set_margin_start(8);
+    entry.set_margin_end(8);
+    entry.set_margin_top(2);
+    entry.set_hexpand(true);
+    SEARCH_ENTRY.with(|e| *e.borrow_mut() = Some(entry.clone()));
+    crate::e2e::set_search_entry(&entry);
+    panel.append(&entry);
+
+    // Match-mode selector.
+    let mode_dd = DropDown::from_strings(&SearchMode::ALL.iter().map(|m| m.label()).collect::<Vec<_>>());
+    mode_dd.set_selected(SearchMode::ALL.iter().position(|m| *m == SearchMode::Both).unwrap_or(0) as u32);
+    mode_dd.set_margin_start(8);
+    mode_dd.set_margin_end(8);
+    mode_dd.set_margin_top(4);
+    panel.append(&mode_dd);
+
+    // Run-search closure shared by the entry + mode change.
+    let run_search: Rc<dyn Fn()> = {
+        let app = app.clone();
+        let entry = entry.clone();
+        Rc::new(move || {
+            let query = entry.text().to_string();
+            app.vm.search.set_query(query.clone());
+            if query.trim().is_empty() {
+                app.vm.search.results.set(Vec::new());
+                return;
+            }
+            let Some(root) = app.vm.project.root_url.get() else {
+                app.vm.status_bar.set_message("Open a folder to search");
+                return;
+            };
+            app.vm.search.run(app.vm.fs(), &root);
+        })
+    };
+    {
+        let run = run_search.clone();
+        entry.connect_activate(move |_| run());
+    }
+    {
+        let app = app.clone();
+        let run = run_search.clone();
+        mode_dd.connect_selected_notify(move |dd| {
+            app.vm.search.set_mode(SearchMode::ALL[dd.selected() as usize]);
+            run();
+        });
+    }
+
+    // Result count.
+    let count = sub_header("No results");
+    panel.append(&count);
+
+    // Results list.
+    let list = ListBox::new();
+    list.add_css_class("mf-search-results");
+    let scroll = ScrolledWindow::new();
+    scroll.set_vexpand(true);
+    scroll.set_child(Some(&list));
+    panel.append(&scroll);
+
+    let app_sub = app.clone();
+    app.vm.search.results.bind(move |results| {
+        clear_list(&list);
+        count.set_text(&match results.len() {
+            0 => "No results".to_string(),
+            1 => "1 result".to_string(),
+            n => format!("{n} results"),
+        });
+        for result in results {
+            list.append(&search_result_row(&app_sub, result));
+        }
+    });
+
+    panel
+}
+
+/// One clickable find-in-files result: `file:line` over a trimmed preview.
+fn search_result_row(app: &Rc<AppState>, result: &matforge_core::viewmodels::search::SearchResult) -> Button {
+    let name = result.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let location = match result.line {
+        Some(line) => format!("{name}:{line}"),
+        None => name,
+    };
+
+    let btn = Button::new();
+    btn.set_has_frame(false);
+    btn.add_css_class("mf-row");
+    let col = GtkBox::new(Orientation::Vertical, 0);
+    col.set_halign(gtk::Align::Start);
+
+    let loc = Label::new(Some(&location));
+    loc.set_halign(gtk::Align::Start);
+    loc.add_css_class("mf-search-loc");
+    col.append(&loc);
+
+    if result.line.is_some() {
+        let preview = Label::new(Some(&result.preview));
+        preview.set_halign(gtk::Align::Start);
+        preview.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        preview.set_max_width_chars(30);
+        preview.add_css_class("mf-text-muted");
+        col.append(&preview);
+    }
+    btn.set_child(Some(&col));
+
+    let app = app.clone();
+    let file = result.path.to_string_lossy().into_owned();
+    let line = result.line.unwrap_or(1);
+    btn.connect_clicked(move |_| goto_problem(&app, &file, line));
+    btn
 }
 
 fn describe_selection(app: &Rc<AppState>) -> String {
@@ -968,6 +1101,16 @@ fn panel_entry(placeholder: &str) -> Entry {
 
 thread_local! {
     static EDITOR_NB: std::cell::RefCell<Option<Notebook>> = const { std::cell::RefCell::new(None) };
+    static SEARCH_ENTRY: std::cell::RefCell<Option<Entry>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Focus the find-in-files entry (used by the `Ctrl+F` action).
+fn focus_search_entry() {
+    SEARCH_ENTRY.with(|e| {
+        if let Some(entry) = e.borrow().as_ref() {
+            entry.grab_focus();
+        }
+    });
 }
 
 fn build_center(app: &Rc<AppState>) -> GtkBox {

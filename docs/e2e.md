@@ -43,6 +43,7 @@ Headless / CI: wrap with Xvfb — `xvfb-run -a just e2e`.
 
 | Scenario | Drives | Asserts |
 |----------|--------|---------|
+| find in files | `Ctrl+F`, types `disp` + Enter | `search_results` becomes non-zero |
 | gutter breakpoint | clicks the gutter at a line | `active_breakpoints` gains/loses that line |
 | F9 breakpoint | focuses the editor, presses F9 | a breakpoint is set at the cursor |
 | live REPL | types `x = [1 2 3]` in the REPL + Enter | the Workspace gains variable `x` (real `matlabc -repl`) |
