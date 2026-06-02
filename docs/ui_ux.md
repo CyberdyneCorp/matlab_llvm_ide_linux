@@ -95,6 +95,17 @@ It offers a query field, a match-mode selector (**File names** / **In files** /
 trimmed preview; clicking it opens the file and jumps to the line (reusing the
 PROBLEMS-pane goto path). The walk descends subfolders and skips dot-entries.
 
+## Compiler panel
+
+The activity bar's **Compiler** entry shows a build panel backed by the shared
+`ToolbarViewModel` (so it stays in lock-step with the top toolbar's pickers). It
+has a **build-state badge** (IDLE / BUILDING / READY / FAILED, fed by
+`is_compiling` + `last_build`), a **SOURCE** line that names the active file and
+warns when it is unsaved, a **TARGET** picker that prints the resolved
+`matlabc` emit flag (e.g. `-emit-cpp`, or "(runs program, captures .va)" for
+Verilog-A), **OPTIONS** (optimization + numeric-mode pickers), and a **Compile**
+action that is enabled only for a saved file.
+
 ## Command-window mode
 
 When the center notebook has nothing open (no source tab and no flowchart), the

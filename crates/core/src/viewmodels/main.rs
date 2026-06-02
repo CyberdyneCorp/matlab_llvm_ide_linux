@@ -134,6 +134,7 @@ impl MainViewModel {
             self.console.log(classify_log(line), line.clone());
         }
         self.console.set_problems(problems);
+        self.toolbar.last_build.set(Some(result.success()));
         if result.success() {
             self.console.set_artifact(target, result.stdout.clone());
             self.status_bar.set_message(format!("Compiled to {}", target.label()));
@@ -151,7 +152,8 @@ impl MainViewModel {
             return false;
         };
         self.status_bar.set_message(format!("Compiling {}…", target.label()));
-        match svc.run(&inv, &mut |_| {}) {
+        self.toolbar.is_compiling.set(true);
+        let outcome = match svc.run(&inv, &mut |_| {}) {
             Ok(result) => {
                 let ok = result.success();
                 self.apply_compile_result(target, &result);
@@ -159,9 +161,12 @@ impl MainViewModel {
             }
             Err(e) => {
                 self.console.log(ConsoleLevel::Error, format!("compiler error: {e}"));
+                self.toolbar.last_build.set(Some(false));
                 false
             }
-        }
+        };
+        self.toolbar.is_compiling.set(false);
+        outcome
     }
 
     // ---- REPL routing ------------------------------------------------------

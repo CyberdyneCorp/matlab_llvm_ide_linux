@@ -11,6 +11,11 @@ pub struct ToolbarViewModel {
     pub numeric_mode: Property<NumericMode>,
     pub is_running: Property<bool>,
     pub is_debugging: Property<bool>,
+    /// True while a compile is in flight (drives the Compiler panel badge).
+    pub is_compiling: Property<bool>,
+    /// Outcome of the most recent compile: `None` until the first build,
+    /// then `Some(true)`/`Some(false)`.
+    pub last_build: Property<Option<bool>>,
 }
 
 impl Default for ToolbarViewModel {
@@ -27,6 +32,8 @@ impl ToolbarViewModel {
             numeric_mode: Property::new(NumericMode::Float64),
             is_running: Property::new(false),
             is_debugging: Property::new(false),
+            is_compiling: Property::new(false),
+            last_build: Property::new(None),
         }
     }
 
@@ -69,6 +76,13 @@ mod tests {
         assert_eq!(vm.target.get(), CompilerTarget::Llvm);
         assert_eq!(vm.optimization.get(), OptimizationProfile::O2);
         assert_eq!(vm.numeric_mode.get(), NumericMode::Strict);
+    }
+
+    #[test]
+    fn build_state_defaults_to_idle() {
+        let vm = ToolbarViewModel::new();
+        assert!(!vm.is_compiling.get());
+        assert_eq!(vm.last_build.get(), None);
     }
 
     #[test]

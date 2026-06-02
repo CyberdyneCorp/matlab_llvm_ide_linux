@@ -610,6 +610,7 @@ fn build_sidebar(app: &Rc<AppState>) -> Stack {
     stack.add_css_class("mf-border-right");
     stack.add_named(&build_explorer(app), Some("explorer"));
     stack.add_named(&build_search(app), Some("search"));
+    stack.add_named(&build_compiler_panel(app), Some("compiler"));
     stack.add_named(&build_debug_panel(app), Some("debug"));
 
     let stack2 = stack.clone();
@@ -617,6 +618,7 @@ fn build_sidebar(app: &Rc<AppState>) -> Stack {
         let name = match item {
             ActivityItem::Debug => "debug",
             ActivityItem::Search => "search",
+            ActivityItem::Compiler => "compiler",
             _ => "explorer",
         };
         stack2.set_visible_child_name(name);
@@ -812,6 +814,185 @@ fn search_result_row(app: &Rc<AppState>, result: &matforge_core::viewmodels::sea
     let line = result.line.unwrap_or(1);
     btn.connect_clicked(move |_| goto_problem(&app, &file, line));
     btn
+}
+
+// ---- Compiler panel --------------------------------------------------------
+
+fn build_compiler_panel(app: &Rc<AppState>) -> GtkBox {
+    let panel = GtkBox::new(Orientation::Vertical, 0);
+
+    // Header with a build-state badge.
+    let header = GtkBox::new(Orientation::Horizontal, 2);
+    header.add_css_class("mf-panel-header-row");
+    header.set_margin_start(8);
+    header.set_margin_end(8);
+    header.set_margin_top(5);
+    header.set_margin_bottom(3);
+    let title = Label::new(Some("COMPILER"));
+    title.add_css_class("mf-panel-header");
+    title.set_halign(gtk::Align::Start);
+    title.set_hexpand(true);
+    header.append(&title);
+    let badge = Label::new(Some("IDLE"));
+    badge.add_css_class("mf-build-badge");
+    header.append(&badge);
+    panel.append(&header);
+    {
+        let appc = app.clone();
+        let badge = badge.clone();
+        let update = move || {
+            let (text, class) = if appc.vm.toolbar.is_compiling.get() {
+                ("BUILDING", "mf-badge-busy")
+            } else {
+                match appc.vm.toolbar.last_build.get() {
+                    Some(true) => ("READY", "mf-badge-ok"),
+                    Some(false) => ("FAILED", "mf-badge-fail"),
+                    None => ("IDLE", "mf-badge-idle"),
+                }
+            };
+            badge.set_text(text);
+            for c in ["mf-badge-busy", "mf-badge-ok", "mf-badge-fail", "mf-badge-idle"] {
+                badge.remove_css_class(c);
+            }
+            badge.add_css_class(class);
+        };
+        update();
+        let u1 = update.clone();
+        app.vm.toolbar.is_compiling.subscribe(move |_| u1());
+        app.vm.toolbar.last_build.subscribe(move |_| update());
+    }
+
+    let body = GtkBox::new(Orientation::Vertical, 0);
+    let scroll = ScrolledWindow::new();
+    scroll.set_vexpand(true);
+    scroll.set_child(Some(&body));
+    panel.append(&scroll);
+
+    // SOURCE — the active file (and whether it can be compiled).
+    body.append(&sub_header("SOURCE"));
+    let source = Label::new(Some("No active file"));
+    source.add_css_class("mf-text-secondary");
+    source.set_halign(gtk::Align::Start);
+    source.set_margin_start(8);
+    source.set_wrap(true);
+    body.append(&source);
+    {
+        let appc = app.clone();
+        let source = source.clone();
+        let update = move |_: &Option<u64>| {
+            source.remove_css_class("mf-text-warn");
+            match appc.vm.editor.active_tab() {
+                Some(tab) if tab.url.is_some() => source.set_text(&tab.name),
+                Some(tab) => {
+                    source.set_text(&format!("{} — unsaved (Save to compile)", tab.name));
+                    source.add_css_class("mf-text-warn");
+                }
+                None => source.set_text("No active file"),
+            }
+        };
+        update(&None);
+        app.vm.editor.active_id.subscribe(update);
+    }
+
+    // TARGET — language picker + the matlabc emit flag it maps to.
+    body.append(&sub_header("TARGET"));
+    let target_dd = DropDown::from_strings(&CompilerTarget::ALL.iter().map(|t| t.label()).collect::<Vec<_>>());
+    target_dd.set_margin_start(8);
+    target_dd.set_margin_end(8);
+    body.append(&target_dd);
+    let flag = Label::new(None);
+    flag.add_css_class("mf-text-muted");
+    flag.add_css_class("mf-mono");
+    flag.set_halign(gtk::Align::Start);
+    flag.set_margin_start(8);
+    flag.set_margin_top(2);
+    body.append(&flag);
+    {
+        let app = app.clone();
+        target_dd.connect_selected_notify(move |dd| {
+            app.vm.toolbar.set_target(CompilerTarget::ALL[dd.selected() as usize]);
+        });
+    }
+    {
+        let dd = target_dd.clone();
+        let flag = flag.clone();
+        app.vm.toolbar.target.bind(move |t| {
+            if let Some(i) = CompilerTarget::ALL.iter().position(|x| x == t) {
+                dd.set_selected(i as u32);
+            }
+            flag.set_text(t.matlabc_flag().unwrap_or("(runs program, captures .va)"));
+        });
+    }
+
+    // OPTIONS — optimization + numeric mode (same state as the toolbar).
+    body.append(&sub_header("OPTIONS"));
+    let opt_dd = DropDown::from_strings(&OptimizationProfile::ALL.iter().map(|o| o.label()).collect::<Vec<_>>());
+    opt_dd.set_margin_start(8);
+    opt_dd.set_margin_end(8);
+    opt_dd.set_margin_top(2);
+    body.append(&opt_dd);
+    {
+        let app = app.clone();
+        opt_dd.connect_selected_notify(move |dd| {
+            app.vm.toolbar.set_optimization(OptimizationProfile::ALL[dd.selected() as usize]);
+        });
+    }
+    {
+        let dd = opt_dd.clone();
+        app.vm.toolbar.optimization.bind(move |o| {
+            if let Some(i) = OptimizationProfile::ALL.iter().position(|x| x == o) {
+                dd.set_selected(i as u32);
+            }
+        });
+    }
+    let num_dd = DropDown::from_strings(&NumericMode::ALL.iter().map(|n| n.label()).collect::<Vec<_>>());
+    num_dd.set_margin_start(8);
+    num_dd.set_margin_end(8);
+    num_dd.set_margin_top(4);
+    body.append(&num_dd);
+    {
+        let app = app.clone();
+        num_dd.connect_selected_notify(move |dd| {
+            app.vm.toolbar.set_numeric_mode(NumericMode::ALL[dd.selected() as usize]);
+        });
+    }
+    {
+        let dd = num_dd.clone();
+        app.vm.toolbar.numeric_mode.bind(move |n| {
+            if let Some(i) = NumericMode::ALL.iter().position(|x| x == n) {
+                dd.set_selected(i as u32);
+            }
+        });
+    }
+
+    // ACTIONS — Compile (enabled only for a saved file).
+    body.append(&sub_header("ACTIONS"));
+    let compile = Button::with_label("Compile");
+    compile.add_css_class("mf-compile-cta");
+    compile.set_margin_start(8);
+    compile.set_margin_end(8);
+    compile.set_margin_top(2);
+    compile.set_margin_bottom(8);
+    {
+        let app = app.clone();
+        compile.connect_clicked(move |_| runner::compile(&app.vm));
+    }
+    {
+        let appc = app.clone();
+        let compile = compile.clone();
+        let update = move || {
+            let can = appc.vm.editor.active_tab().and_then(|t| t.url).is_some()
+                && !appc.vm.toolbar.is_compiling.get();
+            compile.set_sensitive(can);
+        };
+        update();
+        let u1 = update.clone();
+        app.vm.editor.active_id.subscribe(move |_| u1());
+        app.vm.toolbar.is_compiling.subscribe(move |_| update());
+    }
+    body.append(&compile);
+
+    panel
 }
 
 fn describe_selection(app: &Rc<AppState>) -> String {
