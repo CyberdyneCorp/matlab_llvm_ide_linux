@@ -159,6 +159,23 @@ fn draw_area(ctx: &cairo::Context, xs: &[f64], ys: &[f64], map: &impl Fn(f64, f6
     draw_line(ctx, xs, ys, map, palette::ACCENT_MAGENTA);
 }
 
+/// Paint the empty-plots placeholder (dark background + hint) so the panel
+/// never shows a bare white surface.
+pub fn draw_empty(ctx: &cairo::Context, w: f64, h: f64) {
+    fill(ctx, palette::EDITOR_BACKGROUND, 0.0, 0.0, w, h);
+    set_color(ctx, palette::TEXT_MUTED);
+    ctx.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+    ctx.set_font_size(12.0);
+    let msg = "No figures yet.";
+    let ext = ctx.text_extents(msg).map(|e| e.width()).unwrap_or(0.0);
+    ctx.move_to((w - ext) / 2.0, h / 2.0 - 6.0);
+    ctx.show_text(msg).ok();
+    let hint = "Click + or plot a workspace variable.";
+    let ext2 = ctx.text_extents(hint).map(|e| e.width()).unwrap_or(0.0);
+    ctx.move_to((w - ext2) / 2.0, h / 2.0 + 12.0);
+    ctx.show_text(hint).ok();
+}
+
 /// Render a matrix as a cold→hot heatmap (blue → red) for the Matrix Viewer.
 pub fn draw_heatmap(ctx: &cairo::Context, w: f64, h: f64, m: &MatrixView) {
     fill(ctx, palette::EDITOR_BACKGROUND, 0.0, 0.0, w, h);

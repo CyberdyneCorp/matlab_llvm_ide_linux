@@ -96,6 +96,13 @@ impl AppState {
         }
     }
 
+    /// Plot a named workspace variable as `kind` (the "Plot As" context menu).
+    /// Captures the value over the REPL; the figure is created when it arrives.
+    pub fn plot_variable_as(self: &Rc<Self>, name: &str, kind: matforge_core::models::PlotKind) {
+        self.vm.request_plot(name, kind);
+        self.inspect_variable(name);
+    }
+
     /// Plot the currently inspected workspace variable as a line series.
     pub fn plot_inspected(self: &Rc<Self>) {
         use matforge_core::models::{PlotFigure, PlotKind};

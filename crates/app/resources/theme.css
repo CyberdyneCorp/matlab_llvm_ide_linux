@@ -143,6 +143,30 @@ window.mf-root,
 .mf-row:hover { background-color: @mf_hover; }
 .mf-row.selected { background-color: @mf_selection; color: @mf_text_primary; }
 
+/* GTK lists default to a light background — make them show the dark panel. */
+list, listview, columnview {
+    background-color: transparent;
+    color: @mf_text_primary;
+}
+/* Containers that default to a light background — let the dark panel show. */
+scrolledwindow, scrolledwindow > viewport, viewport,
+notebook, notebook > stack, notebook > header.top {
+    background-color: transparent;
+}
+notebook > header.top { background-color: @mf_panel; }
+list > row, listview > row {
+    background-color: transparent;
+    color: @mf_text_primary;
+}
+list > row:selected, listview > row:selected {
+    background-color: @mf_selection;
+    color: @mf_text_primary;
+}
+/* Popover menus (right-click Plot As…) */
+popover > contents { background-color: @mf_card; color: @mf_text_primary; }
+popover button { color: @mf_text_primary; }
+popover button:hover { background-color: @mf_hover; }
+
 /* Console levels */
 .mf-log-error   { color: @mf_red; }
 .mf-log-warning { color: @mf_yellow; }

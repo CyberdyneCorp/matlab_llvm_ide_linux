@@ -64,6 +64,9 @@ impl ReplSession {
         let mut child = Command::new(matlabc)
             .arg("-repl")
             .current_dir(cwd)
+            // Make the matlab_plot runtime emit figures as ___MF_FIG_*___
+            // sentinels so `plot(...)` in the REPL lands in the Plots panel.
+            .env("MATLAB_LLVM_IDE_FIGURES", "1")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -130,6 +133,7 @@ impl DapSession {
         let mut child = Command::new(matlabc)
             .arg("-dap")
             .arg(file)
+            .env("MATLAB_LLVM_IDE_FIGURES", "1")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

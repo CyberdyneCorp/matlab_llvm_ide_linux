@@ -971,10 +971,13 @@ fn build_workspace(app: &Rc<AppState>) -> GtkBox {
             clear_list(&table);
             for v in vars {
                 let btn = ws_variable_row(v);
-                let app3 = app2.clone();
-                let name = v.name.clone();
-                // Click selects + captures the value into the Matrix Viewer.
-                btn.connect_clicked(move |_| app3.inspect_variable(&name));
+                {
+                    let app3 = app2.clone();
+                    let name = v.name.clone();
+                    // Left-click: select + capture the value into the Matrix Viewer.
+                    btn.connect_clicked(move |_| app3.inspect_variable(&name));
+                }
+                attach_var_menu(&btn, &app2, &v.name); // right-click: Plot As…
                 table.append(&btn);
             }
             body.set_visible_child_name(if vars.is_empty() { "empty" } else { "table" });
@@ -999,6 +1002,59 @@ fn build_workspace(app: &Rc<AppState>) -> GtkBox {
     }
 
     panel
+}
+
+/// Attach a right-click "Plot As…" / Inspect menu to a workspace variable row.
+fn attach_var_menu(btn: &Button, app: &Rc<AppState>, name: &str) {
+    use matforge_core::models::PlotKind;
+    let pop = gtk::Popover::new();
+    pop.set_parent(btn);
+    let menu = GtkBox::new(Orientation::Vertical, 1);
+
+    let inspect = Button::with_label("Inspect value");
+    inspect.set_has_frame(false);
+    inspect.set_halign(gtk::Align::Start);
+    {
+        let app = app.clone();
+        let name = name.to_string();
+        let pop = pop.clone();
+        inspect.connect_clicked(move |_| {
+            app.inspect_variable(&name);
+            pop.popdown();
+        });
+    }
+    menu.append(&inspect);
+
+    for (label, kind) in [
+        ("Plot (Line)", PlotKind::Line2D),
+        ("Plot Scatter", PlotKind::Scatter),
+        ("Plot Bar", PlotKind::Bar),
+        ("Plot Area", PlotKind::Spectrum),
+    ] {
+        let b = Button::with_label(label);
+        b.set_has_frame(false);
+        b.set_halign(gtk::Align::Start);
+        let app = app.clone();
+        let name = name.to_string();
+        let pop = pop.clone();
+        b.connect_clicked(move |_| {
+            app.plot_variable_as(&name, kind);
+            pop.popdown();
+        });
+        menu.append(&b);
+    }
+    pop.set_child(Some(&menu));
+
+    let gesture = gtk::GestureClick::new();
+    gesture.set_button(gtk::gdk::BUTTON_SECONDARY);
+    {
+        let pop = pop.clone();
+        gesture.connect_pressed(move |_g, _n, x, y| {
+            pop.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+            pop.popup();
+        });
+    }
+    btn.add_controller(gesture);
 }
 
 fn ws_columns_header() -> GtkBox {
@@ -1141,8 +1197,9 @@ fn build_plots(app: &Rc<AppState>) -> GtkBox {
                 .iter()
                 .find(|f| Some(f.id) == sel)
                 .or_else(|| figs.last());
-            if let Some(figure) = figure {
-                crate::plot_render::draw_figure(ctx, w as f64, h as f64, figure);
+            match figure {
+                Some(figure) => crate::plot_render::draw_figure(ctx, w as f64, h as f64, figure),
+                None => crate::plot_render::draw_empty(ctx, w as f64, h as f64),
             }
         });
     }

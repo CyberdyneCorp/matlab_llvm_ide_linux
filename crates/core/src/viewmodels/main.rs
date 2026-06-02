@@ -7,7 +7,8 @@
 use std::path::Path;
 use std::rc::Rc;
 
-use crate::models::{CompilerTarget, ConsoleLevel};
+use crate::models::{CompilerTarget, ConsoleLevel, PlotFigure, PlotKind};
+use crate::observable::Property;
 use crate::services::compiler::{parse_diagnostic, CompileResult, CompilerInvocation, CompilerService};
 use crate::services::filesystem::FileSystem;
 use crate::services::sentinels::ReplEvent;
@@ -37,6 +38,9 @@ pub struct MainViewModel {
     pub breakpoints: BreakpointsViewModel,
 
     pub settings: Settings,
+    /// A `(variable, kind)` plot requested via "Plot As" — fulfilled when the
+    /// variable's value arrives over the REPL value channel.
+    pub pending_plot: Property<Option<(String, PlotKind)>>,
     fs: Rc<dyn FileSystem>,
     clipboard: Rc<dyn Clipboard>,
     picker: Rc<dyn FilePicker>,
@@ -64,6 +68,7 @@ impl MainViewModel {
             search: SearchViewModel::new(),
             breakpoints: BreakpointsViewModel::new(),
             settings,
+            pending_plot: Property::new(None),
             fs,
             clipboard,
             picker,
@@ -169,6 +174,32 @@ impl MainViewModel {
         }
     }
 
+    /// Request that `name` be plotted as `kind` once its value is captured.
+    /// The caller is responsible for triggering the value capture (the live
+    /// REPL `disp` probe).
+    pub fn request_plot(&self, name: impl Into<String>, kind: PlotKind) {
+        self.pending_plot.set(Some((name.into(), kind)));
+    }
+
+    /// If a "Plot As" is pending for `name`, build a line-style figure from the
+    /// freshly inspected matrix and add it to the Plots panel.
+    fn fulfil_pending_plot(&self, name: &str) {
+        let Some((pname, kind)) = self.pending_plot.get() else { return };
+        if pname != name {
+            return;
+        }
+        if let Some(m) = self.workspace.inspected_matrix.get() {
+            let ys: Vec<f64> = m.cells.iter().flatten().copied().collect();
+            if !ys.is_empty() {
+                let xs: Vec<f64> = (0..ys.len()).map(|i| i as f64).collect();
+                let index = self.plots.figures.with(|f| f.len() as i32) + 1;
+                let fig = PlotFigure::series(index, pname.clone(), kind, xs, ys).with_source(pname);
+                self.plots.add(fig);
+            }
+        }
+        self.pending_plot.set(None);
+    }
+
     fn route_repl_event(&self, event: ReplEvent) {
         match event {
             ReplEvent::Workspace(text) => {
@@ -177,7 +208,8 @@ impl MainViewModel {
             }
             ReplEvent::Value(text) => {
                 let name = self.workspace.selected_name.get().unwrap_or_else(|| "ans".to_string());
-                self.workspace.set_matrix_from_disp(name, &text);
+                self.workspace.set_matrix_from_disp(name.as_str(), &text);
+                self.fulfil_pending_plot(&name);
             }
             ReplEvent::Figure { runtime_id, width, height, png } => {
                 use crate::models::{PlotFigure, PlotKind};
@@ -316,6 +348,23 @@ mod tests {
         vm.feed_repl_line(VAL_END);
         let m = vm.workspace.inspected_matrix.get().unwrap();
         assert_eq!(m.title, "M");
+    }
+
+    #[test]
+    fn plot_as_creates_figure_when_value_arrives() {
+        use crate::services::sentinels::{VAL_BEGIN, VAL_END};
+        let (vm, _, _) = main_vm(FakeFileSystem::new());
+        vm.workspace.select("M");
+        vm.request_plot("M", crate::models::PlotKind::Bar);
+        // Value capture round-trips over the REPL channel.
+        vm.feed_repl_line(VAL_BEGIN);
+        vm.feed_repl_line("1 2 3 4");
+        vm.feed_repl_line(VAL_END);
+        let figs = vm.plots.figures.get();
+        assert_eq!(figs.len(), 1);
+        assert_eq!(figs[0].kind, crate::models::PlotKind::Bar);
+        assert_eq!(figs[0].ys.len(), 4);
+        assert!(vm.pending_plot.get().is_none());
     }
 
     #[test]

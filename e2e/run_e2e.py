@@ -108,12 +108,30 @@ def scenario_inspect_and_plot():
         app.close()
 
 
+def scenario_repl_plot():
+    print("scenario: plot() in the REPL produces a figure")
+    if not os.path.exists(MATLABC):
+        check("REPL plot (skipped: matlabc not found)", True, "skipped")
+        return
+    app = App(env_extra={"MATFORGE_OPEN": PROJ, "MATLABC_PATH": MATLABC})
+    try:
+        ex, ey, ew, eh = app.wait_rect("repl_entry_rect")
+        app.click_window(ex + ew // 2, ey + eh // 2)
+        app.type_text("plot([1 2 3 4 3 2 1])")
+        app.key("Return")
+        st = app.wait_for(lambda s: s.get("plots", 0) > 0, timeout=25, what="figure from plot()")
+        check("plot() in the REPL adds a figure", st["plots"] > 0, f"plots={st['plots']}")
+    finally:
+        app.close()
+
+
 def main():
     setup_project()
     scenario_gutter_breakpoint()
     scenario_f9_breakpoint()
     scenario_repl_workspace()
     scenario_inspect_and_plot()
+    scenario_repl_plot()
     summary_and_exit()
 
 
