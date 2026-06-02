@@ -205,6 +205,72 @@ pub fn hit_test(doc: &FlowchartDocument, world: FlowPosition) -> Option<String> 
     None
 }
 
+/// Bounding box `(min_x, min_y, max_x, max_y)` of all nodes in the entry flow,
+/// in world coordinates. `None` for an empty flow. Used for zoom-to-fit.
+pub fn content_bounds(doc: &FlowchartDocument) -> Option<(f64, f64, f64, f64)> {
+    let flow = doc.flows.first()?;
+    let mut it = flow.nodes.iter();
+    let first = it.next()?;
+    let (x, y, w, h) = node_rect(first);
+    let mut b = (x, y, x + w, y + h);
+    for node in it {
+        let (x, y, w, h) = node_rect(node);
+        b.0 = b.0.min(x);
+        b.1 = b.1.min(y);
+        b.2 = b.2.max(x + w);
+        b.3 = b.3.max(y + h);
+    }
+    Some(b)
+}
+
+/// World-space position of a node's port (for the edge-drag rubber band).
+pub fn port_world(doc: &FlowchartDocument, node_id: &str, port: &str) -> Option<(f64, f64)> {
+    let flow = doc.flows.first()?;
+    let node = flow.nodes.iter().find(|n| n.id == node_id)?;
+    Some(port_point(node, port))
+}
+
+/// Nearest *output* port within `radius` world-units of `world`, as
+/// `(node_id, port_id)`. Used to start an edge drag from a port stub.
+pub fn output_port_hit(
+    doc: &FlowchartDocument,
+    world: FlowPosition,
+    radius: f64,
+) -> Option<(String, String)> {
+    let flow = doc.flows.first()?;
+    let mut best: Option<(f64, String, String)> = None;
+    for node in &flow.nodes {
+        for p in &node.ports.outputs {
+            let (px, py) = port_point(node, &p.id);
+            let d = ((px - world.x).powi(2) + (py - world.y).powi(2)).sqrt();
+            if d <= radius && best.as_ref().map(|b| d < b.0).unwrap_or(true) {
+                best = Some((d, node.id.clone(), p.id.clone()));
+            }
+        }
+    }
+    best.map(|(_, n, p)| (n, p))
+}
+
+/// Input port of `node_id` closest to `world` (the drop target's landing port).
+/// Falls back to `"in"` when the node declares no input ports.
+pub fn nearest_input_port(doc: &FlowchartDocument, node_id: &str, world: FlowPosition) -> Option<String> {
+    let flow = doc.flows.first()?;
+    let node = flow.nodes.iter().find(|n| n.id == node_id)?;
+    if node.ports.inputs.is_empty() {
+        return None;
+    }
+    node.ports
+        .inputs
+        .iter()
+        .map(|p| {
+            let (px, py) = port_point(node, &p.id);
+            let d = (px - world.x).powi(2) + (py - world.y).powi(2);
+            (d, p.id.clone())
+        })
+        .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(_, id)| id)
+}
+
 /// Palette kinds offered for a given document dialect.
 pub fn palette_kinds(doc: &FlowchartDocument) -> Vec<NodeKind> {
     use matforge_core::models::flowchart::SchemaKind;

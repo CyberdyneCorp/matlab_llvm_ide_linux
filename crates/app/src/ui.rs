@@ -771,13 +771,15 @@ fn build_center(app: &Rc<AppState>) -> GtkBox {
     center.append(&editor_nb);
     center.append(&console);
 
-    // Command-window mode: with no source open, hide the editor and let the
-    // console (the MATLAB command window / REPL workspace) fill the center.
-    {
+    // Command-window mode: with nothing open in the center notebook (no source
+    // tab and no flowchart), hide it and let the console (the MATLAB command
+    // window / REPL workspace) fill the center. Driven by the notebook's page
+    // count so it accounts for flowchart pages, which are not editor.tabs.
+    let update_center = {
         let editor_nb = editor_nb.clone();
         let console = console.clone();
-        app.vm.editor.tabs.bind(move |tabs| {
-            if tabs.is_empty() {
+        move || {
+            if editor_nb.n_pages() == 0 {
                 editor_nb.set_visible(false);
                 console.set_vexpand(true);
                 console.set_size_request(-1, -1);
@@ -786,7 +788,16 @@ fn build_center(app: &Rc<AppState>) -> GtkBox {
                 console.set_vexpand(false);
                 console.set_size_request(-1, 220);
             }
-        });
+        }
+    };
+    update_center();
+    {
+        let f = update_center.clone();
+        editor_nb.connect_page_added(move |_, _, _| f());
+    }
+    {
+        let f = update_center.clone();
+        editor_nb.connect_page_removed(move |_, _, _| f());
     }
     center
 }
@@ -842,7 +853,7 @@ pub fn open_demo_flowchart(app: &Rc<AppState>, signal: bool) {
         fc.add_edge(&disp, "out", "main_end", "in");
     }
     fc.select(None);
-    let view = crate::flowchart_view::build_flowchart_view(fc);
+    let view = crate::flowchart_view::build_flowchart_view(app, fc, None);
     EDITOR_NB.with(|nb| {
         let nb = nb.borrow();
         if let Some(nb) = nb.as_ref() {
@@ -871,7 +882,7 @@ fn open_flowchart(app: &Rc<AppState>, path: &Path) {
     };
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let fc = Rc::new(FlowchartViewModel::from_document(doc));
-    let view = crate::flowchart_view::build_flowchart_view(fc);
+    let view = crate::flowchart_view::build_flowchart_view(app, fc, Some(path.to_path_buf()));
     EDITOR_NB.with(|nb| {
         let nb = nb.borrow();
         if let Some(nb) = nb.as_ref() {

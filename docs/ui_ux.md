@@ -52,3 +52,31 @@ The editor applies one `GtkTextTag` per token color, computed by the pure
 C++, Python, TypeScript, Verilog/Verilog-A, LLVM IR, MLIR). Keywords render
 magenta, builtins/calls blue, strings amber, comments muted, numbers green —
 matching the reference's `Theme.Code` colors exactly.
+
+## Command-window mode
+
+When the center notebook has nothing open (no source tab and no flowchart), the
+editor is hidden and the console — the MATLAB command window / REPL workspace —
+fills the center, matching the reference's "everything is a REPL" feel. Opening a
+file or flowchart restores the editor with the console docked at the bottom.
+
+## Flowchart editor
+
+Opening a `.mflow` (or the demo charts) shows a three-pane editor:
+[`flowchart_view`](../crates/app/src/flowchart_view.rs) renders the document on a
+Cairo canvas between a block palette and a property inspector. All edits go
+through the tested [`FlowchartViewModel`](../crates/core/src/viewmodels/flowchart.rs).
+
+* **Palette** (left): a **Save** / **Compile** action row, the dialect-appropriate
+  block list (click to drop a node), and **undo / redo / delete** controls.
+* **Canvas** (center): pan-free but **zoom-to-fit on open** (and a **Fit** button)
+  always frames the chart; scroll to zoom, drag a node body to move it, and drag
+  from a node's output port to another node to draw a control edge (a dashed
+  rubber band follows the cursor and snaps to the target's nearest input port).
+* **Inspector** (right): edits the selected block — its label plus the fields that
+  matter for its kind (assignment target/expression, `if`/`while` condition, `for`
+  loop variable/iterable, signal-flow block parameters, state actions, …) and a
+  **Toggle breakpoint** action for executable blocks.
+* **Save** writes the `.mflow` back to disk; **Compile** lowers the chart to MATLAB
+  via `matlabc -emit-matlab`, writes the generated `.m` beside it, and opens it in
+  the editor.

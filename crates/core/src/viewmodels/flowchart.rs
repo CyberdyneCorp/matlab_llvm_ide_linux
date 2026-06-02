@@ -109,6 +109,27 @@ impl FlowchartViewModel {
         self.is_dirty.set(true);
     }
 
+    /// Apply an in-place edit to a node's mutable fields (label / data) without
+    /// snapshotting undo — for inspector field edits during typing. Marks the
+    /// document dirty. Pair with [`begin_edit`](Self::begin_edit) if a single
+    /// undo step per editing session is wanted.
+    pub fn edit_node(&self, id: &str, f: impl FnOnce(&mut FlowNode)) {
+        self.document.update(|d| {
+            if let Some(flow) = d.flows.first_mut() {
+                if let Some(node) = flow.nodes.iter_mut().find(|n| n.id == id) {
+                    f(node);
+                }
+            }
+        });
+        self.is_dirty.set(true);
+    }
+
+    /// The entry-flow node with `id`, cloned (for the inspector).
+    pub fn node(&self, id: &str) -> Option<FlowNode> {
+        self.document
+            .with(|d| d.flows.first().and_then(|f| f.nodes.iter().find(|n| n.id == id).cloned()))
+    }
+
     /// Delete a node and any edge that touches it.
     pub fn delete_node(&self, id: &str) {
         self.push_undo();
@@ -348,6 +369,35 @@ mod tests {
             d.flows[0].nodes.iter().find(|n| n.id == "main_end").unwrap().ui.position
         });
         assert_eq!((pos.x, pos.y), (240.0, 220.0));
+    }
+
+    #[test]
+    fn edit_node_updates_fields_and_marks_dirty() {
+        let vm = FlowchartViewModel::empty("D", SchemaKind::ControlFlow);
+        let id = vm.add_node(NodeKind::Assignment, 0.0, 0.0);
+        vm.is_dirty.set(false);
+        vm.edit_node(&id, |n| {
+            n.label = "y = 2*x".into();
+            n.data.lhs = Some("y".into());
+            n.data.rhs = Some("2*x".into());
+        });
+        assert!(vm.is_dirty.get());
+        let node = vm.node(&id).unwrap();
+        assert_eq!(node.label, "y = 2*x");
+        assert_eq!(node.data.lhs.as_deref(), Some("y"));
+        assert_eq!(node.data.rhs.as_deref(), Some("2*x"));
+        // edit_node adds no undo step of its own: a single undo removes the
+        // whole node added above (back to the 2-node template).
+        assert_eq!(vm.node_count(), 3);
+        vm.undo();
+        assert_eq!(vm.node_count(), 2);
+    }
+
+    #[test]
+    fn node_lookup_returns_clone_or_none() {
+        let vm = FlowchartViewModel::empty("D", SchemaKind::ControlFlow);
+        assert!(vm.node("main_start").is_some());
+        assert!(vm.node("missing").is_none());
     }
 
     #[test]
