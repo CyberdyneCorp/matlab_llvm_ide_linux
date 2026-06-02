@@ -829,6 +829,7 @@ fn build_console(app: &Rc<AppState>) -> GtkBox {
     let entry = Entry::new();
     entry.set_hexpand(true);
     entry.set_placeholder_text(Some("MATLAB command…"));
+    crate::e2e::set_repl_entry(&entry);
     {
         let app = app.clone();
         let entry2 = entry.clone();

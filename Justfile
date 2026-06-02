@@ -57,6 +57,15 @@ test-integration:
 # Unit + integration tests.
 test-all: test test-integration
 
+# End-to-end tests: drive the real GTK binary via X11 input, assert on app
+# state. Needs a display + python-xlib (`just e2e-setup`); use xvfb-run in CI.
+e2e: build
+    python3 e2e/run_e2e.py
+
+# Install the e2e harness dependency (no sudo).
+e2e-setup:
+    pip install --user -r e2e/requirements.txt
+
 # ---- Coverage --------------------------------------------------------------
 
 # Print a coverage summary for the core crate (needs cargo-llvm-cov).

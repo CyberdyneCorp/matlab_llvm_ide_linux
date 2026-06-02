@@ -4,3 +4,7 @@ Cargo.lock.bak
 *.profraw
 /coverage
 .DS_Store
+
+# Python
+__pycache__/
+*.pyc

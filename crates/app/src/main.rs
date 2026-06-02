@@ -15,6 +15,7 @@ use matforge_core::services::settings::Settings;
 use matforge_core::viewmodels::MainViewModel;
 
 mod app_state;
+mod e2e;
 mod editor_view;
 mod flow_render;
 mod icons;
@@ -61,6 +62,11 @@ fn build_main_window(app: &Application) {
     let app = AppState::new(vm, settings.clone());
 
     ui::build(&window, app.clone());
+
+    // E2E state introspection (test-only; no-op unless the env var is set).
+    if let Ok(path) = std::env::var("MATFORGE_E2E_STATE") {
+        e2e::install_state_dump(app.clone(), std::path::PathBuf::from(path));
+    }
 
     // Optional startup open (used for demos / verification):
     //   MATFORGE_OPEN=<folder>  MATFORGE_FILE=<file>  MATFORGE_COMPILE=1

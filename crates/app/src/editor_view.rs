@@ -149,6 +149,8 @@ pub fn build_code_view(
     }
     view.add_controller(keys);
 
+    crate::e2e::set_active_gutter(&gutter);
+
     let hbox = GtkBox::new(Orientation::Horizontal, 0);
     hbox.append(&gutter);
     hbox.append(&scroll);

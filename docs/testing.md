@@ -32,6 +32,13 @@ cargo llvm-cov --package matforge-core --summary-only
 MATLABC_PATH=/path/to/matlabc cargo test -p matforge-core --test integration
 ```
 
+## End-to-end (GTK)
+
+Beyond unit + integration tests, `e2e/` drives the **real binary** with
+synthesized X11 input and asserts on real app state (see
+[`docs/e2e.md`](e2e.md)): `just e2e-setup` then `just e2e`. Covers gutter/F9
+breakpoints and the live REPL → workspace round-trip.
+
 ## Coverage target
 
 ≥ 90% on `matforge-core`. Current measured: **~95% region / line / function**.
