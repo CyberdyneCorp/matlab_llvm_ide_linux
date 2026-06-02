@@ -53,6 +53,37 @@ C++, Python, TypeScript, Verilog/Verilog-A, LLVM IR, MLIR). Keywords render
 magenta, builtins/calls blue, strings amber, comments muted, numbers green —
 matching the reference's `Theme.Code` colors exactly.
 
+## Menu bar & keyboard shortcuts
+
+A `GtkPopoverMenuBar` above the toolbar mirrors the macOS reference's menus,
+driven by `win.*` `GSimpleAction`s registered on the window (see
+[`build_menu_bar`](../crates/app/src/ui.rs)). Accelerators are bound on the
+`GtkApplication` and shown inline in the menus.
+
+| Menu | Item | Shortcut |
+|------|------|----------|
+| File | New File | `Ctrl+N` |
+| File | Open Folder… | `Ctrl+O` |
+| File | Save | `Ctrl+S` |
+| File | Close Tab | `Ctrl+W` |
+| File | Quit | `Ctrl+Q` |
+| Edit | Undo / Redo | `Ctrl+Z` / `Ctrl+Shift+Z` (built-in text view) |
+| Edit | Cut / Copy / Paste / Select All | standard text-view actions |
+| Edit | Search in Files | `Ctrl+F` |
+| View | Toggle Sidebar | `Ctrl+B` |
+| View | Toggle Workspace | `Ctrl+Shift+W` |
+| View | Toggle Plots | `Ctrl+Shift+P` |
+| Run | Compile | `Ctrl+Shift+B` |
+| Run | Run | `Ctrl+R` |
+| Run | Stop | `Shift+F5` |
+| Debug | Start Debugging | `F5` |
+| Debug | Continue | `F8` |
+| Debug | Step Over / Into / Out | `F10` / `F11` / `Shift+F11` |
+| Help | About | — |
+
+Toggling a breakpoint stays on `F9` in the focused editor (handled by the code
+view, not the menu) to match the gutter-click affordance.
+
 ## Command-window mode
 
 When the center notebook has nothing open (no source tab and no flowchart), the

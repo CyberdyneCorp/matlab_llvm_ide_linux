@@ -28,6 +28,7 @@ pub fn build(window: &ApplicationWindow, app: Rc<AppState>) {
     let root = GtkBox::new(Orientation::Vertical, 0);
     root.add_css_class("mf-window");
 
+    root.append(&build_menu_bar(window, &app));
     root.append(&build_toolbar(window, &app));
 
     let middle = GtkBox::new(Orientation::Horizontal, 0);
@@ -82,6 +83,217 @@ pub fn build(window: &ApplicationWindow, app: Rc<AppState>) {
     root.append(&middle);
     root.append(&build_status_bar(&app));
     window.set_child(Some(&root));
+}
+
+// ---- Menu bar + actions ----------------------------------------------------
+
+/// Register the `win.*` actions, bind their keyboard accelerators on the
+/// application, and return the rendered menu bar. Mirrors the macOS reference's
+/// File / Edit / View / Run / Debug / Help menus.
+fn build_menu_bar(window: &ApplicationWindow, app: &Rc<AppState>) -> gtk::PopoverMenuBar {
+    use gtk::gio::{Menu, SimpleAction};
+
+    // Register a parameterless `win.<name>` action running `f`.
+    let register = |name: &str, f: Rc<dyn Fn()>| {
+        let act = SimpleAction::new(name, None);
+        act.connect_activate(move |_, _| f());
+        window.add_action(&act);
+    };
+
+    let a = app.clone();
+    let w = window.clone();
+    register("new", Rc::new(move || new_untitled(&a)));
+    {
+        let a = app.clone();
+        let w2 = w.clone();
+        register("open", Rc::new(move || pick_folder(&w2, &a)));
+    }
+    {
+        let a = app.clone();
+        register("save", Rc::new(move || save_active(&a)));
+    }
+    {
+        let a = app.clone();
+        register("close-tab", Rc::new(move || close_active_tab(&a)));
+    }
+    {
+        let w2 = w.clone();
+        register("quit", Rc::new(move || w2.close()));
+    }
+    {
+        let a = app.clone();
+        register(
+            "find",
+            Rc::new(move || {
+                a.vm.activity_bar.select(ActivityItem::Search);
+                a.vm.layout.sidebar_visible.set(true);
+            }),
+        );
+    }
+    {
+        let a = app.clone();
+        register("toggle-sidebar", Rc::new(move || a.vm.layout.toggle_sidebar()));
+    }
+    {
+        let a = app.clone();
+        register("toggle-workspace", Rc::new(move || a.vm.layout.toggle_workspace()));
+    }
+    {
+        let a = app.clone();
+        register("toggle-plots", Rc::new(move || a.vm.layout.toggle_plots()));
+    }
+    {
+        let a = app.clone();
+        register("compile", Rc::new(move || runner::compile(&a.vm)));
+    }
+    {
+        let a = app.clone();
+        register(
+            "run",
+            Rc::new(move || {
+                let settings = a.settings.clone();
+                runner::run(&a.vm, &settings);
+            }),
+        );
+    }
+    {
+        let a = app.clone();
+        register(
+            "stop",
+            Rc::new(move || {
+                a.stop_debug();
+                a.vm.toolbar.is_running.set(false);
+            }),
+        );
+    }
+    {
+        let a = app.clone();
+        register("debug", Rc::new(move || a.start_debug()));
+    }
+    for (name, cmd) in [
+        ("dbg-continue", "continue"),
+        ("dbg-next", "next"),
+        ("dbg-step-in", "stepIn"),
+        ("dbg-step-out", "stepOut"),
+    ] {
+        let a = app.clone();
+        register(name, Rc::new(move || a.debug_command(cmd)));
+    }
+    {
+        let a = app.clone();
+        register("dbg-stop", Rc::new(move || a.stop_debug()));
+    }
+    {
+        let w2 = w.clone();
+        register("about", Rc::new(move || show_about(&w2)));
+    }
+
+    // Keyboard accelerators (shown automatically in the menu by GTK).
+    if let Some(gapp) = window.application().and_then(|a| a.downcast::<gtk::Application>().ok()) {
+        for (action, accels) in [
+            ("win.new", &["<Ctrl>n"][..]),
+            ("win.open", &["<Ctrl>o"]),
+            ("win.save", &["<Ctrl>s"]),
+            ("win.close-tab", &["<Ctrl>w"]),
+            ("win.quit", &["<Ctrl>q"]),
+            ("win.find", &["<Ctrl>f"]),
+            ("win.toggle-sidebar", &["<Ctrl>b"]),
+            ("win.toggle-workspace", &["<Ctrl><Shift>w"]),
+            ("win.toggle-plots", &["<Ctrl><Shift>p"]),
+            ("win.compile", &["<Ctrl><Shift>b"]),
+            ("win.run", &["<Ctrl>r"]),
+            ("win.stop", &["<Shift>F5"]),
+            ("win.debug", &["F5"]),
+            ("win.dbg-continue", &["F8"]),
+            ("win.dbg-next", &["F10"]),
+            ("win.dbg-step-in", &["F11"]),
+            ("win.dbg-step-out", &["<Shift>F11"]),
+        ] {
+            gapp.set_accels_for_action(action, accels);
+        }
+    }
+
+    let menubar = Menu::new();
+
+    let file = Menu::new();
+    file.append(Some("New File"), Some("win.new"));
+    file.append(Some("Open Folder…"), Some("win.open"));
+    file.append(Some("Save"), Some("win.save"));
+    file.append(Some("Close Tab"), Some("win.close-tab"));
+    file.append(Some("Quit"), Some("win.quit"));
+    menubar.append_submenu(Some("File"), &file);
+
+    let edit = Menu::new();
+    edit.append(Some("Undo"), Some("text.undo"));
+    edit.append(Some("Redo"), Some("text.redo"));
+    let clip = Menu::new();
+    clip.append(Some("Cut"), Some("clipboard.cut"));
+    clip.append(Some("Copy"), Some("clipboard.copy"));
+    clip.append(Some("Paste"), Some("clipboard.paste"));
+    clip.append(Some("Select All"), Some("selection.select-all"));
+    edit.append_section(None, &clip);
+    let find_section = Menu::new();
+    find_section.append(Some("Search in Files"), Some("win.find"));
+    edit.append_section(None, &find_section);
+    menubar.append_submenu(Some("Edit"), &edit);
+
+    let view = Menu::new();
+    view.append(Some("Toggle Sidebar"), Some("win.toggle-sidebar"));
+    view.append(Some("Toggle Workspace"), Some("win.toggle-workspace"));
+    view.append(Some("Toggle Plots"), Some("win.toggle-plots"));
+    menubar.append_submenu(Some("View"), &view);
+
+    let run_menu = Menu::new();
+    run_menu.append(Some("Compile"), Some("win.compile"));
+    run_menu.append(Some("Run"), Some("win.run"));
+    run_menu.append(Some("Stop"), Some("win.stop"));
+    menubar.append_submenu(Some("Run"), &run_menu);
+
+    let debug = Menu::new();
+    debug.append(Some("Start Debugging"), Some("win.debug"));
+    debug.append(Some("Continue"), Some("win.dbg-continue"));
+    debug.append(Some("Step Over"), Some("win.dbg-next"));
+    debug.append(Some("Step Into"), Some("win.dbg-step-in"));
+    debug.append(Some("Step Out"), Some("win.dbg-step-out"));
+    debug.append(Some("Stop Debugging"), Some("win.dbg-stop"));
+    menubar.append_submenu(Some("Debug"), &debug);
+
+    let help = Menu::new();
+    help.append(Some("About MatForge IDE"), Some("win.about"));
+    menubar.append_submenu(Some("Help"), &help);
+
+    let bar = gtk::PopoverMenuBar::from_model(Some(&menubar));
+    bar.add_css_class("mf-menubar");
+    bar
+}
+
+/// Close the current center notebook page and, if it is a text tab, its model.
+fn close_active_tab(app: &Rc<AppState>) {
+    let active_id = app.vm.editor.active_tab().map(|t| t.id);
+    EDITOR_NB.with(|nb| {
+        if let Some(nb) = nb.borrow().as_ref() {
+            if let Some(p) = nb.current_page() {
+                nb.remove_page(Some(p));
+            }
+        }
+    });
+    if let Some(id) = active_id {
+        app.vm.editor.close(id);
+    }
+}
+
+/// Modal About dialog.
+fn show_about(window: &ApplicationWindow) {
+    let about = gtk::AboutDialog::new();
+    about.set_program_name(Some("MatForge IDE"));
+    about.set_version(Some(env!("CARGO_PKG_VERSION")));
+    about.set_comments(Some(
+        "A Linux (Rust + GTK4) port of the MatForge IDE for the matlab_llvm compiler.",
+    ));
+    about.set_license_type(gtk::License::MitX11);
+    about.set_transient_for(Some(window));
+    about.set_modal(true);
+    about.present();
 }
 
 // ---- Toolbar ---------------------------------------------------------------

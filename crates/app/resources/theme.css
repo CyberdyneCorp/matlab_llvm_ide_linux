@@ -74,6 +74,18 @@ window.mf-root,
     border-left: 2px solid @mf_orange;
 }
 
+/* Menu bar */
+.mf-menubar {
+    background-color: @mf_chrome;
+    color: @mf_text_secondary;
+    padding: 1px 4px;
+    border-bottom: 1px solid @mf_border_soft;
+    font-size: 12px;
+}
+.mf-menubar > item { padding: 2px 8px; border-radius: 4px; }
+.mf-menubar > item:hover,
+.mf-menubar > item:selected { background-color: @mf_hover; color: @mf_text_primary; }
+
 /* Toolbar */
 .mf-toolbar { background-color: @mf_chrome; }
 .mf-brand   { color: @mf_text_primary; font-weight: 600; font-size: 13px; }
