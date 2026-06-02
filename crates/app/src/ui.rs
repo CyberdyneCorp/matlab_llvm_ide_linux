@@ -767,8 +767,27 @@ fn build_center(app: &Rc<AppState>) -> GtkBox {
     editor_nb.add_css_class("mf-editor");
     EDITOR_NB.with(|e| *e.borrow_mut() = Some(editor_nb.clone()));
 
+    let console = build_console(app);
     center.append(&editor_nb);
-    center.append(&build_console(app));
+    center.append(&console);
+
+    // Command-window mode: with no source open, hide the editor and let the
+    // console (the MATLAB command window / REPL workspace) fill the center.
+    {
+        let editor_nb = editor_nb.clone();
+        let console = console.clone();
+        app.vm.editor.tabs.bind(move |tabs| {
+            if tabs.is_empty() {
+                editor_nb.set_visible(false);
+                console.set_vexpand(true);
+                console.set_size_request(-1, -1);
+            } else {
+                editor_nb.set_visible(true);
+                console.set_vexpand(false);
+                console.set_size_request(-1, 220);
+            }
+        });
+    }
     center
 }
 
@@ -890,11 +909,13 @@ fn build_console(app: &Rc<AppState>) -> GtkBox {
     let nb = Notebook::new();
     nb.set_vexpand(true);
 
-    // CONSOLE — color-coded transcript.
+    // CONSOLE — color-coded transcript, matrix-retro green-on-black.
     let console_view = TextView::new();
     console_view.set_monospace(true);
     console_view.set_editable(false);
-    console_view.add_css_class("mf-code");
+    console_view.add_css_class("mf-terminal");
+    console_view.set_left_margin(6);
+    console_view.set_top_margin(4);
     let cbuf = console_view.buffer();
     for (name, color) in console_tag_colors() {
         if cbuf.tag_table().lookup(name).is_none() {
@@ -982,10 +1003,12 @@ fn build_console(app: &Rc<AppState>) -> GtkBox {
 
     // Live REPL input.
     let input_row = GtkBox::new(Orientation::Horizontal, 4);
+    input_row.add_css_class("mf-term-panel");
     let prompt = Label::new(Some(">>"));
-    prompt.add_css_class("mf-text-secondary");
+    prompt.add_css_class("mf-prompt");
     let entry = Entry::new();
     entry.set_hexpand(true);
+    entry.add_css_class("mf-terminal-entry");
     entry.set_placeholder_text(Some("MATLAB command…"));
     crate::e2e::set_repl_entry(&entry);
     {
@@ -1051,15 +1074,17 @@ fn level_tag(level: ConsoleLevel) -> &'static str {
 }
 
 fn console_tag_colors() -> [(&'static str, matforge_core::theme::Rgb); 7] {
-    use matforge_core::theme::palette as p;
+    use matforge_core::theme::Rgb;
+    // Matrix-retro terminal palette: greens for normal output, red/yellow kept
+    // for errors/warnings so they still pop on the near-black background.
     [
-        ("lvl-error", p::ACCENT_RED),
-        ("lvl-warning", p::ACCENT_YELLOW),
-        ("lvl-success", p::ACCENT_GREEN),
-        ("lvl-command", p::TEXT_SECONDARY),
-        ("lvl-debug", p::TEXT_MUTED),
-        ("lvl-info", p::ACCENT_CYAN),
-        ("lvl-plain", p::TEXT_PRIMARY),
+        ("lvl-error", Rgb::hex(0xFF5C57)),
+        ("lvl-warning", Rgb::hex(0xF3F99D)),
+        ("lvl-success", Rgb::hex(0x5AF78E)),
+        ("lvl-command", Rgb::hex(0x7CFC8A)),
+        ("lvl-debug", Rgb::hex(0x2F8F3F)),
+        ("lvl-info", Rgb::hex(0x57C7B8)),
+        ("lvl-plain", Rgb::hex(0x43D459)),
     ]
 }
 

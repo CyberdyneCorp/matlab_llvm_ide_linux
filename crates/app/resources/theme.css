@@ -11,9 +11,11 @@
 @define-color mf_border           #2a3a52;
 @define-color mf_border_soft      #223047;
 
-@define-color mf_text_primary     #d3dcea;
-@define-color mf_text_secondary   #8898ae;
-@define-color mf_text_muted       #5e6c82;
+@define-color mf_text_primary     #e3e9f3;
+@define-color mf_text_secondary   #a3b2c8;
+@define-color mf_text_muted       #8090a8;
+@define-color mf_term_bg          #04070a;
+@define-color mf_term_fg          #43d459;
 
 @define-color mf_orange  #e08a45;
 @define-color mf_amber   #c97a3a;
@@ -187,8 +189,27 @@ popover button:hover { background-color: @mf_hover; }
 .mf-col-title {
     font-size: 9px;
     font-weight: 700;
-    color: @mf_text_muted;
+    color: @mf_text_secondary;
     letter-spacing: 1px;
+}
+/* Brighten list/row text for readability. */
+.mf-row label, list > row label { color: @mf_text_primary; }
+
+/* Matrix-retro console: green on near-black. */
+textview.mf-terminal, textview.mf-terminal text {
+    background-color: @mf_term_bg;
+    color: @mf_term_fg;
+    font-family: "JetBrains Mono", "Fira Code", "DejaVu Sans Mono", monospace;
+    font-size: 12px;
+}
+.mf-term-panel { background-color: @mf_term_bg; }
+.mf-prompt { color: @mf_term_fg; font-weight: 700; }
+entry.mf-terminal-entry, entry.mf-terminal-entry > text {
+    background-color: @mf_term_bg;
+    color: @mf_term_fg;
+    caret-color: @mf_term_fg;
+    font-family: "JetBrains Mono", "DejaVu Sans Mono", monospace;
+    border: 1px solid #11331a;
 }
 
 /* File-kind icon colors (Explorer) */
