@@ -21,6 +21,8 @@ use crate::app_state::AppState;
 thread_local! {
     static ACTIVE_GUTTER: RefCell<Option<gtk::Widget>> = const { RefCell::new(None) };
     static REPL_ENTRY: RefCell<Option<gtk::Widget>> = const { RefCell::new(None) };
+    static WORKSPACE_TABLE: RefCell<Option<gtk::Widget>> = const { RefCell::new(None) };
+    static PLOTS_ADD: RefCell<Option<gtk::Widget>> = const { RefCell::new(None) };
 }
 
 /// Record the gutter of the most recently built code view (drive target).
@@ -31,6 +33,16 @@ pub fn set_active_gutter(w: &impl IsA<gtk::Widget>) {
 /// Record the REPL input entry (drive target).
 pub fn set_repl_entry(w: &impl IsA<gtk::Widget>) {
     REPL_ENTRY.with(|c| *c.borrow_mut() = Some(w.clone().upcast()));
+}
+
+/// Record the workspace variable table (drive target).
+pub fn set_workspace_table(w: &impl IsA<gtk::Widget>) {
+    WORKSPACE_TABLE.with(|c| *c.borrow_mut() = Some(w.clone().upcast()));
+}
+
+/// Record the Plots "add" button (drive target).
+pub fn set_plots_add(w: &impl IsA<gtk::Widget>) {
+    PLOTS_ADD.with(|c| *c.borrow_mut() = Some(w.clone().upcast()));
 }
 
 /// `[x, y, w, h]` of `w` in window-client coordinates (the harness adds the
@@ -61,12 +73,17 @@ pub fn install_state_dump(app: Rc<AppState>, path: PathBuf) {
             "execution_line": active.as_ref().and_then(|t| t.execution_line),
             "tabs": app.vm.editor.tabs.with(|ts| ts.iter().map(|t| t.name.clone()).collect::<Vec<_>>()),
             "workspace": app.vm.workspace.variables.with(|vs| vs.iter().map(|v| v.name.clone()).collect::<Vec<_>>()),
+            "inspected_matrix": app.vm.workspace.inspected_matrix.with(|m| {
+                m.as_ref().map(|mm| json!({"title": mm.title, "rows": mm.rows, "cols": mm.cols}))
+            }),
             "plots": app.vm.plots.figures.with(|f| f.len()),
             "status": app.vm.status_bar.state.with(|s| s.message.clone()),
             "sidebar_visible": app.vm.layout.sidebar_visible.get(),
             "right_visible": app.vm.layout.workspace_visible.get(),
             "gutter_rect": ACTIVE_GUTTER.with(|c| c.borrow().as_ref().and_then(rect_in_window)),
             "repl_entry_rect": REPL_ENTRY.with(|c| c.borrow().as_ref().and_then(rect_in_window)),
+            "workspace_table_rect": WORKSPACE_TABLE.with(|c| c.borrow().as_ref().and_then(rect_in_window)),
+            "plots_add_rect": PLOTS_ADD.with(|c| c.borrow().as_ref().and_then(rect_in_window)),
         });
 
         let tmp = path.with_extension("json.tmp");

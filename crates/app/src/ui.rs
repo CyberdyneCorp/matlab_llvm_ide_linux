@@ -46,7 +46,8 @@ pub fn build(window: &ApplicationWindow, app: Rc<AppState>) {
     inner.set_resize_end_child(false);
     inner.set_shrink_start_child(false);
     inner.set_shrink_end_child(false);
-    inner.set_position(940);
+    // No fixed position: the editor expands, the right region keeps its size
+    // request (workspace + plots), so nothing overflows the window.
 
     // sidebar | (center|right) — draggable divider, sidebar keeps its size.
     let outer = Paned::new(Orientation::Horizontal);
@@ -60,10 +61,17 @@ pub fn build(window: &ApplicationWindow, app: Rc<AppState>) {
     outer.set_position(220);
     middle.append(&outer);
 
-    // Hide/show bindings — closing a panel hands its space to the editor.
+    // The whole right region is visible if either panel is; closing both hands
+    // the space to the editor.
     {
         let right = right.clone();
-        app.vm.layout.workspace_visible.bind(move |v| right.set_visible(*v));
+        let plots_vis = app.vm.layout.plots_visible.clone();
+        app.vm.layout.workspace_visible.bind(move |v| right.set_visible(*v || plots_vis.get()));
+    }
+    {
+        let right = right.clone();
+        let ws_vis = app.vm.layout.workspace_visible.clone();
+        app.vm.layout.plots_visible.bind(move |v| right.set_visible(*v || ws_vis.get()));
     }
     {
         let sidebar = sidebar.clone();
@@ -881,22 +889,41 @@ fn glib_stop() -> gtk::glib::Propagation {
 
 // ---- Right column (Workspace ⇄ Plots) -------------------------------------
 
-fn build_right_column(app: &Rc<AppState>) -> Notebook {
-    let nb = Notebook::new();
-    nb.set_size_request(380, -1);
-    nb.add_css_class("mf-panel");
-    nb.add_css_class("mf-border-left");
-    nb.append_page(&build_workspace(app), Some(&Label::new(Some("WORKSPACE"))));
-    nb.append_page(&build_plots(app), Some(&Label::new(Some("PLOTS"))));
+fn build_right_column(app: &Rc<AppState>) -> Paned {
+    // Workspace and Plots are separate, both-visible panels (like the macOS
+    // reference) — a draggable divider between them, each independently
+    // closable via its header ✕.
+    let workspace = build_workspace(app);
+    let plots = build_plots(app);
 
-    // Surface the LIVE badge: jump to Plots when a figure arrives.
-    let nb2 = nb.clone();
-    app.vm.plots.figures.subscribe(move |figs| {
-        if !figs.is_empty() {
-            nb2.set_current_page(Some(1));
-        }
-    });
-    nb
+    let paned = Paned::new(Orientation::Horizontal);
+    paned.set_wide_handle(true);
+    paned.set_size_request(620, -1);
+    paned.add_css_class("mf-border-left");
+    paned.set_start_child(Some(&workspace));
+    paned.set_end_child(Some(&plots));
+    paned.set_resize_start_child(true);
+    paned.set_resize_end_child(true);
+    paned.set_position(320);
+
+    {
+        let workspace = workspace.clone();
+        app.vm.layout.workspace_visible.bind(move |v| workspace.set_visible(*v));
+    }
+    {
+        let plots = plots.clone();
+        app.vm.layout.plots_visible.bind(move |v| plots.set_visible(*v));
+    }
+    // A new figure re-opens the Plots panel if it was closed.
+    {
+        let app = app.clone();
+        app.clone().vm.plots.figures.subscribe(move |figs| {
+            if !figs.is_empty() {
+                app.vm.layout.plots_visible.set(true);
+            }
+        });
+    }
+    paned
 }
 
 fn build_workspace(app: &Rc<AppState>) -> GtkBox {
@@ -922,6 +949,7 @@ fn build_workspace(app: &Rc<AppState>) -> GtkBox {
 
     // Table / empty-state stack.
     let table = ListBox::new();
+    crate::e2e::set_workspace_table(&table);
     let tscroll = ScrolledWindow::new();
     tscroll.set_vexpand(true);
     tscroll.set_child(Some(&table));
@@ -945,7 +973,8 @@ fn build_workspace(app: &Rc<AppState>) -> GtkBox {
                 let btn = ws_variable_row(v);
                 let app3 = app2.clone();
                 let name = v.name.clone();
-                btn.connect_clicked(move |_| app3.vm.workspace.select(name.clone()));
+                // Click selects + captures the value into the Matrix Viewer.
+                btn.connect_clicked(move |_| app3.inspect_variable(&name));
                 table.append(&btn);
             }
             body.set_visible_child_name(if vars.is_empty() { "empty" } else { "table" });
@@ -958,6 +987,16 @@ fn build_workspace(app: &Rc<AppState>) -> GtkBox {
     insp.append_page(&build_variable_inspector(app), Some(&Label::new(Some("VARIABLE INSPECTOR"))));
     insp.append_page(&build_matrix_viewer(app), Some(&Label::new(Some("MATRIX VIEWER"))));
     panel.append(&insp);
+
+    // When a value is captured, jump to the Matrix Viewer so it's visible.
+    {
+        let insp = insp.clone();
+        app.vm.workspace.inspected_matrix.subscribe(move |m| {
+            if m.is_some() {
+                insp.set_current_page(Some(1));
+            }
+        });
+    }
 
     panel
 }
@@ -1057,6 +1096,11 @@ fn build_plots(app: &Rc<AppState>) -> GtkBox {
     let panel = GtkBox::new(Orientation::Vertical, 4);
 
     let add = header_action(ic::ADD);
+    crate::e2e::set_plots_add(&add);
+    {
+        let app = app.clone();
+        add.connect_clicked(move |_| app.plot_inspected());
+    }
     let refresh = header_action(ic::REFRESH);
     let trash = header_action(ic::TRASH);
     let clear = header_action(ic::CLEAR);
@@ -1075,7 +1119,7 @@ fn build_plots(app: &Rc<AppState>) -> GtkBox {
     let close = header_action(ic::CLOSE);
     {
         let app = app.clone();
-        close.connect_clicked(move |_| app.vm.layout.workspace_visible.set(false));
+        close.connect_clicked(move |_| app.vm.layout.plots_visible.set(false));
     }
     panel.append(&panel_header("PLOTS", &[add, refresh, trash, clear, close]));
 

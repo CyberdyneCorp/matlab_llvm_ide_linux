@@ -81,6 +81,39 @@ impl AppState {
         }
     }
 
+    /// Select a workspace variable and capture its value into the Matrix Viewer
+    /// via a sentinel-wrapped `disp`. The value block is routed to the inspector
+    /// by `MainViewModel::feed_repl_line`.
+    pub fn inspect_variable(self: &Rc<Self>, name: &str) {
+        self.vm.workspace.select(name);
+        if self.ensure_repl() {
+            if let Some(session) = self.repl.borrow_mut().as_mut() {
+                let probe = format!(
+                    "disp('___MF_VAL_BEGIN___'); disp({name}); disp('___MF_VAL_END___')"
+                );
+                let _ = session.eval(&probe);
+            }
+        }
+    }
+
+    /// Plot the currently inspected workspace variable as a line series.
+    pub fn plot_inspected(self: &Rc<Self>) {
+        use matforge_core::models::{PlotFigure, PlotKind};
+        let Some(m) = self.vm.workspace.inspected_matrix.get() else {
+            self.vm.status_bar.set_message("Click a workspace variable first, then +");
+            return;
+        };
+        let ys: Vec<f64> = m.cells.iter().flatten().copied().collect();
+        if ys.is_empty() {
+            return;
+        }
+        let xs: Vec<f64> = (0..ys.len()).map(|i| i as f64).collect();
+        let index = self.vm.plots.figures.with(|f| f.len() as i32) + 1;
+        let fig = PlotFigure::series(index, m.title.clone(), PlotKind::Line2D, xs, ys)
+            .with_source(m.title.clone());
+        self.vm.plots.add(fig);
+    }
+
     // ---- DAP debugger ------------------------------------------------------
 
     /// Launch a debug session on the active tab's file.
@@ -146,6 +179,7 @@ impl AppState {
         self.vm.debug.terminate();
         self.vm.editor.clear_execution_lines();
         self.vm.toolbar.is_debugging.set(false);
+        self.vm.workspace.live.set(false);
     }
 
     /// Re-send the active tab's breakpoints if a debug session is live.
@@ -223,6 +257,9 @@ impl AppState {
                 if let Some(top) = frames.first() {
                     self.mark_exec_line(top);
                 }
+                // Mirror the frame's locals into the Workspace table too, like
+                // the macOS reference (in addition to the Debug panel's Locals).
+                self.vm.workspace.set_from_debug_locals(&locals);
                 self.vm.debug.on_stopped(frames, locals);
             }
             _ => {}

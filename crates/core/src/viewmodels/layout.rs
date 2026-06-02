@@ -33,7 +33,7 @@ impl LayoutViewModel {
             plots_width: Property::new(crate::theme::metrics::PLOTS_COLUMN_WIDTH),
             sidebar_visible: Property::new(true),
             workspace_visible: Property::new(true),
-            plots_visible: Property::new(false),
+            plots_visible: Property::new(true),
             center_mode: Property::new(CenterLayoutMode::Split),
         }
     }
@@ -73,7 +73,7 @@ impl LayoutViewModel {
         self.plots_width.set(crate::theme::metrics::PLOTS_COLUMN_WIDTH);
         self.sidebar_visible.set(true);
         self.workspace_visible.set(true);
-        self.plots_visible.set(false);
+        self.plots_visible.set(true);
         self.center_mode.set(CenterLayoutMode::Split);
     }
 }
@@ -86,7 +86,8 @@ mod tests {
     fn defaults() {
         let vm = LayoutViewModel::new();
         assert!(vm.workspace_visible.get());
-        assert!(!vm.plots_visible.get());
+        assert!(vm.plots_visible.get());
+        assert!(vm.sidebar_visible.get());
         assert_eq!(vm.center_mode.get(), CenterLayoutMode::Split);
     }
 
@@ -96,8 +97,7 @@ mod tests {
         vm.toggle_workspace();
         assert!(!vm.workspace_visible.get());
         vm.toggle_plots();
-        assert!(vm.plots_visible.get());
-        assert!(vm.sidebar_visible.get());
+        assert!(!vm.plots_visible.get());
         vm.toggle_sidebar();
         assert!(!vm.sidebar_visible.get());
     }

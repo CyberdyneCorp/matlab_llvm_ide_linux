@@ -76,11 +76,44 @@ def scenario_repl_workspace():
         app.close()
 
 
+def scenario_inspect_and_plot():
+    print("scenario: inspect a workspace variable and plot it")
+    if not os.path.exists(MATLABC):
+        check("inspect + plot (skipped: matlabc not found)", True, "skipped")
+        return
+    app = App(env_extra={"MATFORGE_OPEN": PROJ, "MATLABC_PATH": MATLABC})
+    try:
+        ex, ey, ew, eh = app.wait_rect("repl_entry_rect")
+        app.click_window(ex + ew // 2, ey + eh // 2)
+        app.type_text("M = [1 2 3 4]")
+        app.key("Return")
+        app.wait_for(lambda s: "M" in s.get("workspace", []), timeout=20, what="var M")
+
+        # Click the first workspace row (M) -> capture its value.
+        tx, ty, tw, th = app.wait_rect("workspace_table_rect")
+        app.click_window(tx + 30, ty + 12)
+        st = app.wait_for(lambda s: s.get("inspected_matrix"), timeout=15, what="value captured")
+        m = st["inspected_matrix"]
+        check("clicking a variable shows its value", m is not None and m["cols"] == 4,
+              f"inspected={m}")
+
+        # Click Plots '+' -> plot the inspected variable.
+        before = app.state().get("plots", 0)
+        px, py, pw, ph = app.wait_rect("plots_add_rect")
+        app.click_window(px + pw // 2, py + ph // 2)
+        st = app.wait_for(lambda s: s.get("plots", 0) > before, what="figure added")
+        check("plotting the variable adds a figure", st["plots"] > before,
+              f"plots={st['plots']}")
+    finally:
+        app.close()
+
+
 def main():
     setup_project()
     scenario_gutter_breakpoint()
     scenario_f9_breakpoint()
     scenario_repl_workspace()
+    scenario_inspect_and_plot()
     summary_and_exit()
 
 

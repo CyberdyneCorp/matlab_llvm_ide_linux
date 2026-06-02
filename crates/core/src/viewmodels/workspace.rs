@@ -3,7 +3,7 @@
 //! [`parsers`](crate::services::parsers) and exposes the table, selection,
 //! current heatmap matrix, and the live-REPL flag.
 
-use crate::models::{MatrixView, WorkspaceVariable};
+use crate::models::{DType, DapVariable, MatrixView, WorkspaceVariable};
 use crate::observable::Property;
 use crate::services::parsers;
 
@@ -33,6 +33,26 @@ impl WorkspaceViewModel {
     /// Replace the table from a captured `whos` block.
     pub fn update_from_whos(&self, text: &str) {
         self.variables.set(parsers::parse_workspace(text));
+    }
+
+    /// Mirror a paused debug frame's locals into the workspace table so the
+    /// variables are visible there too (matching the macOS reference). The DAP
+    /// shape hints (`indexed`/`named`) approximate the displayed size.
+    pub fn set_from_debug_locals(&self, locals: &[DapVariable]) {
+        let vars = locals
+            .iter()
+            .map(|v| {
+                let dtype = v.type_hint.as_deref().map(DType::from_class).unwrap_or(DType::Double);
+                let size = match (v.indexed_variables, v.named_variables) {
+                    (Some(n), _) if n > 0 => format!("{n} elems"),
+                    (_, Some(n)) if n > 0 => format!("{n} fields"),
+                    _ => "1x1".to_string(),
+                };
+                WorkspaceVariable::new(&v.name, dtype, size, 0).with_preview(v.value.clone())
+            })
+            .collect();
+        self.variables.set(vars);
+        self.live.set(true);
     }
 
     pub fn select(&self, name: impl Into<String>) {
@@ -86,6 +106,22 @@ mod tests {
         assert_eq!((m.rows, m.cols), (2, 3));
         assert_eq!(m.title, "M");
         assert_eq!(m.value_range(), Some((1.0, 6.0)));
+    }
+
+    #[test]
+    fn debug_locals_populate_workspace() {
+        let vm = WorkspaceViewModel::new();
+        let mut m = DapVariable::scalar("A", "2x2 double");
+        m.type_hint = Some("double".into());
+        m.indexed_variables = Some(4);
+        let locals = vec![DapVariable::scalar("x", "3"), m];
+        vm.set_from_debug_locals(&locals);
+        let vars = vm.variables.get();
+        assert_eq!(vars.len(), 2);
+        assert_eq!(vars[0].name, "x");
+        assert_eq!(vars[0].preview, "3");
+        assert_eq!(vars[1].size, "4 elems");
+        assert!(vm.live.get());
     }
 
     #[test]

@@ -89,6 +89,13 @@ impl ReplSession {
         )?;
         self.stdin.flush()
     }
+
+    /// Send a command verbatim with no workspace-sync probe — used for IDE
+    /// probes (e.g. value capture) that shouldn't trigger a `whos` refresh.
+    pub fn eval(&mut self, command: &str) -> std::io::Result<()> {
+        writeln!(self.stdin, "{command}")?;
+        self.stdin.flush()
+    }
 }
 
 impl Drop for ReplSession {
