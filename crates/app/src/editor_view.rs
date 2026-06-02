@@ -1,14 +1,18 @@
 //! A code editor surface: a `GtkTextView` with live syntax highlighting and a
 //! Cairo gutter (line numbers, breakpoint dots, the yellow ▶ execution marker).
-//! The gutter is a real sibling to the left of the text inside the scroller, so
-//! it receives clicks directly — clicking it (or pressing F9) toggles a
-//! breakpoint. All state lives in the view models; this only draws from them.
+//!
+//! Layout: `HBox[ gutter | ScrolledWindow[textview] ]`. The `TextView` is the
+//! *direct* child of the `ScrolledWindow` (it's a `GtkScrollable`, so this is
+//! required for correct sizing/scrolling). The gutter is a sibling `DrawingArea`
+//! to its left — it receives clicks directly (no overlap with the text) and
+//! redraws on scroll, mapping buffer↔window coordinates via the text view. All
+//! state lives in the view models; this only draws from them.
 
 use std::f64::consts::PI;
 use std::rc::Rc;
 
 use gtk::prelude::*;
-use gtk::{cairo, Box as GtkBox, DrawingArea, Orientation, ScrolledWindow, TextView};
+use gtk::{cairo, Box as GtkBox, DrawingArea, Orientation, ScrolledWindow, TextView, TextWindowType};
 
 use matforge_core::services::highlighter::Language;
 use matforge_core::theme::{code, palette};
@@ -18,18 +22,17 @@ use crate::highlight;
 
 const GUTTER_WIDTH: i32 = 52;
 
-/// Build the editor surface for a tab. Returns the scrollable widget.
+/// Build the editor surface for a tab. Returns the container widget.
 pub fn build_code_view(
     app: &Rc<AppState>,
     tab_id: u64,
     contents: &str,
     language: Language,
-) -> ScrolledWindow {
+) -> GtkBox {
     let view = TextView::new();
     view.set_monospace(true);
     view.add_css_class("mf-code");
-    view.set_left_margin(6);
-    view.set_hexpand(true);
+    view.set_left_margin(8);
     let buffer = view.buffer();
     buffer.set_text(contents);
     highlight::ensure_tags(&buffer);
@@ -56,9 +59,16 @@ pub fn build_code_view(
         });
     }
 
-    // Gutter — a sibling to the left of the text, scrolled together with it.
+    // TextView is the direct scrollable child of the ScrolledWindow.
+    let scroll = ScrolledWindow::new();
+    scroll.set_child(Some(&view));
+    scroll.set_hexpand(true);
+    scroll.set_vexpand(true);
+
+    // Gutter sits beside the scroller, filling the viewport height.
     let gutter = DrawingArea::new();
     gutter.set_width_request(GUTTER_WIDTH);
+    gutter.set_vexpand(true);
     gutter.add_css_class("mf-gutter");
     {
         let view = view.clone();
@@ -66,15 +76,11 @@ pub fn build_code_view(
         gutter.set_draw_func(move |_a, ctx, _w, h| draw_gutter(ctx, h, &view, &app, tab_id));
     }
 
-    let hbox = GtkBox::new(Orientation::Horizontal, 0);
-    hbox.append(&gutter);
-    hbox.append(&view);
-
-    let scroll = ScrolledWindow::new();
-    scroll.set_child(Some(&hbox));
-    scroll.set_vexpand(true);
-
-    // Redraw the gutter on edits and when breakpoints / the exec line change.
+    // Redraw the gutter on scroll, on edits, and when bp/exec state changes.
+    {
+        let gutter = gutter.clone();
+        scroll.vadjustment().connect_value_changed(move |_| gutter.queue_draw());
+    }
     {
         let gutter = gutter.clone();
         buffer.connect_changed(move |_| gutter.queue_draw());
@@ -102,20 +108,23 @@ pub fn build_code_view(
         });
     }
 
-    // Click the gutter to toggle a breakpoint at the clicked line.
+    // Click the gutter to toggle a breakpoint at the clicked line. The gutter
+    // shares the text view's vertical position, so the click y is a widget
+    // window-y; convert it to a buffer y and resolve the line.
     let click = gtk::GestureClick::new();
     {
         let view = view.clone();
         let app = app.clone();
         let gutter2 = gutter.clone();
         click.connect_released(move |_g, _n, _x, y| {
-            // The gutter shares the text's vertical coordinate space, so y is a
-            // buffer y; sample the line at a small positive content x.
-            if let Some(it) = view.iter_at_location(1, y as i32) {
-                app.vm.editor.toggle_breakpoint(tab_id, it.line() as usize + 1);
-                app.refresh_breakpoints();
-                gutter2.queue_draw();
-            }
+            // The gutter shares the text view's vertical position; convert the
+            // click y to a buffer y and resolve the line (x-independent, so a
+            // click in the gutter margin still maps to the right line).
+            let (_, by) = view.window_to_buffer_coords(TextWindowType::Widget, 0, y as i32);
+            let (iter, _) = view.line_at_y(by);
+            app.vm.editor.toggle_breakpoint(tab_id, iter.line() as usize + 1);
+            app.refresh_breakpoints();
+            gutter2.queue_draw();
         });
     }
     gutter.add_controller(click);
@@ -140,7 +149,10 @@ pub fn build_code_view(
     }
     view.add_controller(keys);
 
-    scroll
+    let hbox = GtkBox::new(Orientation::Horizontal, 0);
+    hbox.append(&gutter);
+    hbox.append(&scroll);
+    hbox
 }
 
 fn draw_gutter(ctx: &cairo::Context, height: i32, view: &TextView, app: &Rc<AppState>, tab_id: u64) {
@@ -157,12 +169,13 @@ fn draw_gutter(ctx: &cairo::Context, height: i32, view: &TextView, app: &Rc<AppS
 
     for line in 0..line_count {
         let Some(iter) = buffer.iter_at_line(line) else { continue };
-        // The gutter scrolls with the text, so buffer y == gutter draw y.
-        let (y, lh) = view.line_yrange(&iter);
-        if y + lh < 0 || y > height {
-            continue;
+        let (by, lh) = view.line_yrange(&iter);
+        // Map the buffer y to an on-screen (widget window) y, accounting for scroll.
+        let (_, wy) = view.buffer_to_window_coords(TextWindowType::Widget, 0, by);
+        if wy + lh < 0 || wy > height {
+            continue; // off-screen
         }
-        let yf = y as f64;
+        let yf = wy as f64;
         let center = yf + lh as f64 / 2.0;
         let one_indexed = line as usize + 1;
         let is_exec = tab.execution_line == Some(one_indexed);
