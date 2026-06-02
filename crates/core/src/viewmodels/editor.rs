@@ -11,6 +11,9 @@ use crate::services::filesystem::FileSystem;
 pub struct EditorViewModel {
     pub tabs: Property<Vec<EditorTab>>,
     pub active_id: Property<Option<u64>>,
+    /// A `(tab_id, line)` jump request (1-indexed) — e.g. clicking a diagnostic
+    /// in the PROBLEMS pane. The code view scrolls + places the cursor.
+    pub goto_request: Property<Option<(u64, usize)>>,
 }
 
 impl Default for EditorViewModel {
@@ -21,7 +24,17 @@ impl Default for EditorViewModel {
 
 impl EditorViewModel {
     pub fn new() -> EditorViewModel {
-        EditorViewModel { tabs: Property::new(Vec::new()), active_id: Property::new(None) }
+        EditorViewModel {
+            tabs: Property::new(Vec::new()),
+            active_id: Property::new(None),
+            goto_request: Property::new(None),
+        }
+    }
+
+    /// Ask the view to scroll to a 1-indexed line in a tab.
+    pub fn request_goto(&self, tab_id: u64, line: usize) {
+        self.set_active(tab_id);
+        self.goto_request.set(Some((tab_id, line)));
     }
 
     /// Add a text tab and focus it; returns its id.
@@ -227,6 +240,17 @@ mod tests {
         assert!(vm.active_tab().unwrap().breakpoints.contains_key(&3));
         vm.toggle_breakpoint(id, 3);
         assert!(vm.active_tab().unwrap().breakpoints.is_empty());
+    }
+
+    #[test]
+    fn request_goto_sets_active_and_request() {
+        let vm = EditorViewModel::new();
+        let a = vm.open_text("a", "Matlab", "");
+        let b = vm.open_text("b", "Matlab", "");
+        vm.set_active(a);
+        vm.request_goto(b, 7);
+        assert_eq!(vm.active_id.get(), Some(b));
+        assert_eq!(vm.goto_request.get(), Some((b, 7)));
     }
 
     #[test]

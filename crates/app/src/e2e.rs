@@ -77,6 +77,10 @@ pub fn install_state_dump(app: Rc<AppState>, path: PathBuf) {
                 m.as_ref().map(|mm| json!({"title": mm.title, "rows": mm.rows, "cols": mm.cols}))
             }),
             "plots": app.vm.plots.figures.with(|f| f.len()),
+            "problems": app.vm.console.problems.with(|p| p.len()),
+            "console": app.vm.console.messages.with(|m| m.len()),
+            "watch": app.vm.debug.evaluations.with(|e| e.len()),
+            "function_breakpoints": app.vm.breakpoints.function_bps.with(|b| b.len()),
             "status": app.vm.status_bar.state.with(|s| s.message.clone()),
             "sidebar_visible": app.vm.layout.sidebar_visible.get(),
             "right_visible": app.vm.layout.workspace_visible.get(),

@@ -108,6 +108,23 @@ pub fn build_code_view(
         });
     }
 
+    // Jump to a requested line (e.g. clicking a PROBLEMS diagnostic).
+    {
+        let view = view.clone();
+        let buffer = buffer.clone();
+        app.vm.editor.goto_request.subscribe(move |req| {
+            if let Some((tid, line)) = req {
+                if *tid == tab_id {
+                    if let Some(mut it) = buffer.iter_at_line(*line as i32 - 1) {
+                        buffer.place_cursor(&it);
+                        view.scroll_to_iter(&mut it, 0.2, false, 0.0, 0.0);
+                        view.grab_focus();
+                    }
+                }
+            }
+        });
+    }
+
     // Click the gutter to toggle a breakpoint at the clicked line. The gutter
     // shares the text view's vertical position, so the click y is a widget
     // window-y; convert it to a buffer y and resolve the line.

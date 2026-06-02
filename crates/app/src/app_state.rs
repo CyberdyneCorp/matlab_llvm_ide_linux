@@ -3,6 +3,7 @@
 //! turns decoded adapter messages into `DebugViewModel` updates.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -23,6 +24,8 @@ pub struct AppState {
     dbg_frames: RefCell<Vec<DapStackFrame>>,
     dbg_thread: RefCell<i64>,
     dbg_file: RefCell<Option<PathBuf>>,
+    /// Pending watch evaluations: DAP request seq → expression.
+    dbg_watch_pending: RefCell<HashMap<i64, String>>,
 }
 
 impl AppState {
@@ -35,6 +38,7 @@ impl AppState {
             dbg_frames: RefCell::new(Vec::new()),
             dbg_thread: RefCell::new(1),
             dbg_file: RefCell::new(None),
+            dbg_watch_pending: RefCell::new(HashMap::new()),
         })
     }
 
@@ -177,6 +181,23 @@ impl AppState {
         }
     }
 
+    /// Evaluate a watch expression against the paused top frame.
+    pub fn evaluate_watch(self: &Rc<Self>, expr: &str) {
+        let Some(fid) = self.dbg_frames.borrow().first().map(|f| f.id) else {
+            self.vm.console.log(ConsoleLevel::Warning, "Not paused — can't evaluate a watch");
+            return;
+        };
+        if let Some(session) = self.dap.borrow_mut().as_mut() {
+            let frame = session.client.request(
+                "evaluate",
+                Some(json!({ "expression": expr, "frameId": fid, "context": "watch" })),
+            );
+            let seq = session.client.last_seq();
+            let _ = session.write_frame(&frame);
+            self.dbg_watch_pending.borrow_mut().insert(seq, expr.to_string());
+        }
+    }
+
     /// Tear down any running debug session.
     pub fn stop_debug(self: &Rc<Self>) {
         if self.dap.borrow().is_some() {
@@ -194,6 +215,37 @@ impl AppState {
         if self.dap.borrow().is_some() {
             self.send_breakpoints();
         }
+    }
+
+    /// Push the function breakpoints to a live adapter.
+    pub fn send_function_breakpoints(self: &Rc<Self>) {
+        if self.dap.borrow().is_none() {
+            return;
+        }
+        let bps: Vec<Value> = self.vm.breakpoints.function_bps.with(|list| {
+            list.iter()
+                .filter(|bp| bp.enabled)
+                .map(|bp| {
+                    let mut v = json!({ "name": bp.name });
+                    if let Some(c) = &bp.condition {
+                        v["condition"] = json!(c);
+                    }
+                    v
+                })
+                .collect()
+        });
+        self.send_request("setFunctionBreakpoints", Some(json!({ "breakpoints": bps })));
+    }
+
+    /// Push the enabled exception filters to a live adapter.
+    pub fn send_exception_breakpoints(self: &Rc<Self>) {
+        if self.dap.borrow().is_none() {
+            return;
+        }
+        let filters: Vec<String> = self.vm.breakpoints.exception_filters.with(|list| {
+            list.iter().filter(|f| f.enabled).map(|f| f.filter.clone()).collect()
+        });
+        self.send_request("setExceptionBreakpoints", Some(json!({ "filters": filters })));
     }
 
     fn send_request(self: &Rc<Self>, command: &str, args: Option<Value>) {
@@ -220,19 +272,27 @@ impl AppState {
             return;
         }
         match parse_message(body) {
-            Some(DapMessage::Response { command, success, body, .. }) => {
-                self.on_dap_response(&command, success, &body)
+            Some(DapMessage::Response { request_seq, command, success, body }) => {
+                self.on_dap_response(request_seq, &command, success, &body)
             }
             Some(DapMessage::Event { event, body }) => self.on_dap_event(&event, &body),
             _ => {}
         }
     }
 
-    fn on_dap_response(self: &Rc<Self>, command: &str, success: bool, body: &Value) {
+    fn on_dap_response(self: &Rc<Self>, request_seq: i64, command: &str, success: bool, body: &Value) {
         if !success && command != "disconnect" {
+            // A failed watch still resolves its pending slot.
+            self.dbg_watch_pending.borrow_mut().remove(&request_seq);
             return;
         }
         match command {
+            "evaluate" => {
+                if let Some(expr) = self.dbg_watch_pending.borrow_mut().remove(&request_seq) {
+                    let result = body.get("result").and_then(Value::as_str).unwrap_or("").to_string();
+                    self.vm.debug.add_evaluation(expr, result);
+                }
+            }
             "initialize" => {
                 let data_bp = body.get("supportsDataBreakpoints").and_then(Value::as_bool).unwrap_or(false);
                 let step_back = body.get("supportsStepBack").and_then(Value::as_bool).unwrap_or(false);

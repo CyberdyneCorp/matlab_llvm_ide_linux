@@ -125,8 +125,27 @@ def scenario_repl_plot():
         app.close()
 
 
+def scenario_problems_pane():
+    print("scenario: compiling a bad file populates PROBLEMS")
+    if not os.path.exists(MATLABC):
+        check("PROBLEMS (skipped: matlabc not found)", True, "skipped")
+        return
+    bad = os.path.join(PROJ, "bad.m")
+    with open(bad, "w") as f:
+        f.write("x = 1 + + undefined_name_zzz;\n")
+    app = App(env_extra={"MATFORGE_OPEN": PROJ, "MATFORGE_FILE": bad,
+                         "MATFORGE_COMPILE": "1", "MATLABC_PATH": MATLABC})
+    try:
+        st = app.wait_for(lambda s: s.get("problems", 0) > 0, timeout=20, what="diagnostics")
+        check("a bad compile adds PROBLEMS diagnostics", st["problems"] > 0,
+              f"problems={st['problems']}")
+    finally:
+        app.close()
+
+
 def main():
     setup_project()
+    scenario_problems_pane()
     scenario_gutter_breakpoint()
     scenario_f9_breakpoint()
     scenario_repl_workspace()

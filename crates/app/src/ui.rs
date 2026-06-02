@@ -14,6 +14,7 @@ use gtk::{
 use matforge_core::models::{
     CompilerTarget, ConsoleLevel, NodeFileKind, NumericMode, OptimizationProfile, ProjectNode,
 };
+use matforge_core::services::compiler::DiagnosticLevel;
 use matforge_core::services::highlighter::Language;
 use matforge_core::viewmodels::{ActivityItem, DebugState, FlowchartViewModel};
 
@@ -558,7 +559,7 @@ fn file_icon_class(kind: NodeFileKind) -> &'static str {
     }
 }
 
-fn build_debug_panel(app: &Rc<AppState>) -> GtkBox {
+fn build_debug_panel(app: &Rc<AppState>) -> ScrolledWindow {
     let panel = GtkBox::new(Orientation::Vertical, 4);
     panel.append(&section_header("DEBUG"));
 
@@ -606,13 +607,93 @@ fn build_debug_panel(app: &Rc<AppState>) -> GtkBox {
         });
     });
 
+    // Exception filters (built once — the adapter ships a static set).
+    panel.append(&sub_header("FILTERS"));
+    for f in app.vm.breakpoints.exception_filters.get() {
+        let cb = gtk::CheckButton::with_label(&f.label);
+        cb.set_margin_start(8);
+        cb.set_active(f.enabled);
+        let app = app.clone();
+        let filter = f.filter.clone();
+        cb.connect_toggled(move |c| {
+            app.vm.breakpoints.set_exception_enabled(&filter, c.is_active());
+            app.send_exception_breakpoints();
+        });
+        panel.append(&cb);
+    }
+
+    // Function breakpoints.
+    panel.append(&sub_header("FUNCTION BREAKPOINTS"));
+    let fn_entry = panel_entry("function name + Enter");
+    {
+        let app = app.clone();
+        let e = fn_entry.clone();
+        fn_entry.connect_activate(move |_| {
+            let name = e.text().to_string();
+            if !name.trim().is_empty() {
+                app.vm.breakpoints.add_function(name.trim());
+                app.send_function_breakpoints();
+                e.set_text("");
+            }
+        });
+    }
+    panel.append(&fn_entry);
+    let fn_list = ListBox::new();
+    panel.append(&fn_list);
+    {
+        let app = app.clone();
+        app.clone().vm.breakpoints.function_bps.bind(move |bps| {
+            clear_list(&fn_list);
+            for bp in bps {
+                let row = GtkBox::new(Orientation::Horizontal, 4);
+                row.set_margin_start(8);
+                let lbl = Label::new(Some(&bp.name));
+                lbl.set_hexpand(true);
+                lbl.set_halign(gtk::Align::Start);
+                let rm = Button::with_label("✕");
+                rm.set_has_frame(false);
+                rm.add_css_class("mf-header-action");
+                let app = app.clone();
+                let id = bp.id;
+                rm.connect_clicked(move |_| {
+                    app.vm.breakpoints.remove_function(id);
+                    app.send_function_breakpoints();
+                });
+                row.append(&lbl);
+                row.append(&rm);
+                fn_list.append(&row);
+            }
+        });
+    }
+
+    // Line breakpoints across all tabs (click to jump).
+    panel.append(&sub_header("BREAKPOINTS"));
+    let bp_list = ListBox::new();
+    panel.append(&bp_list);
+    {
+        let app = app.clone();
+        app.clone().vm.editor.tabs.bind(move |tabs| {
+            clear_list(&bp_list);
+            for t in tabs {
+                for line in t.breakpoints.keys() {
+                    let btn = Button::with_label(&format!("● {}:{}", t.name, line));
+                    btn.set_has_frame(false);
+                    btn.set_halign(gtk::Align::Start);
+                    btn.add_css_class("mf-row");
+                    let app = app.clone();
+                    let id = t.id;
+                    let line = *line;
+                    btn.connect_clicked(move |_| app.vm.editor.request_goto(id, line));
+                    bp_list.append(&btn);
+                }
+            }
+        });
+    }
+
     // Call stack.
     panel.append(&sub_header("CALL STACK"));
     let stack_list = ListBox::new();
-    let stack_scroll = ScrolledWindow::new();
-    stack_scroll.set_min_content_height(120);
-    stack_scroll.set_child(Some(&stack_list));
-    panel.append(&stack_scroll);
+    panel.append(&stack_list);
     app.vm.debug.stack_frames.bind(move |frames| {
         clear_list(&stack_list);
         for f in frames {
@@ -624,10 +705,7 @@ fn build_debug_panel(app: &Rc<AppState>) -> GtkBox {
     // Locals.
     panel.append(&sub_header("LOCALS"));
     let locals_list = ListBox::new();
-    let locals_scroll = ScrolledWindow::new();
-    locals_scroll.set_vexpand(true);
-    locals_scroll.set_child(Some(&locals_list));
-    panel.append(&locals_scroll);
+    panel.append(&locals_list);
     app.vm.debug.locals.bind(move |locals| {
         clear_list(&locals_list);
         for v in locals {
@@ -636,7 +714,42 @@ fn build_debug_panel(app: &Rc<AppState>) -> GtkBox {
         }
     });
 
-    panel
+    // Watch.
+    panel.append(&sub_header("WATCH"));
+    let watch_entry = panel_entry("expression + Enter");
+    {
+        let app = app.clone();
+        let e = watch_entry.clone();
+        watch_entry.connect_activate(move |_| {
+            let expr = e.text().to_string();
+            if !expr.trim().is_empty() {
+                app.evaluate_watch(expr.trim());
+                e.set_text("");
+            }
+        });
+    }
+    panel.append(&watch_entry);
+    let watch_list = ListBox::new();
+    panel.append(&watch_list);
+    app.vm.debug.evaluations.bind(move |evals| {
+        clear_list(&watch_list);
+        for ev in evals {
+            watch_list.append(&row_label(&format!("{} = {}", ev.expression, ev.result)));
+        }
+    });
+
+    let scroll = ScrolledWindow::new();
+    scroll.set_vexpand(true);
+    scroll.set_child(Some(&panel));
+    scroll
+}
+
+fn panel_entry(placeholder: &str) -> Entry {
+    let e = Entry::new();
+    e.set_placeholder_text(Some(placeholder));
+    e.set_margin_start(8);
+    e.set_margin_end(8);
+    e
 }
 
 // ---- Center (editor + console) --------------------------------------------
@@ -777,10 +890,17 @@ fn build_console(app: &Rc<AppState>) -> GtkBox {
     let nb = Notebook::new();
     nb.set_vexpand(true);
 
+    // CONSOLE — color-coded transcript.
     let console_view = TextView::new();
     console_view.set_monospace(true);
     console_view.set_editable(false);
     console_view.add_css_class("mf-code");
+    let cbuf = console_view.buffer();
+    for (name, color) in console_tag_colors() {
+        if cbuf.tag_table().lookup(name).is_none() {
+            cbuf.create_tag(Some(name), &[("foreground", &color.to_css())]);
+        }
+    }
     let console_scroll = ScrolledWindow::new();
     console_scroll.set_child(Some(&console_view));
     nb.append_page(&console_scroll, Some(&Label::new(Some("CONSOLE"))));
@@ -789,16 +909,12 @@ fn build_console(app: &Rc<AppState>) -> GtkBox {
         let app = app.clone();
         let buf = console_view.buffer();
         move || {
-            let mut text = String::new();
-            for m in app.vm.console.messages.get() {
-                text.push_str(&m.text);
-                text.push('\n');
+            buf.set_text("");
+            let all = app.vm.console.messages.get().into_iter().chain(app.vm.repl.transcript.get());
+            for m in all {
+                let mut end = buf.end_iter();
+                buf.insert_with_tags_by_name(&mut end, &format!("{}\n", m.text), &[level_tag(m.level)]);
             }
-            for m in app.vm.repl.transcript.get() {
-                text.push_str(&m.text);
-                text.push('\n');
-            }
-            buf.set_text(&text);
         }
     };
     {
@@ -810,10 +926,44 @@ fn build_console(app: &Rc<AppState>) -> GtkBox {
         app.vm.repl.transcript.subscribe(move |_| render());
     }
 
+    // PROBLEMS — clickable diagnostics that jump to the source line.
+    let problems = ListBox::new();
+    let problems_scroll = ScrolledWindow::new();
+    problems_scroll.set_child(Some(&problems));
+    nb.append_page(&problems_scroll, Some(&Label::new(Some("PROBLEMS"))));
+    {
+        let app = app.clone();
+        app.clone().vm.console.problems.bind(move |diags| {
+            clear_list(&problems);
+            for d in diags {
+                let (icon, cls) = match d.level {
+                    DiagnosticLevel::Error => ("✕", "mf-log-error"),
+                    DiagnosticLevel::Warning => ("▲", "mf-log-warning"),
+                    DiagnosticLevel::Note => ("ℹ", "mf-text-secondary"),
+                };
+                let file = std::path::Path::new(&d.file)
+                    .file_name()
+                    .map(|f| f.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| d.file.clone());
+                let btn = Button::with_label(&format!("{icon}  {file}:{}:{}   {}", d.line, d.column, d.message));
+                btn.set_has_frame(false);
+                btn.set_halign(gtk::Align::Start);
+                btn.add_css_class("mf-row");
+                btn.add_css_class(cls);
+                let app = app.clone();
+                let path = d.file.clone();
+                let line = d.line;
+                btn.connect_clicked(move |_| goto_problem(&app, &path, line));
+                problems.append(&btn);
+            }
+        });
+    }
+
+    // Artifact panes (LLVM IR / C++ / …) appear after CONSOLE + PROBLEMS.
     {
         let nb_artifacts = nb.clone();
         app.vm.console.artifacts.subscribe(move |artifacts| {
-            while nb_artifacts.n_pages() > 1 {
+            while nb_artifacts.n_pages() > 2 {
                 nb_artifacts.remove_page(Some(nb_artifacts.n_pages() - 1));
             }
             for (tab, text) in artifacts {
@@ -885,6 +1035,46 @@ fn build_console(app: &Rc<AppState>) -> GtkBox {
 
 fn glib_stop() -> gtk::glib::Propagation {
     gtk::glib::Propagation::Stop
+}
+
+/// GtkTextTag name for a console message level.
+fn level_tag(level: ConsoleLevel) -> &'static str {
+    match level {
+        ConsoleLevel::Error => "lvl-error",
+        ConsoleLevel::Warning => "lvl-warning",
+        ConsoleLevel::Success => "lvl-success",
+        ConsoleLevel::Command => "lvl-command",
+        ConsoleLevel::Debug => "lvl-debug",
+        ConsoleLevel::Info => "lvl-info",
+        ConsoleLevel::Plain => "lvl-plain",
+    }
+}
+
+fn console_tag_colors() -> [(&'static str, matforge_core::theme::Rgb); 7] {
+    use matforge_core::theme::palette as p;
+    [
+        ("lvl-error", p::ACCENT_RED),
+        ("lvl-warning", p::ACCENT_YELLOW),
+        ("lvl-success", p::ACCENT_GREEN),
+        ("lvl-command", p::TEXT_SECONDARY),
+        ("lvl-debug", p::TEXT_MUTED),
+        ("lvl-info", p::ACCENT_CYAN),
+        ("lvl-plain", p::TEXT_PRIMARY),
+    ]
+}
+
+/// Open the diagnostic's file (if needed) and scroll to its line.
+fn goto_problem(app: &Rc<AppState>, file: &str, line: usize) {
+    let path = std::path::Path::new(file);
+    open_file_in_editor(app, path);
+    if let Some(id) = app
+        .vm
+        .editor
+        .tabs
+        .with(|ts| ts.iter().find(|t| t.url.as_deref() == Some(path)).map(|t| t.id))
+    {
+        app.vm.editor.request_goto(id, line);
+    }
 }
 
 // ---- Right column (Workspace ⇄ Plots) -------------------------------------
