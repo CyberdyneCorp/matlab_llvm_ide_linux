@@ -245,13 +245,30 @@ fn build_markdown_container(buffer: &gtk::TextBuffer, editor: GtkBox) -> GtkBox 
     }
 
     let paned = gtk::Paned::new(Orientation::Horizontal);
+    paned.add_css_class("mf-md-split");
     paned.set_start_child(Some(&editor));
     paned.set_end_child(Some(&preview_scroll));
     paned.set_resize_start_child(true);
     paned.set_resize_end_child(true);
+    // Let either side shrink past its natural width so the editor's long lines
+    // don't claim most of the space and squeeze the preview to a sliver.
+    paned.set_shrink_start_child(true);
+    paned.set_shrink_end_child(true);
     paned.set_wide_handle(true);
     paned.set_vexpand(true);
     paned.set_hexpand(true);
+
+    // Split 50/50 once the real width is known (the allocation isn't available
+    // at build time); after that GTK keeps the proportion and the user can drag.
+    paned.add_tick_callback(|p, _| {
+        let w = p.width();
+        if w > 1 {
+            p.set_position(w / 2);
+            gtk::glib::ControlFlow::Break
+        } else {
+            gtk::glib::ControlFlow::Continue
+        }
+    });
 
     // Header: a linked Edit / Split / Preview toggle.
     let edit_btn = gtk::ToggleButton::with_label("Edit");
