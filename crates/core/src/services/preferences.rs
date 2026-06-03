@@ -222,4 +222,27 @@ mod tests {
         assert_eq!(back.appearance.accent_enum(), Accent::Violet);
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn config_path_save_and_load_via_xdg() {
+        // Point the config dir at a temp location and exercise the default-path
+        // helpers (config_path → save → load).
+        let dir = std::env::temp_dir().join(format!("mf_xdg_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::env::set_var("XDG_CONFIG_HOME", &dir);
+
+        let path = Preferences::config_path().expect("config path");
+        assert!(path.ends_with("matforge/config.toml"));
+
+        let mut p = Preferences::default();
+        p.push_recent("/proj/a");
+        p.save().expect("save");
+        assert!(path.exists());
+
+        let loaded = Preferences::load();
+        assert_eq!(loaded.recent, vec!["/proj/a".to_string()]);
+
+        std::env::remove_var("XDG_CONFIG_HOME");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

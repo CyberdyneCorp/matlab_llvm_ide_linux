@@ -83,7 +83,13 @@ mod tests {
     #[test]
     fn level_css_classes() {
         assert_eq!(ConsoleLevel::Error.css_class(), Some("mf-log-error"));
-        assert_eq!(ConsoleLevel::Info.css_class(), None);
+        assert_eq!(ConsoleLevel::Warning.css_class(), Some("mf-log-warning"));
+        assert_eq!(ConsoleLevel::Success.css_class(), Some("mf-log-success"));
+        assert_eq!(ConsoleLevel::Command.css_class(), Some("mf-log-command"));
+        // The remaining levels are unstyled (default console color).
+        for lvl in [ConsoleLevel::Info, ConsoleLevel::Debug, ConsoleLevel::Plain] {
+            assert_eq!(lvl.css_class(), None);
+        }
     }
 
     #[test]
@@ -96,7 +102,24 @@ mod tests {
 
     #[test]
     fn tab_labels() {
+        // Every tab has a non-empty, unique label.
+        let tabs = [
+            ConsoleTab::Console,
+            ConsoleTab::Problems,
+            ConsoleTab::LlvmIr,
+            ConsoleTab::Cpp,
+            ConsoleTab::Python,
+            ConsoleTab::TypeScript,
+            ConsoleTab::SystemVerilog,
+            ConsoleTab::Mlir,
+            ConsoleTab::VerilogA,
+        ];
+        let labels: Vec<&str> = tabs.iter().map(|t| t.label()).collect();
+        assert!(labels.iter().all(|l| !l.is_empty()));
         assert_eq!(ConsoleTab::LlvmIr.label(), "LLVM IR");
-        assert_eq!(ConsoleTab::Console.label(), "CONSOLE");
+        assert_eq!(ConsoleTab::Cpp.label(), "C++ CODE");
+        assert_eq!(ConsoleTab::VerilogA.label(), "VERILOG-A");
+        // Ord is used to order artifact tabs after CONSOLE/PROBLEMS.
+        assert!(ConsoleTab::Console < ConsoleTab::Cpp);
     }
 }

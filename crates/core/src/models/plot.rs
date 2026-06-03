@@ -104,7 +104,22 @@ mod tests {
 
     #[test]
     fn kind_labels() {
-        assert_eq!(PlotKind::Spectrum.label(), "Spectrum (area)");
         assert_eq!(PlotKind::ALL.len(), 8);
+        // Every kind has a distinct, non-empty label.
+        let labels: Vec<&str> = PlotKind::ALL.iter().map(|k| k.label()).collect();
+        assert!(labels.iter().all(|l| !l.is_empty()));
+        let mut sorted = labels.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), labels.len(), "labels must be unique");
+        assert_eq!(PlotKind::Surface3D.label(), "Surface (3D)");
+    }
+
+    #[test]
+    fn rendered_figure_uses_png() {
+        let mut f = PlotFigure::series(2, "F", PlotKind::Rendered, vec![], vec![]);
+        assert!(!f.is_rendered());
+        f.png_data = Some(vec![0x89, 0x50]);
+        assert!(f.is_rendered());
     }
 }

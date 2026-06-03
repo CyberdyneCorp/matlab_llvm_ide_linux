@@ -32,6 +32,26 @@ impl Rgb {
         (self.r as f64 / 255.0, self.g as f64 / 255.0, self.b as f64 / 255.0)
     }
 
+    /// WCAG relative luminance (0.0 black … 1.0 white).
+    pub fn relative_luminance(self) -> f64 {
+        fn lin(c: u8) -> f64 {
+            let c = c as f64 / 255.0;
+            if c <= 0.03928 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        }
+        0.2126 * lin(self.r) + 0.7152 * lin(self.g) + 0.0722 * lin(self.b)
+    }
+
+    /// WCAG contrast ratio between two colors (1.0 = identical … 21.0 = black/white).
+    pub fn contrast(self, other: Rgb) -> f64 {
+        let (a, b) = (self.relative_luminance(), other.relative_luminance());
+        let (hi, lo) = if a >= b { (a, b) } else { (b, a) };
+        (hi + 0.05) / (lo + 0.05)
+    }
+
     /// Linear sRGB interpolation: `t = 0` → `self`, `t = 1` → `other`.
     /// Used by the matrix viewer's cold→hot heatmap gradient. `t` is clamped.
     pub fn blend(self, other: Rgb, t: f64) -> Rgb {
@@ -467,6 +487,56 @@ mod tests {
     fn hex_splits_channels() {
         let c = Rgb::hex(0x121A26);
         assert_eq!((c.r, c.g, c.b), (0x12, 0x1A, 0x26));
+    }
+
+    #[test]
+    fn contrast_extremes() {
+        let black = Rgb::hex(0x000000);
+        let white = Rgb::hex(0xFFFFFF);
+        assert!((black.contrast(white) - 21.0).abs() < 0.1);
+        assert!((white.contrast(white) - 1.0).abs() < 0.01);
+    }
+
+    /// No theme should render text that's hard to read on its own surfaces —
+    /// guards against the "text not visible" regressions across all themes.
+    #[test]
+    fn every_theme_has_readable_text() {
+        for id in ThemeId::ALL {
+            let t = ThemeTokens::for_id(id);
+            let surfaces = [
+                ("panel", t.panel),
+                ("panel_alt", t.panel_alt),
+                ("card", t.card),
+                ("window_background", t.window_background),
+                ("chrome", t.chrome),
+                ("editor_bg", t.editor_bg),
+            ];
+            for (name, bg) in surfaces {
+                // Primary text must clearly stand out (WCAG AA body ≈ 4.5).
+                assert!(
+                    t.text_primary.contrast(bg) >= 4.5,
+                    "{id:?}: text_primary on {name} contrast {:.2} < 4.5",
+                    t.text_primary.contrast(bg)
+                );
+                // Secondary / muted are large-text/UI-chrome (AA large ≈ 3.0).
+                assert!(
+                    t.text_secondary.contrast(bg) >= 3.0,
+                    "{id:?}: text_secondary on {name} contrast {:.2} < 3.0",
+                    t.text_secondary.contrast(bg)
+                );
+                assert!(
+                    t.text_muted.contrast(bg) >= 2.4,
+                    "{id:?}: text_muted on {name} contrast {:.2} < 2.4",
+                    t.text_muted.contrast(bg)
+                );
+            }
+            // The matrix-retro terminal: green on its own black must be legible.
+            assert!(
+                t.term_fg.contrast(t.term_bg) >= 4.5,
+                "{id:?}: terminal text contrast {:.2} < 4.5",
+                t.term_fg.contrast(t.term_bg)
+            );
+        }
     }
 
     #[test]

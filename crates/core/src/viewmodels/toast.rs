@@ -48,4 +48,11 @@ mod tests {
         vm.clear();
         assert_eq!(vm.message.get(), None);
     }
+
+    #[test]
+    fn default_is_empty() {
+        let vm = ToastViewModel::default();
+        assert_eq!(vm.message.get(), None);
+        assert_eq!(vm.revision.get(), 0);
+    }
 }

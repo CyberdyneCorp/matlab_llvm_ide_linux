@@ -304,6 +304,27 @@ mod tests {
     }
 
     #[test]
+    fn every_category_has_label_accent_and_one_dialect() {
+        use NodeCategory::*;
+        let all = [
+            ControlFlow, Data, Io, Functions, Matrix, Other,
+            SignalSources, SignalSinks, SignalContinuous, SignalDiscrete,
+            SignalMath, SignalRouting, SignalLookup, SignalComposite,
+            ChartStates, ChartJunctions, ChartFunctions,
+        ];
+        for c in all {
+            assert!(!c.label().is_empty(), "{c:?} has no label");
+            let _ = c.accent(); // every arm returns a color
+            // Signal/state predicates partition the dialect-specific categories.
+            assert!(!(c.is_signal_flow() && c.is_state_chart()), "{c:?} in two dialects");
+        }
+        // The control-flow categories are neither signal nor chart.
+        for c in [ControlFlow, Data, Io, Functions, Matrix, Other] {
+            assert!(!c.is_signal_flow() && !c.is_state_chart());
+        }
+    }
+
+    #[test]
     fn param_fields_for_known_blocks() {
         let gain = SignalFlowParamSpec::fields(NodeKind::SignalGain);
         assert_eq!(gain.len(), 1);
