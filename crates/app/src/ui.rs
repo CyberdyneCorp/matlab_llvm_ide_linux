@@ -612,6 +612,8 @@ fn build_sidebar(app: &Rc<AppState>) -> Stack {
     stack.add_named(&build_explorer(app), Some("explorer"));
     stack.add_named(&build_search(app), Some("search"));
     stack.add_named(&build_compiler_panel(app), Some("compiler"));
+    stack.add_named(&build_hdl_panel(app), Some("hdl"));
+    stack.add_named(&build_docs_panel(app), Some("docs"));
     stack.add_named(&build_debug_panel(app), Some("debug"));
 
     let stack2 = stack.clone();
@@ -620,6 +622,8 @@ fn build_sidebar(app: &Rc<AppState>) -> Stack {
             ActivityItem::Debug => "debug",
             ActivityItem::Search => "search",
             ActivityItem::Compiler => "compiler",
+            ActivityItem::Hdl => "hdl",
+            ActivityItem::Docs => "docs",
             _ => "explorer",
         };
         stack2.set_visible_child_name(name);
@@ -688,6 +692,182 @@ fn build_explorer(app: &Rc<AppState>) -> GtkBox {
     panel.append(&details);
 
     panel
+}
+
+// ---- HDL panel -------------------------------------------------------------
+
+fn build_hdl_panel(app: &Rc<AppState>) -> GtkBox {
+    use matforge_core::models::{CompilerTarget, ConsoleTab};
+
+    let panel = GtkBox::new(Orientation::Vertical, 0);
+    panel.append(&panel_header("HDL", &[]));
+    let body = GtkBox::new(Orientation::Vertical, 0);
+    let scroll = ScrolledWindow::new();
+    scroll.set_vexpand(true);
+    scroll.set_child(Some(&body));
+    panel.append(&scroll);
+
+    // SOURCE.
+    body.append(&sub_header("SOURCE"));
+    let source = Label::new(Some("No active file"));
+    source.add_css_class("mf-text-secondary");
+    source.set_halign(gtk::Align::Start);
+    source.set_margin_start(8);
+    source.set_wrap(true);
+    body.append(&source);
+    {
+        let appc = app.clone();
+        let source = source.clone();
+        let update = move |_: &Option<u64>| match appc.vm.editor.active_tab() {
+            Some(t) if t.url.is_some() => source.set_text(&t.name),
+            Some(t) => source.set_text(&format!("{} — unsaved (Save to compile)", t.name)),
+            None => source.set_text("No active file"),
+        };
+        update(&None);
+        app.vm.editor.active_id.subscribe(update);
+    }
+
+    // ACTIONS — the two HDL lanes.
+    body.append(&sub_header("ACTIONS"));
+    let sv = Button::with_label("Compile to SystemVerilog");
+    sv.add_css_class("mf-compile-cta");
+    sv.set_margin_start(8);
+    sv.set_margin_end(8);
+    sv.set_margin_top(2);
+    {
+        let app = app.clone();
+        sv.connect_clicked(move |_| {
+            app.vm.toolbar.set_target(CompilerTarget::Sv);
+            runner::compile(&app.vm);
+        });
+    }
+    body.append(&sv);
+    let sv_note = Label::new(Some("Emits to the SYSTEMVERILOG artifact tab."));
+    sv_note.add_css_class("mf-text-muted");
+    sv_note.set_halign(gtk::Align::Start);
+    sv_note.set_wrap(true);
+    sv_note.set_margin_start(8);
+    body.append(&sv_note);
+
+    let va = Button::with_label("Compile to Verilog-A");
+    va.add_css_class("mf-compile-cta");
+    va.set_margin_start(8);
+    va.set_margin_end(8);
+    va.set_margin_top(6);
+    {
+        let app = app.clone();
+        va.connect_clicked(move |_| {
+            app.vm.toolbar.set_target(CompilerTarget::Va);
+            let settings = app.settings.clone();
+            runner::run(app.vm.clone(), &settings);
+        });
+    }
+    body.append(&va);
+    let va_note = Label::new(Some("Runs the script; writeVerilogA(...) calls emit .va files."));
+    va_note.add_css_class("mf-text-muted");
+    va_note.set_halign(gtk::Align::Start);
+    va_note.set_wrap(true);
+    va_note.set_margin_start(8);
+    body.append(&va_note);
+
+    // LATEST OUTPUT — whether each lane has produced an artifact.
+    body.append(&sub_header("LATEST OUTPUT"));
+    let sv_state = Label::new(None);
+    sv_state.set_halign(gtk::Align::Start);
+    sv_state.set_margin_start(8);
+    let va_state = Label::new(None);
+    va_state.set_halign(gtk::Align::Start);
+    va_state.set_margin_start(8);
+    body.append(&sv_state);
+    body.append(&va_state);
+    {
+        let app = app.clone();
+        let sv_state = sv_state.clone();
+        let va_state = va_state.clone();
+        app.vm.console.artifacts.bind(move |arts| {
+            let mark = |present: bool, name: &str| {
+                if present {
+                    format!("✓ {name} emitted")
+                } else {
+                    format!("— no {name} yet")
+                }
+            };
+            sv_state.set_text(&mark(arts.contains_key(&ConsoleTab::SystemVerilog), "SystemVerilog"));
+            va_state.set_text(&mark(arts.contains_key(&ConsoleTab::VerilogA), "Verilog-A"));
+        });
+    }
+
+    panel
+}
+
+// ---- Docs panel ------------------------------------------------------------
+
+fn build_docs_panel(app: &Rc<AppState>) -> GtkBox {
+    let panel = GtkBox::new(Orientation::Vertical, 0);
+    panel.append(&panel_header("DOCS", &[]));
+
+    let list = ListBox::new();
+    let scroll = ScrolledWindow::new();
+    scroll.set_vexpand(true);
+    scroll.set_child(Some(&list));
+    panel.append(&scroll);
+
+    let app_sub = app.clone();
+    app.vm.project.root_url.bind(move |root| {
+        clear_list(&list);
+        let Some(root) = root else {
+            let l = row_label("Open a folder to browse its docs.");
+            l.set_margin_top(8);
+            list.append(&l);
+            return;
+        };
+        let mut md = Vec::new();
+        collect_markdown(root, 6, &mut md);
+        // Prefer a top-level docs/ folder, then alphabetical.
+        md.sort_by(|a, b| {
+            let da = a.components().any(|c| c.as_os_str() == "docs");
+            let db = b.components().any(|c| c.as_os_str() == "docs");
+            db.cmp(&da).then(a.cmp(b))
+        });
+        if md.is_empty() {
+            let l = row_label("No .md files under this folder.");
+            l.set_margin_top(8);
+            list.append(&l);
+            return;
+        }
+        for path in md.iter().take(300) {
+            let rel = path.strip_prefix(root).unwrap_or(path).to_string_lossy().into_owned();
+            let btn = Button::with_label(&rel);
+            btn.set_has_frame(false);
+            btn.set_halign(gtk::Align::Start);
+            btn.add_css_class("mf-row");
+            let app = app_sub.clone();
+            let path = path.clone();
+            btn.connect_clicked(move |_| open_file_in_editor(&app, &path));
+            list.append(&btn);
+        }
+    });
+
+    panel
+}
+
+/// Recursively collect `.md` files under `dir` (depth-limited, skips dot-dirs).
+fn collect_markdown(dir: &Path, depth: usize, out: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        if name.starts_with('.') {
+            continue;
+        }
+        if path.is_dir() {
+            if depth > 0 {
+                collect_markdown(&path, depth - 1, out);
+            }
+        } else if path.extension().and_then(|e| e.to_str()) == Some("md") {
+            out.push(path);
+        }
+    }
 }
 
 // ---- Search (find in files) ------------------------------------------------
