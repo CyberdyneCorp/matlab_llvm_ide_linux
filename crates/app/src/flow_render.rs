@@ -12,7 +12,7 @@ use matforge_core::models::flowchart::{
     FlowNode, FlowPosition, FlowchartDocument, NodeKind, NodeShape, PortAnchor,
 };
 use matforge_core::models::BreakpointConfig;
-use matforge_core::theme::{palette, Rgb};
+use matforge_core::theme::Rgb;
 
 /// Pan offset + zoom factor.
 #[derive(Clone, Copy)]
@@ -48,7 +48,7 @@ pub fn draw_document(
     breakpoints: &BTreeMap<String, BreakpointConfig>,
     exec_node: Option<&str>,
 ) {
-    set_rgb(ctx, palette::EDITOR_BACKGROUND);
+    set_rgb(ctx, crate::theme_css::current().editor_bg);
     ctx.rectangle(0.0, 0.0, w, h);
     ctx.fill().ok();
 
@@ -82,21 +82,21 @@ pub fn draw_document(
 
         // Body.
         draw_shape(ctx, node.kind.shape(), x, y, nw, nh);
-        set_rgb(ctx, palette::CARD);
+        set_rgb(ctx, crate::theme_css::current().card);
         ctx.fill_preserve().ok();
         ctx.set_line_width(if is_sel { 2.5 } else { 1.3 });
-        set_rgb(ctx, if is_sel { palette::ACCENT_BLUE } else { accent });
+        set_rgb(ctx, if is_sel { crate::theme_css::current().blue } else { accent });
         ctx.stroke().ok();
 
         if is_exec {
             draw_shape(ctx, node.kind.shape(), x - 2.0, y - 2.0, nw + 4.0, nh + 4.0);
-            set_rgb(ctx, palette::ACCENT_YELLOW);
+            set_rgb(ctx, crate::theme_css::current().yellow);
             ctx.set_line_width(2.0);
             ctx.stroke().ok();
         }
 
         // Label.
-        set_rgb(ctx, palette::TEXT_PRIMARY);
+        set_rgb(ctx, crate::theme_css::current().text_primary);
         ctx.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
         ctx.set_font_size(12.0);
         let label = node_label(node);
@@ -106,7 +106,7 @@ pub fn draw_document(
 
         // Breakpoint dot.
         if breakpoints.contains_key(&node.id) {
-            set_rgb(ctx, palette::ACCENT_RED);
+            set_rgb(ctx, crate::theme_css::current().red);
             ctx.arc(x + 8.0, y + 8.0, 4.0, 0.0, std::f64::consts::TAU);
             ctx.fill().ok();
         }
@@ -116,7 +116,7 @@ pub fn draw_document(
 }
 
 fn draw_edge(ctx: &cairo::Context, from_anchor: Option<PortAnchor>, start: (f64, f64), end: (f64, f64)) {
-    set_rgb(ctx, palette::TEXT_SECONDARY);
+    set_rgb(ctx, crate::theme_css::current().text_secondary);
     ctx.set_line_width(1.4);
     ctx.move_to(start.0, start.1);
     let horizontal = matches!(from_anchor, Some(PortAnchor::Left) | Some(PortAnchor::Right));
@@ -132,7 +132,7 @@ fn draw_edge(ctx: &cairo::Context, from_anchor: Option<PortAnchor>, start: (f64,
     ctx.line_to(end.0, end.1);
     ctx.stroke().ok();
     // Arrowhead.
-    set_rgb(ctx, palette::TEXT_SECONDARY);
+    set_rgb(ctx, crate::theme_css::current().text_secondary);
     ctx.arc(end.0, end.1, 2.5, 0.0, std::f64::consts::TAU);
     ctx.fill().ok();
 }

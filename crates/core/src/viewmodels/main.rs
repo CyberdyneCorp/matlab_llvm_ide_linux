@@ -16,7 +16,8 @@ use crate::services::settings::Settings;
 use crate::services::system_bridge::{Clipboard, FilePicker};
 
 use super::{
-    activity_bar::ActivityBarViewModel, breakpoints::BreakpointsViewModel, console::ConsoleViewModel,
+    activity_bar::ActivityBarViewModel, appearance::AppearanceViewModel,
+    breakpoints::BreakpointsViewModel, console::ConsoleViewModel,
     debug::DebugViewModel, editor::EditorViewModel, layout::LayoutViewModel, plots::PlotsViewModel,
     project_explorer::ProjectExplorerViewModel, repl::ReplViewModel, search::SearchViewModel,
     status_bar::StatusBarViewModel, toolbar::ToolbarViewModel, workspace::WorkspaceViewModel,
@@ -36,6 +37,7 @@ pub struct MainViewModel {
     pub debug: DebugViewModel,
     pub search: SearchViewModel,
     pub breakpoints: BreakpointsViewModel,
+    pub appearance: AppearanceViewModel,
 
     pub settings: Settings,
     /// A `(variable, kind)` plot requested via "Plot As" — fulfilled when the
@@ -67,6 +69,7 @@ impl MainViewModel {
             debug: DebugViewModel::new(),
             search: SearchViewModel::new(),
             breakpoints: BreakpointsViewModel::new(),
+            appearance: AppearanceViewModel::new(),
             settings,
             pending_plot: Property::new(None),
             fs,

@@ -1,32 +1,10 @@
-/* MatForge IDE dark theme — mirrors crates/core/src/theme.rs (Theme.swift).
- * GTK4 CSS. Loaded at startup by src/main.rs via a CssProvider at
- * STYLE_PROVIDER_PRIORITY_APPLICATION so it overrides the default theme. */
-
-@define-color mf_window_background #121a26;
-@define-color mf_chrome           #16202e;
-@define-color mf_panel            #1a2434;
-@define-color mf_panel_alt        #1f2a3c;
-@define-color mf_editor_bg        #131c2a;
-@define-color mf_card             #213046;
-@define-color mf_border           #2a3a52;
-@define-color mf_border_soft      #223047;
-
-@define-color mf_text_primary     #e3e9f3;
-@define-color mf_text_secondary   #a3b2c8;
-@define-color mf_text_muted       #8090a8;
-@define-color mf_term_bg          #04070a;
-@define-color mf_term_fg          #43d459;
-
-@define-color mf_orange  #e08a45;
-@define-color mf_amber   #c97a3a;
-@define-color mf_green   #5ebe6e;
-@define-color mf_blue    #4fa3e3;
-@define-color mf_cyan    #64c8d6;
-@define-color mf_red     #e05b5b;
-@define-color mf_yellow  #e0c26a;
-@define-color mf_magenta #c678dd;
-@define-color mf_selection #244064;
-@define-color mf_hover     #223149;
+/* MatForge IDE theme TEMPLATE — NOT loaded directly.
+ *
+ * crates/app/src/theme_css.rs prepends a generated `@define-color` block (from
+ * the active ThemeTokens) and substitutes the font-size sentinels
+ * (scaled by the UI font factor) before this is handed to a CssProvider. That
+ * is what makes light/dark/high-contrast switching and font zoom work at
+ * runtime. Edit colors in crates/core/src/theme.rs, not here. */
 
 /* Base surfaces */
 window.mf-root,
@@ -34,7 +12,7 @@ window.mf-root,
     background-color: @mf_window_background;
     color: @mf_text_primary;
     font-family: -apple-system, "SF Pro Text", "Inter", "Cantarell", sans-serif;
-    font-size: 12px;
+    font-size: __FS_BASE__;
 }
 
 .mf-chrome    { background-color: @mf_chrome; }
@@ -52,8 +30,8 @@ window.mf-root,
 .mf-text-secondary { color: @mf_text_secondary; }
 .mf-text-muted     { color: @mf_text_muted; }
 .mf-panel-header {
-    color: @mf_orange;
-    font-size: 10px;
+    color: @mf_accent;
+    font-size: __FS_XS__;
     font-weight: 700;
     /* GTK has no small-caps; uppercase the source text instead. */
     letter-spacing: 1px;
@@ -69,9 +47,9 @@ window.mf-root,
 }
 .mf-activity-item:hover { background-color: @mf_hover; color: @mf_text_primary; }
 .mf-activity-item.selected {
-    color: @mf_orange;
+    color: @mf_accent;
     background-color: @mf_panel;
-    border-left: 2px solid @mf_orange;
+    border-left: 2px solid @mf_accent;
 }
 
 /* Menu bar */
@@ -80,7 +58,7 @@ window.mf-root,
     color: @mf_text_secondary;
     padding: 1px 4px;
     border-bottom: 1px solid @mf_border_soft;
-    font-size: 12px;
+    font-size: __FS_BASE__;
 }
 .mf-menubar > item { padding: 2px 8px; border-radius: 4px; }
 .mf-menubar > item:hover,
@@ -88,9 +66,9 @@ window.mf-root,
 
 /* Toolbar */
 .mf-toolbar { background-color: @mf_chrome; }
-.mf-brand   { color: @mf_text_primary; font-weight: 600; font-size: 13px; }
+.mf-brand   { color: @mf_text_primary; font-weight: 600; font-size: __FS_LG__; }
 .mf-logo {
-    background: linear-gradient(160deg, #f0a85a, #d9772f);
+    background: @mf_accent;
     color: #1a1206;
     font-weight: 800;
     border-radius: 5px;
@@ -105,7 +83,7 @@ window.mf-root,
     min-width: 46px;
 }
 .mf-tool:hover { background-color: @mf_hover; }
-.mf-tool-label { font-size: 9px; color: @mf_text_secondary; }
+.mf-tool-label { font-size: __FS_XXS__; color: @mf_text_secondary; }
 .mf-run  { color: @mf_green; }
 .mf-stop { color: @mf_red; }
 .mf-debug { color: @mf_red; }
@@ -124,9 +102,9 @@ window.mf-root,
     border-right: 1px solid @mf_border_soft;
 }
 .mf-tab.active { color: @mf_text_primary; background-color: @mf_editor_bg; }
-.mf-tab-dirty { color: @mf_orange; }
+.mf-tab-dirty { color: @mf_accent; }
 .mf-tab-label { color: @mf_text_secondary; }
-.mf-tab-label image { color: @mf_orange; }
+.mf-tab-label image { color: @mf_accent; }
 .mf-tab-close {
     color: @mf_text_muted;
     min-height: 16px;
@@ -138,17 +116,17 @@ window.mf-root,
 /* Editor */
 .mf-code, textview.mf-code text {
     background-color: @mf_editor_bg;
-    color: #cbd3e1;
+    color: @mf_code_fg;
     font-family: "JetBrains Mono", "Fira Code", "DejaVu Sans Mono", monospace;
-    font-size: 12px;
+    font-size: __FS_BASE__;
 }
-.mf-gutter { background-color: @mf_editor_bg; color: #4a5870; }
+.mf-gutter { background-color: @mf_editor_bg; color: @mf_gutter; }
 
 /* Status bar */
 .mf-status-bar {
     background-color: @mf_chrome;
     color: @mf_text_secondary;
-    font-size: 11px;
+    font-size: __FS_SM__;
     border-top: 1px solid @mf_border_soft;
 }
 
@@ -157,12 +135,12 @@ window.mf-root,
 .mf-row:hover { background-color: @mf_hover; }
 .mf-row.selected { background-color: @mf_selection; color: @mf_text_primary; }
 
-/* GTK lists default to a light background — make them show the dark panel. */
+/* GTK lists default to a light background — make them show the panel. */
 list, listview, columnview {
     background-color: transparent;
     color: @mf_text_primary;
 }
-/* Containers that default to a light background — let the dark panel show. */
+/* Containers that default to a light background — let the panel show. */
 scrolledwindow, scrolledwindow > viewport, viewport,
 notebook, notebook > stack, notebook > header.top {
     background-color: transparent;
@@ -185,7 +163,7 @@ popover button:hover { background-color: @mf_hover; }
 .mf-event-log { background-color: transparent; }
 .mf-event-row {
     font-family: "JetBrains Mono", "DejaVu Sans Mono", monospace;
-    font-size: 11px;
+    font-size: __FS_SM__;
     color: @mf_text_secondary;
     padding: 1px 8px;
 }
@@ -197,7 +175,7 @@ popover button:hover { background-color: @mf_hover; }
 .mf-table { font-family: "JetBrains Mono", "DejaVu Sans Mono", monospace; }
 .mf-table-head {
     color: @mf_text_secondary;
-    font-size: 10px;
+    font-size: __FS_XS__;
     font-weight: 700;
     background-color: @mf_panel_alt;
     padding: 2px 6px;
@@ -205,14 +183,14 @@ popover button:hover { background-color: @mf_hover; }
 }
 .mf-table-cell {
     color: @mf_text_primary;
-    font-size: 11px;
+    font-size: __FS_SM__;
     padding: 2px 6px;
     border: 1px solid @mf_border_soft;
 }
 
 /* Compiler panel */
 .mf-build-badge {
-    font-size: 9px;
+    font-size: __FS_XXS__;
     font-weight: 700;
     padding: 1px 6px;
     border-radius: 3px;
@@ -222,11 +200,11 @@ popover button:hover { background-color: @mf_hover; }
 .mf-badge-fail { color: @mf_red;    border-color: @mf_red; }
 .mf-badge-busy { color: @mf_amber;  border-color: @mf_amber; }
 .mf-badge-idle { color: @mf_text_muted; border-color: @mf_border; }
-.mf-mono { font-family: "JetBrains Mono", "DejaVu Sans Mono", monospace; font-size: 10px; }
+.mf-mono { font-family: "JetBrains Mono", "DejaVu Sans Mono", monospace; font-size: __FS_XS__; }
 .mf-text-warn { color: @mf_amber; }
 
 /* Search (find in files) */
-.mf-search-loc { color: @mf_text_primary; font-size: 11px; font-weight: 600; }
+.mf-search-loc { color: @mf_text_primary; font-size: __FS_SM__; font-weight: 600; }
 .mf-search-results > row { padding: 1px 4px; }
 
 /* Console levels */
@@ -247,7 +225,7 @@ popover button:hover { background-color: @mf_hover; }
 /* Table column headers */
 .mf-col-header { padding: 3px 8px; border-bottom: 1px solid @mf_border_soft; }
 .mf-col-title {
-    font-size: 9px;
+    font-size: __FS_XXS__;
     font-weight: 700;
     color: @mf_text_secondary;
     letter-spacing: 1px;
@@ -260,7 +238,7 @@ textview.mf-terminal, textview.mf-terminal text {
     background-color: @mf_term_bg;
     color: @mf_term_fg;
     font-family: "JetBrains Mono", "Fira Code", "DejaVu Sans Mono", monospace;
-    font-size: 12px;
+    font-size: __FS_BASE__;
 }
 .mf-term-panel { background-color: @mf_term_bg; }
 .mf-prompt { color: @mf_term_fg; font-weight: 700; }
@@ -282,13 +260,13 @@ entry.mf-terminal-entry, entry.mf-terminal-entry > text {
 
 /* Empty states */
 .mf-empty-icon { color: @mf_border; opacity: 0.7; }
-.mf-empty-title { color: @mf_text_secondary; font-weight: 600; font-size: 13px; }
+.mf-empty-title { color: @mf_text_secondary; font-weight: 600; font-size: __FS_LG__; }
 
 /* Pills / badges */
 .mf-pill {
     border-radius: 8px;
     padding: 1px 8px;
-    font-size: 10px;
+    font-size: __FS_XS__;
 }
 .mf-pill-running { background-color: @mf_green; color: #0a1410; }
 .mf-pill-idle    { background-color: @mf_panel_alt; color: @mf_text_secondary; }

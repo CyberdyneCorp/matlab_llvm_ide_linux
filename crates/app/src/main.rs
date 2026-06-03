@@ -27,6 +27,7 @@ mod statechart_window;
 mod process;
 mod runner;
 mod services_impl;
+mod theme_css;
 mod ui;
 
 use app_state::AppState;
@@ -37,7 +38,6 @@ const APP_ID: &str = "org.matlab_llvm.MatForge";
 fn main() -> glib::ExitCode {
     let app = Application::builder().application_id(APP_ID).build();
     app.connect_startup(|_| {
-        install_css();
         icons::install();
     });
     app.connect_activate(build_main_window);
@@ -63,7 +63,19 @@ fn build_main_window(app: &Application) {
     ));
     let app = AppState::new(vm, settings.clone());
 
+    // Apply persisted appearance before the first paint, then keep the CSS +
+    // Cairo renderers in sync with the appearance view model at runtime.
+    let prefs = matforge_core::services::preferences::Preferences::load();
+    app.vm.appearance.apply(
+        prefs.appearance.theme_id(),
+        prefs.appearance.accent_enum(),
+        prefs.appearance.font_scale,
+        prefs.appearance.code_font.clone(),
+    );
+
     ui::build(&window, app.clone());
+
+    install_theming(&window, &app);
 
     // E2E state introspection (test-only; no-op unless the env var is set).
     if let Ok(path) = std::env::var("MATFORGE_E2E_STATE") {
@@ -123,6 +135,13 @@ fn build_main_window(app: &Application) {
     if std::env::var("MATFORGE_NORIGHT").is_ok() {
         app.vm.layout.workspace_visible.set(false);
     }
+    // Demo/verification: force a theme/accent at launch.
+    if let Ok(theme) = std::env::var("MATFORGE_THEME") {
+        app.vm.appearance.set_theme(matforge_core::theme::ThemeId::from_key(&theme));
+    }
+    if let Ok(accent) = std::env::var("MATFORGE_ACCENT") {
+        app.vm.appearance.set_accent(matforge_core::theme::Accent::from_key(&accent));
+    }
 
     if !runner::matlabc_available(&settings) {
         app.vm.status_bar.set_message(format!(
@@ -134,10 +153,12 @@ fn build_main_window(app: &Application) {
     window.present();
 }
 
-/// Load the bundled CSS theme into the default display.
-fn install_css() {
+/// Install a swappable `CssProvider` driven by the appearance view model: render
+/// the stylesheet from the active theme tokens + font scale, and re-render on any
+/// appearance change (theme / accent / zoom). Also caches the tokens for the
+/// Cairo renderers and persists the choice.
+fn install_theming(window: &ApplicationWindow, app: &Rc<AppState>) {
     let provider = CssProvider::new();
-    provider.load_from_string(include_str!("../resources/theme.css"));
     if let Some(display) = gdk::Display::default() {
         gtk::style_context_add_provider_for_display(
             &display,
@@ -145,4 +166,33 @@ fn install_css() {
             gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
     }
+
+    let render = {
+        let app = app.clone();
+        let provider = provider.clone();
+        let window = window.clone();
+        move || {
+            let tokens = app.vm.appearance.tokens();
+            let scale = app.vm.appearance.font_scale.get();
+            provider.load_from_string(&theme_css::render(&tokens, scale));
+            theme_css::set_current(tokens);
+            // Re-tint the Cairo widgets (plots/flowchart/gutter) immediately.
+            window.queue_draw();
+            persist_appearance(&app);
+        }
+    };
+    render(); // initial paint
+    app.vm.appearance.revision.subscribe(move |_| render());
+}
+
+/// Save the current appearance into `config.toml`, preserving other fields.
+fn persist_appearance(app: &Rc<AppState>) {
+    use matforge_core::services::preferences::Preferences;
+    let a = &app.vm.appearance;
+    let mut prefs = Preferences::load();
+    prefs.appearance.theme = a.theme_id.get().key().to_string();
+    prefs.appearance.accent = a.accent.get().key().to_string();
+    prefs.appearance.font_scale = a.font_scale.get();
+    prefs.appearance.code_font = a.code_font_family.get();
+    let _ = prefs.save();
 }
