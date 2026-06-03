@@ -2369,12 +2369,49 @@ fn build_console(app: &Rc<AppState>) -> GtkBox {
                 view.set_monospace(true);
                 view.set_editable(false);
                 view.add_css_class("mf-code");
-                view.buffer().set_text(text);
+                let buf = view.buffer();
+                buf.set_text(text);
+                // Syntax-highlight generated code (C++/Python/TS/LLVM/MLIR/Verilog).
+                if let Some(lang) = artifact_language(*tab) {
+                    crate::highlight::apply(&buf, lang);
+                }
                 let scroll = ScrolledWindow::new();
                 scroll.set_child(Some(&view));
                 nb_artifacts.append_page(&scroll, Some(&Label::new(Some(tab.label()))));
             }
         });
+    }
+
+    // Copy / Clear actions in the tab bar's end corner; they act on the tab in
+    // view (console transcript, problems list, or a generated-code pane).
+    {
+        let actions = GtkBox::new(Orientation::Horizontal, 2);
+        actions.add_css_class("mf-tab-actions");
+        let copy_btn = header_action(ic::COPY);
+        copy_btn.set_tooltip_text(Some("Copy contents"));
+        let clear_btn = header_action(ic::CLEAR);
+        clear_btn.set_tooltip_text(Some("Clear"));
+        actions.append(&copy_btn);
+        actions.append(&clear_btn);
+        nb.set_action_widget(&actions, gtk::PackType::End);
+
+        {
+            let app = app.clone();
+            let nb = nb.clone();
+            let cbuf = console_view.buffer();
+            copy_btn.connect_clicked(move |btn| {
+                let text = current_tab_text(&nb, &app, &cbuf);
+                if !text.is_empty() {
+                    btn.clipboard().set_text(&text);
+                    app.vm.toast.show("Copied to clipboard");
+                }
+            });
+        }
+        {
+            let app = app.clone();
+            let nb = nb.clone();
+            clear_btn.connect_clicked(move |_| clear_current_tab(&nb, &app));
+        }
     }
     panel.append(&nb);
 
@@ -2435,6 +2472,72 @@ fn build_console(app: &Rc<AppState>) -> GtkBox {
 
 fn glib_stop() -> gtk::glib::Propagation {
     gtk::glib::Propagation::Stop
+}
+
+/// The highlighter language for a generated-code console tab, if it is code.
+fn artifact_language(tab: matforge_core::models::ConsoleTab) -> Option<Language> {
+    use matforge_core::models::ConsoleTab as T;
+    Some(match tab {
+        T::Cpp => Language::Cpp,
+        T::Python => Language::Python,
+        T::TypeScript => Language::TypeScript,
+        T::LlvmIr => Language::LlvmIr,
+        T::Mlir => Language::Mlir,
+        T::SystemVerilog | T::VerilogA => Language::Verilog,
+        T::Console | T::Problems => return None,
+    })
+}
+
+/// Text content of the bottom panel's currently-visible tab, for Copy.
+fn current_tab_text(nb: &Notebook, app: &Rc<AppState>, console_buf: &gtk::TextBuffer) -> String {
+    match nb.current_page() {
+        Some(0) => {
+            let (s, e) = console_buf.bounds();
+            console_buf.text(&s, &e, false).to_string()
+        }
+        Some(1) => app
+            .vm
+            .console
+            .problems
+            .get()
+            .iter()
+            .map(|d| format!("{}:{}:{}: {}", d.file, d.line, d.column, d.message))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Some(idx) => nb
+            .nth_page(Some(idx))
+            .and_then(|p| p.downcast::<ScrolledWindow>().ok())
+            .and_then(|s| s.child())
+            .and_then(|c| c.downcast::<TextView>().ok())
+            .map(|tv| {
+                let b = tv.buffer();
+                let (s, e) = b.bounds();
+                b.text(&s, &e, false).to_string()
+            })
+            .unwrap_or_default(),
+        None => String::new(),
+    }
+}
+
+/// Clear the bottom panel's currently-visible tab.
+fn clear_current_tab(nb: &Notebook, app: &Rc<AppState>) {
+    match nb.current_page() {
+        Some(0) => {
+            app.vm.console.clear();
+            app.vm.repl.transcript.update(|t| t.clear());
+        }
+        Some(1) => app.vm.console.problems.update(|p| p.clear()),
+        Some(idx) => {
+            // Drop the generated artifact backing this page (idx 2.. ↔ map keys).
+            let keys: Vec<_> = app.vm.console.artifacts.get().keys().copied().collect();
+            if let Some(&tab) = keys.get((idx as usize).saturating_sub(2)) {
+                app.vm.console.artifacts.update(|a| {
+                    a.remove(&tab);
+                });
+            }
+        }
+        None => {}
+    }
 }
 
 /// GtkTextTag name for a console message level.
