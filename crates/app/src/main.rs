@@ -21,6 +21,7 @@ mod flow_render;
 mod icons;
 mod flowchart_view;
 mod highlight;
+mod mflowlink_window;
 mod plot_render;
 mod process;
 mod runner;
@@ -96,6 +97,14 @@ fn build_main_window(app: &Application) {
     }
     if let Ok(kind) = std::env::var("MATFORGE_NEWFLOW") {
         ui::open_demo_flowchart(&app, kind == "signal");
+    }
+    if let Ok(p) = std::env::var("MATFORGE_SIMULATE") {
+        let path = std::path::PathBuf::from(&p);
+        if let Ok(text) = std::fs::read_to_string(&path) {
+            if let Ok(doc) = matforge_core::services::flowchart_codec::decode_str(&text) {
+                mflowlink_window::open(&app, doc, Some(path), true);
+            }
+        }
     }
     if let Ok(line) = std::env::var("MATFORGE_BP") {
         if let (Ok(n), Some(tab)) = (line.parse::<usize>(), app.vm.editor.active_tab()) {

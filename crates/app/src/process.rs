@@ -8,6 +8,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -86,6 +87,67 @@ pub fn run_streaming(
     });
     pump_to_main_loop(rx, on_line);
     Ok(())
+}
+
+// ---- Signal-flow simulation ------------------------------------------------
+
+/// A running `matlabc -simulate` process whose CSV output streams to a callback.
+/// Dropping it (or calling [`stop`](SimHandle::stop)) kills the simulation.
+pub struct SimHandle {
+    child: Arc<Mutex<Child>>,
+}
+
+impl SimHandle {
+    pub fn stop(&self) {
+        if let Ok(mut c) = self.child.lock() {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+    }
+}
+
+impl Drop for SimHandle {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+/// Start `matlabc -simulate <file>`, streaming each output line to `on_line` on
+/// the GTK main loop (a `RUN_EXIT_PREFIX<code>` line marks completion).
+pub fn run_simulation(
+    matlabc: &Path,
+    file: &Path,
+    on_line: impl FnMut(String) + 'static,
+) -> std::io::Result<SimHandle> {
+    let mut child = Command::new(matlabc)
+        .arg("-simulate")
+        .arg(file)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let stdout = child.stdout.take().expect("piped stdout");
+    let stderr = child.stderr.take().expect("piped stderr");
+    let child = Arc::new(Mutex::new(child));
+
+    let (tx, rx) = mpsc::channel::<String>();
+    let h_out = spawn_line_reader(stdout, tx.clone());
+    let h_err = spawn_line_reader(stderr, tx.clone());
+    {
+        let child = child.clone();
+        thread::spawn(move || {
+            let _ = h_out.join();
+            let _ = h_err.join();
+            let code = child
+                .lock()
+                .ok()
+                .and_then(|mut c| c.wait().ok())
+                .and_then(|s| s.code())
+                .unwrap_or(-1);
+            let _ = tx.send(format!("{RUN_EXIT_PREFIX}{code}"));
+        });
+    }
+    pump_to_main_loop(rx, on_line);
+    Ok(SimHandle { child })
 }
 
 // ---- Live REPL -------------------------------------------------------------

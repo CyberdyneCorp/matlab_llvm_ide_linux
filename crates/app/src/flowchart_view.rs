@@ -293,6 +293,22 @@ fn build_palette(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>, path: Rc<Optio
     toolbar.append(&compile);
     panel.append(&toolbar);
 
+    // Signal-flow models get a Simulate action that opens the mflowLink window.
+    if fc.document.with(|d| d.schema_kind() == matforge_core::models::flowchart::SchemaKind::SignalFlow) {
+        let sim = Button::with_label("▶ Simulate");
+        sim.add_css_class("mf-tool");
+        sim.add_css_class("mf-run");
+        sim.set_margin_start(6);
+        sim.set_margin_end(6);
+        let app = app.clone();
+        let fc = fc.clone();
+        let path = path.clone();
+        sim.connect_clicked(move |_| {
+            crate::mflowlink_window::open(&app, fc.document.get(), (*path).clone(), false);
+        });
+        panel.append(&sim);
+    }
+
     let header = Label::new(Some("BLOCKS"));
     header.add_css_class("mf-panel-header");
     header.set_halign(gtk::Align::Start);
