@@ -361,6 +361,17 @@ notebook > header tab:hover { color: @mf_text_primary; }
 .mf-palette list > row { border-radius: 5px; margin: 0 4px; }
 .mf-palette list > row:selected { background-color: @mf_selection; }
 
+/* Markdown preview sub-view. */
+.mf-md-toolbar {
+    background-color: @mf_panel_alt;
+    border-bottom: 1px solid @mf_border;
+}
+.mf-md-preview {
+    background-color: @mf_panel;
+    color: @mf_text_primary;
+    font-size: __FS_BASE__;
+}
+
 /* Toast (transient action feedback). */
 .mf-toast {
     background-color: @mf_card;

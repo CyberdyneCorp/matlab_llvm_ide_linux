@@ -168,6 +168,7 @@ pub fn language_label(ext: &str) -> &'static str {
         "ll" => "LLVM IR",
         "mlir" => "MLIR",
         "sv" | "v" | "va" => "Verilog",
+        "md" | "markdown" => "Markdown",
         _ => "Plain",
     }
 }
