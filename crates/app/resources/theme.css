@@ -181,6 +181,9 @@ popover > contents { background-color: @mf_card; color: @mf_text_primary; }
 popover button { color: @mf_text_primary; }
 popover button:hover { background-color: @mf_hover; }
 
+/* Plot thumbnails */
+.mf-thumb { border: 1px solid @mf_border_soft; border-radius: 3px; margin: 2px; }
+
 /* Table Viewer */
 .mf-table { font-family: "JetBrains Mono", "DejaVu Sans Mono", monospace; }
 .mf-table-head {

@@ -2356,16 +2356,43 @@ fn build_plots(app: &Rc<AppState>) -> GtkBox {
         let canvas = canvas.clone();
         move || {
             clear_list(&list);
+            let selected = app.vm.plots.selected_id.get();
             for f in app.vm.plots.figures.get() {
+                let row = GtkBox::new(Orientation::Horizontal, 6);
+                row.add_css_class("mf-row");
+                if Some(f.id) == selected {
+                    row.add_css_class("selected");
+                }
+
+                // Live thumbnail (re-renders on every figure upsert).
+                let thumb = gtk::DrawingArea::new();
+                thumb.set_size_request(58, 38);
+                thumb.add_css_class("mf-thumb");
+                let fig = f.clone();
+                thumb.set_draw_func(move |_a, ctx, w, h| {
+                    crate::plot_render::draw_thumbnail(ctx, w as f64, h as f64, &fig);
+                });
+                row.append(&thumb);
+
                 let btn = Button::with_label(&format!("Figure {} — {}", f.index, f.title));
                 btn.set_has_frame(false);
                 btn.set_halign(gtk::Align::Start);
-                btn.add_css_class("mf-row");
+                btn.set_hexpand(true);
                 let app2 = app.clone();
                 let id = f.id;
                 btn.connect_clicked(move |_| app2.vm.plots.select(id));
-                let row = GtkBox::new(Orientation::Horizontal, 0);
                 row.append(&btn);
+
+                // Figures fed by the runtime emit protocol are "live" (they
+                // upsert in place, e.g. during a drawnow animation).
+                if f.runtime_id.is_some() {
+                    let live = Label::new(Some("LIVE"));
+                    live.add_css_class("mf-pill");
+                    live.add_css_class("mf-pill-live");
+                    live.set_valign(gtk::Align::Center);
+                    live.set_margin_end(6);
+                    row.append(&live);
+                }
                 list.append(&row);
             }
             canvas.queue_draw();
@@ -2376,8 +2403,8 @@ fn build_plots(app: &Rc<AppState>) -> GtkBox {
         app.vm.plots.figures.subscribe(move |_| rebuild());
     }
     {
-        let canvas = canvas.clone();
-        app.vm.plots.selected_id.subscribe(move |_| canvas.queue_draw());
+        let rebuild = rebuild.clone();
+        app.vm.plots.selected_id.subscribe(move |_| rebuild());
     }
     panel
 }

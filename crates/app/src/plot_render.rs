@@ -54,7 +54,7 @@ pub fn draw_figure(ctx: &cairo::Context, w: f64, h: f64, figure: &PlotFigure) {
         (px, py)
     };
 
-    draw_axes(ctx, w, h, y_min, y_max);
+    draw_axes(ctx, w, h, x_min, x_max, y_min, y_max);
 
     match figure.kind {
         PlotKind::Scatter => draw_scatter(ctx, &xs, &figure.ys, &map, palette::ACCENT_BLUE),
@@ -71,6 +71,11 @@ pub fn draw_figure(ctx: &cairo::Context, w: f64, h: f64, figure: &PlotFigure) {
         }
     }
 
+    // Legend (only meaningful with a second series).
+    if !figure.ys2.is_empty() {
+        draw_legend(ctx, w, figure.source_variable.as_deref());
+    }
+
     // Title.
     set_color(ctx, palette::TEXT_PRIMARY);
     ctx.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Bold);
@@ -79,21 +84,86 @@ pub fn draw_figure(ctx: &cairo::Context, w: f64, h: f64, figure: &PlotFigure) {
     ctx.show_text(&figure.title).ok();
 }
 
-fn draw_axes(ctx: &cairo::Context, w: f64, h: f64, y_min: f64, y_max: f64) {
+/// Compact thumbnail render for the figure list: blits a runtime PNG (scaled to
+/// fit) or draws a bare series chart — no title, axis labels, or legend.
+pub fn draw_thumbnail(ctx: &cairo::Context, w: f64, h: f64, figure: &PlotFigure) {
+    fill(ctx, palette::EDITOR_BACKGROUND, 0.0, 0.0, w, h);
+    if let Some(png) = &figure.png_data {
+        blit_png(ctx, w, h, png);
+        return;
+    }
+    if figure.ys.is_empty() {
+        return;
+    }
+    let xs: Vec<f64> = if figure.xs.len() == figure.ys.len() {
+        figure.xs.clone()
+    } else {
+        (0..figure.ys.len()).map(|i| i as f64).collect()
+    };
+    let (x_min, x_max) = range(&xs);
+    let (mut y_min, mut y_max) = range(&figure.ys);
+    if figure.kind == PlotKind::Bar || figure.kind == PlotKind::Histogram {
+        y_min = y_min.min(0.0);
+    }
+    if (y_max - y_min).abs() < f64::EPSILON {
+        y_max += 1.0;
+    }
+    let pad = 3.0;
+    let plot_w = (w - 2.0 * pad).max(1.0);
+    let plot_h = (h - 2.0 * pad).max(1.0);
+    let map = |x: f64, y: f64| -> (f64, f64) {
+        (pad + norm(x, x_min, x_max) * plot_w, pad + (1.0 - norm(y, y_min, y_max)) * plot_h)
+    };
+    match figure.kind {
+        PlotKind::Scatter => draw_scatter(ctx, &xs, &figure.ys, &map, palette::ACCENT_BLUE),
+        PlotKind::Bar | PlotKind::Histogram => draw_bars(ctx, &figure.ys, x_min, x_max, &map, plot_w),
+        _ => draw_line(ctx, &xs, &figure.ys, &map, palette::ACCENT_BLUE),
+    }
+}
+
+fn draw_axes(ctx: &cairo::Context, w: f64, h: f64, x_min: f64, x_max: f64, y_min: f64, y_max: f64) {
     set_color(ctx, palette::BORDER);
     ctx.set_line_width(1.0);
     ctx.move_to(MARGIN, MARGIN);
     ctx.line_to(MARGIN, h - MARGIN);
     ctx.line_to(w - MARGIN, h - MARGIN);
     ctx.stroke().ok();
-    // y range labels
     set_color(ctx, palette::TEXT_MUTED);
     ctx.select_font_face("monospace", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
     ctx.set_font_size(10.0);
+    // y range (left edge).
     ctx.move_to(4.0, MARGIN + 4.0);
     ctx.show_text(&format!("{y_max:.2}")).ok();
     ctx.move_to(4.0, h - MARGIN);
     ctx.show_text(&format!("{y_min:.2}")).ok();
+    // x range (bottom corners).
+    ctx.move_to(MARGIN, h - MARGIN + 12.0);
+    ctx.show_text(&format!("{x_min:.2}")).ok();
+    let x_hi = format!("{x_max:.2}");
+    let ext = ctx.text_extents(&x_hi).map(|e| e.width()).unwrap_or(0.0);
+    ctx.move_to(w - MARGIN - ext, h - MARGIN + 12.0);
+    ctx.show_text(&x_hi).ok();
+}
+
+/// Two-entry legend in the top-right (series 1 = blue, series 2 = green).
+fn draw_legend(ctx: &cairo::Context, w: f64, source: Option<&str>) {
+    let entries = [
+        (palette::ACCENT_BLUE, source.unwrap_or("series 1")),
+        (palette::ACCENT_GREEN, "series 2"),
+    ];
+    ctx.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+    ctx.set_font_size(10.0);
+    let x = w - MARGIN - 92.0;
+    let mut y = MARGIN + 6.0;
+    for (color, label) in entries {
+        set_color(ctx, color);
+        ctx.rectangle(x, y - 7.0, 12.0, 8.0);
+        ctx.fill().ok();
+        set_color(ctx, palette::TEXT_SECONDARY);
+        ctx.move_to(x + 16.0, y);
+        ctx.show_text(label).ok();
+        y += 14.0;
+    }
 }
 
 fn draw_line(ctx: &cairo::Context, xs: &[f64], ys: &[f64], map: &impl Fn(f64, f64) -> (f64, f64), color: Rgb) {
