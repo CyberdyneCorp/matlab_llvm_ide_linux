@@ -179,6 +179,21 @@ impl MainViewModel {
         }
     }
 
+    /// Route a line of program output captured during a **debug** session.
+    /// Figure / workspace / value sentinels are extracted and routed (so
+    /// `plot(...)` while debugging lands in the Plots panel, like Run/REPL),
+    /// while plain text is returned for the caller to surface in the console.
+    pub fn feed_debug_output(&self, line: &str) -> Option<String> {
+        match self.repl.consume_sentinel(line) {
+            Some(ReplEvent::Console(text)) => Some(text),
+            Some(event) => {
+                self.route_repl_event(event);
+                None
+            }
+            None => None,
+        }
+    }
+
     /// Request that `name` be plotted as `kind` once its value is captured.
     /// The caller is responsible for triggering the value capture (the live
     /// REPL `disp` probe).
@@ -340,6 +355,24 @@ mod tests {
         vm.feed_repl_line(WS_END);
         assert_eq!(vm.workspace.variables.get().len(), 1);
         assert!(vm.workspace.live.get());
+    }
+
+    #[test]
+    fn debug_output_routes_figures_to_plots_and_text_to_caller() {
+        use crate::services::sentinels::{FIG_BEGIN, FIG_END};
+        let (vm, _, _) = main_vm(FakeFileSystem::new());
+
+        // Plain program output during debug comes back for the console.
+        assert_eq!(vm.feed_debug_output("result = 42").as_deref(), Some("result = 42"));
+        assert_eq!(vm.plots.figures.get().len(), 0);
+
+        // A figure emitted while debugging lands in the Plots panel (not the
+        // console) — the regression this method fixes.
+        assert_eq!(vm.feed_debug_output(&format!("{FIG_BEGIN} id=5 w=320 h=240")), None);
+        assert_eq!(vm.feed_debug_output("QUJD"), None); // base64 payload ("ABC")
+        assert_eq!(vm.feed_debug_output(FIG_END), None);
+        assert_eq!(vm.plots.figures.get().len(), 1);
+        assert_eq!(vm.plots.figures.get()[0].runtime_id, Some(5));
     }
 
     #[test]

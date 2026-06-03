@@ -368,7 +368,12 @@ impl AppState {
             "output" => {
                 if let Some(text) = body.get("output").and_then(Value::as_str) {
                     for line in text.lines() {
-                        self.vm.console.log(ConsoleLevel::Debug, line.to_string());
+                        // Route through the sentinel pipeline so figures emitted
+                        // by `plot(...)` during debugging reach the Plots panel;
+                        // plain text still lands in the console.
+                        if let Some(plain) = self.vm.feed_debug_output(line) {
+                            self.vm.console.log(ConsoleLevel::Debug, plain);
+                        }
                     }
                 }
             }

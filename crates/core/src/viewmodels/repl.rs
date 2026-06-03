@@ -74,6 +74,14 @@ impl ReplViewModel {
         }
     }
 
+    /// Consume a line through the sentinel router *without* recording plain text
+    /// in the REPL transcript. Used for program output captured during a debug
+    /// session, where figures/workspace payloads still need extracting but the
+    /// plain text belongs in the console, not the REPL pane.
+    pub fn consume_sentinel(&self, line: &str) -> Option<ReplEvent> {
+        self.router.borrow_mut().consume(line)
+    }
+
     /// ↑ — recall an older history entry into the input.
     pub fn recall_previous(&self) {
         let len = self.history.with(|h| h.len());
