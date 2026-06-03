@@ -72,6 +72,7 @@ pub struct LayoutPrefs {
     pub plots_visible: bool,
     pub sidebar_width: i32,
     pub right_width: i32,
+    pub flow_palette_visible: bool,
 }
 
 impl Default for LayoutPrefs {
@@ -82,6 +83,7 @@ impl Default for LayoutPrefs {
             plots_visible: true,
             sidebar_width: 220,
             right_width: 620,
+            flow_palette_visible: true,
         }
     }
 }
@@ -181,6 +183,16 @@ mod tests {
         assert_eq!(p.appearance.accent_enum(), Accent::Amber);
         assert_eq!(p.appearance.font_scale, 1.0);
         assert!(p.layout.plots_visible);
+        // A new field absent from an older config still defaults to visible.
+        assert!(p.layout.flow_palette_visible);
+    }
+
+    #[test]
+    fn flow_palette_visibility_round_trips() {
+        let mut p = Preferences::default();
+        p.layout.flow_palette_visible = false;
+        let reparsed = Preferences::parse(&p.to_toml()).unwrap();
+        assert!(!reparsed.layout.flow_palette_visible);
     }
 
     #[test]

@@ -20,6 +20,8 @@ pub struct LayoutViewModel {
     /// Distraction-free mode: hide the activity bar, sidebar, and right panels,
     /// leaving just the editor + console. Overlays the per-panel visibility.
     pub zen: Property<bool>,
+    /// Whether the flowchart editor's BLOCKS palette is shown (persisted).
+    pub flow_palette_visible: Property<bool>,
 }
 
 impl Default for LayoutViewModel {
@@ -39,11 +41,16 @@ impl LayoutViewModel {
             plots_visible: Property::new(true),
             center_mode: Property::new(CenterLayoutMode::Split),
             zen: Property::new(false),
+            flow_palette_visible: Property::new(true),
         }
     }
 
     pub fn toggle_sidebar(&self) {
         self.sidebar_visible.update(|v| *v = !*v);
+    }
+
+    pub fn toggle_flow_palette(&self) {
+        self.flow_palette_visible.update(|v| *v = !*v);
     }
 
     pub fn toggle_zen(&self) {
@@ -139,6 +146,9 @@ mod tests {
         assert!(!vm.plots_visible.get());
         vm.toggle_sidebar();
         assert!(!vm.sidebar_visible.get());
+        assert!(vm.flow_palette_visible.get());
+        vm.toggle_flow_palette();
+        assert!(!vm.flow_palette_visible.get());
     }
 
     #[test]
