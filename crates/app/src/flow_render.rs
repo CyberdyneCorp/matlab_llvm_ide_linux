@@ -99,7 +99,7 @@ pub fn draw_document(
         set_rgb(ctx, palette::TEXT_PRIMARY);
         ctx.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
         ctx.set_font_size(12.0);
-        let label = if node.label.is_empty() { node.kind.display_name().to_string() } else { node.label.clone() };
+        let label = node_label(node);
         let ext = ctx.text_extents(&label).map(|e| e.width()).unwrap_or(0.0);
         ctx.move_to(x + (nw - ext) / 2.0, y + nh / 2.0 + 4.0);
         ctx.show_text(&label).ok();
@@ -203,6 +203,30 @@ pub fn hit_test(doc: &FlowchartDocument, world: FlowPosition) -> Option<String> 
         }
     }
     None
+}
+
+/// The text drawn on a node body: the explicit label, else the most useful
+/// per-kind text (state name / assignment / expression …), else the kind name.
+fn node_label(node: &FlowNode) -> String {
+    use matforge_core::models::flowchart::NodeKind::*;
+    if !node.label.is_empty() {
+        return node.label.clone();
+    }
+    let d = &node.data;
+    let some = |o: &Option<String>| o.clone().filter(|s| !s.is_empty());
+    match node.kind {
+        // State-chart nodes are keyed by their id (= the state / chart name).
+        k if k.is_state_chart() => some(&d.name).unwrap_or_else(|| node.id.clone()),
+        Assignment => match (some(&d.lhs), some(&d.rhs)) {
+            (Some(l), Some(r)) => format!("{l} = {r}"),
+            _ => node.kind.display_name().to_string(),
+        },
+        Expression | Display => some(&d.expression).unwrap_or_else(|| node.kind.display_name().to_string()),
+        Constant | Variable => some(&d.name).unwrap_or_else(|| node.kind.display_name().to_string()),
+        IfBlock | WhileLoop => some(&d.cond).unwrap_or_else(|| node.kind.display_name().to_string()),
+        FunctionCall => some(&d.callee).unwrap_or_else(|| node.kind.display_name().to_string()),
+        _ => node.kind.display_name().to_string(),
+    }
 }
 
 /// Bounding box `(min_x, min_y, max_x, max_y)` of all nodes in the entry flow,
