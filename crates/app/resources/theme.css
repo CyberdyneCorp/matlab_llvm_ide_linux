@@ -388,6 +388,17 @@ notebook > header tab:hover { color: @mf_text_primary; }
     border-radius: 8px;
     padding: 8px;
 }
+/* Markdown split divider: a wide, discoverable grab target. */
+.mf-md-split > separator {
+    min-width: 10px;
+    background-color: @mf_border;
+    background-clip: content-box;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+}
+.mf-md-split > separator:hover {
+    background-color: @mf_accent;
+}
 .mf-md-table {
     border: 1px solid @mf_border;
     border-radius: 6px;
