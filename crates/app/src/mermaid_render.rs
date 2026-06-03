@@ -8,7 +8,9 @@ use gtk::cairo;
 use gtk::prelude::*;
 use gtk::DrawingArea;
 
-use matforge_core::services::mermaid::{Arrow, ClassScene, Marker, Scene, SeqScene, Shape};
+use matforge_core::services::mermaid::{
+    Arrow, ClassScene, Marker, Scene, SeqScene, Shape, StateKind, StateScene,
+};
 use matforge_core::theme::Rgb;
 
 const FONT: f64 = 13.0;
@@ -435,5 +437,79 @@ fn marker(
             }
         }
         Marker::None => {}
+    }
+}
+
+// ----- state diagrams --------------------------------------------------------
+
+/// A `DrawingArea` sized to `scene`, painting a state diagram on demand.
+pub fn drawing_area_state(scene: StateScene) -> DrawingArea {
+    let area = DrawingArea::new();
+    area.set_content_width(scene.width.ceil() as i32);
+    area.set_content_height(scene.height.ceil() as i32);
+    area.set_halign(gtk::Align::Start);
+    area.add_css_class("mf-md-mermaid");
+    area.set_draw_func(move |_a, ctx, _w, _h| draw_state(ctx, &scene));
+    area
+}
+
+fn draw_state(ctx: &cairo::Context, scene: &StateScene) {
+    let t = crate::theme_css::current();
+    ctx.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+    ctx.set_font_size(FONT);
+
+    // Transitions first, with arrowheads and labels.
+    for e in &scene.edges {
+        set_rgb(ctx, t.text_secondary);
+        ctx.set_line_width(1.5);
+        ctx.move_to(e.from.0, e.from.1);
+        ctx.line_to(e.to.0, e.to.1);
+        ctx.stroke().ok();
+        arrowhead(ctx, e.from, e.to, t.text_secondary);
+        if let Some(label) = &e.label {
+            label_chip(ctx, label, e.label_pos, &t);
+        }
+    }
+
+    for node in &scene.nodes {
+        let (cx, cy) = (node.x + node.w / 2.0, node.y + node.h / 2.0);
+        match node.kind {
+            StateKind::Start => {
+                set_rgb(ctx, t.text_primary);
+                ctx.arc(cx, cy, node.w / 2.0, 0.0, std::f64::consts::TAU);
+                ctx.fill().ok();
+            }
+            StateKind::End => {
+                // Outer ring + filled inner dot.
+                set_rgb(ctx, t.text_primary);
+                ctx.set_line_width(1.5);
+                ctx.arc(cx, cy, node.w / 2.0, 0.0, std::f64::consts::TAU);
+                ctx.stroke().ok();
+                ctx.arc(cx, cy, node.w / 2.0 - 3.5, 0.0, std::f64::consts::TAU);
+                ctx.fill().ok();
+            }
+            StateKind::Choice => {
+                ctx.move_to(cx, node.y);
+                ctx.line_to(node.x + node.w, cy);
+                ctx.line_to(cx, node.y + node.h);
+                ctx.line_to(node.x, cy);
+                ctx.close_path();
+                set_rgb(ctx, t.card);
+                ctx.fill_preserve().ok();
+                set_rgb(ctx, t.accent);
+                ctx.set_line_width(1.6);
+                ctx.stroke().ok();
+            }
+            StateKind::Normal => {
+                rounded_rect(ctx, node.x, node.y, node.w, node.h, 10.0);
+                set_rgb(ctx, t.card);
+                ctx.fill_preserve().ok();
+                set_rgb(ctx, t.accent);
+                ctx.set_line_width(1.6);
+                ctx.stroke().ok();
+                set_rgb(ctx, t.text_primary);
+                centered_text(ctx, &node.label, cx, cy);
+            }
+        }
     }
 }

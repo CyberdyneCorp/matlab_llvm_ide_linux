@@ -424,6 +424,9 @@ fn mermaid_block(src: &str) -> GtkBox {
         Some(Diagram::Class(cd)) => {
             Some(crate::mermaid_render::drawing_area_class(mermaid::layout_class(&cd)))
         }
+        Some(Diagram::State(sm)) => {
+            Some(crate::mermaid_render::drawing_area_state(mermaid::layout_state(&sm)))
+        }
         None => None,
     };
     match area {

@@ -34,18 +34,17 @@ const CUSTOM: &[(&str, &str)] = &[
     ),
 ];
 
-/// Write the custom icons to a temp dir and register it as an icon search path.
+/// Write the custom icons under a `hicolor/` tree and register it as an icon
+/// search path. `hicolor` is the universal fallback theme GTK always searches
+/// (its system `index.theme` already declares `scalable/actions`), so the icons
+/// resolve by name regardless of the active theme — unlike a private theme dir,
+/// which GTK only searches when that theme is selected.
 pub fn install() {
     let dir = std::env::temp_dir().join("matforge-icons");
-    let scalable = dir.join("scalable/actions");
+    let scalable = dir.join("hicolor/scalable/actions");
     if std::fs::create_dir_all(&scalable).is_err() {
         return;
     }
-    // A minimal index.theme so GTK treats the dir as an icon theme path.
-    let _ = std::fs::write(
-        dir.join("index.theme"),
-        "[Icon Theme]\nName=MatForge\nDirectories=scalable/actions\n\n[scalable/actions]\nSize=16\nType=Scalable\n",
-    );
     for (name, svg) in CUSTOM {
         if let Ok(mut f) = std::fs::File::create(scalable.join(format!("{name}.svg"))) {
             let _ = f.write_all(svg.as_bytes());

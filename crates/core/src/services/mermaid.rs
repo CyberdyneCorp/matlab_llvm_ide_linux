@@ -18,6 +18,10 @@
 //!   `Name : member` shorthands; relations `<|--`, `*--`, `o--`, `-->`, `..>`,
 //!   `<|..`, `--`/`..` (with cardinality strings stripped) and `: label`. Laid
 //!   out by layering → [`layout_class`] returns a [`ClassScene`].
+//! - **State diagrams** (`stateDiagram-v2` / `stateDiagram`): `[*]` start/end
+//!   pseudo-states, transitions `A --> B : label`, `state "desc" as id` and
+//!   `id : desc` declarations, and `<<choice>>` states. Laid out by layering →
+//!   [`layout_state`] returns a [`StateScene`].
 //!
 //! Unsupported diagram types return `None` so the caller falls back to the raw
 //! source. Pure and unit-tested.
@@ -31,6 +35,8 @@ pub enum Diagram {
     Sequence(Sequence),
     /// A `classDiagram`; lay out with [`layout_class`].
     Class(ClassDiagram),
+    /// A `stateDiagram` / `stateDiagram-v2`; lay out with [`layout_state`].
+    State(StateMachine),
 }
 
 /// Diagram flow direction.
@@ -139,6 +145,7 @@ pub fn parse(src: &str) -> Option<Diagram> {
         "graph" | "flowchart" => parse_flow(src).map(Diagram::Flow),
         "sequenceDiagram" => parse_sequence(src).map(Diagram::Sequence),
         "classDiagram" => parse_class(src).map(Diagram::Class),
+        "stateDiagram" | "stateDiagram-v2" => parse_state(src).map(Diagram::State),
         _ => None,
     }
 }
@@ -473,13 +480,16 @@ pub fn layout(g: &Graph) -> Scene {
 }
 
 /// Longest-path layering: `layer[v] = max(layer[u]) + 1` over edges `u -> v`,
-/// relaxed until stable. Cycles are bounded by the node count.
+/// relaxed until stable. Back edges (which would form cycles, e.g. a state
+/// machine's `Running -> Paused -> Running`) are dropped first so cyclic graphs
+/// lay out as a DAG instead of inflating every node's layer.
 fn longest_path_layers(n: usize, edges: &[Edge]) -> Vec<usize> {
+    let forward = remove_back_edges(n, edges);
     let mut layer = vec![0usize; n];
-    for _ in 0..n {
+    for _ in 0..=n {
         let mut changed = false;
-        for e in edges {
-            if e.from != e.to && layer[e.to] < layer[e.from] + 1 {
+        for e in &forward {
+            if layer[e.to] < layer[e.from] + 1 {
                 layer[e.to] = layer[e.from] + 1;
                 changed = true;
             }
@@ -489,6 +499,50 @@ fn longest_path_layers(n: usize, edges: &[Edge]) -> Vec<usize> {
         }
     }
     layer
+}
+
+/// Return `edges` with cycle-forming back edges removed, found by a DFS that
+/// drops any edge pointing at a node still on the recursion stack.
+fn remove_back_edges(n: usize, edges: &[Edge]) -> Vec<Edge> {
+    let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n]; // node -> outgoing edge indices
+    for (i, e) in edges.iter().enumerate() {
+        if e.from < n && e.to < n {
+            adj[e.from].push(i);
+        }
+    }
+    let mut color = vec![0u8; n]; // 0 = unvisited, 1 = on stack, 2 = done
+    let mut keep = vec![true; edges.len()];
+    for root in 0..n {
+        if color[root] != 0 {
+            continue;
+        }
+        color[root] = 1;
+        let mut stack: Vec<(usize, usize)> = vec![(root, 0)];
+        while let Some(&(u, ai)) = stack.last() {
+            if ai < adj[u].len() {
+                stack.last_mut().unwrap().1 += 1;
+                let ei = adj[u][ai];
+                let v = edges[ei].to;
+                match color[v] {
+                    1 => keep[ei] = false, // points at an ancestor → back edge
+                    0 => {
+                        color[v] = 1;
+                        stack.push((v, 0));
+                    }
+                    _ => {} // forward / cross edge → keep
+                }
+            } else {
+                color[u] = 2;
+                stack.pop();
+            }
+        }
+    }
+    edges
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| keep[*i])
+        .map(|(_, e)| e.clone())
+        .collect()
 }
 
 /// Intersection of the segment from `node`'s center toward `target` with the
@@ -1187,6 +1241,281 @@ fn clip_rect((x, y, w, h): (f64, f64, f64, f64), target: (f64, f64)) -> (f64, f6
     (cx + dx * t, cy + dy * t)
 }
 
+// ===== state diagrams ========================================================
+
+/// What a state node represents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StateKind {
+    /// A regular named state (rounded box).
+    Normal,
+    /// The `[*]` initial pseudo-state (filled dot).
+    Start,
+    /// The `[*]` final pseudo-state (ringed dot).
+    End,
+    /// A `<<choice>>` state (diamond).
+    Choice,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct State {
+    id: String,
+    label: String,
+    kind: StateKind,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Transition {
+    from: usize,
+    to: usize,
+    label: Option<String>,
+}
+
+/// A parsed state machine (pre-layout): states + transitions.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StateMachine {
+    pub dir: Dir,
+    states: Vec<State>,
+    transitions: Vec<Transition>,
+}
+
+impl StateMachine {
+    pub fn state_count(&self) -> usize {
+        self.states.len()
+    }
+    pub fn transition_count(&self) -> usize {
+        self.transitions.len()
+    }
+}
+
+/// A laid-out state node.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StateNode {
+    pub label: String,
+    pub kind: StateKind,
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+/// A fully laid-out state diagram, sized `width` × `height` pixels. Transitions
+/// reuse [`SceneEdge`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct StateScene {
+    pub width: f64,
+    pub height: f64,
+    pub nodes: Vec<StateNode>,
+    pub edges: Vec<SceneEdge>,
+}
+
+/// Parse a `stateDiagram` / `stateDiagram-v2`. Returns `None` if it has no states.
+fn parse_state(src: &str) -> Option<StateMachine> {
+    let lines: Vec<&str> = src.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let mut dir = Dir::Down;
+    let mut ids: Vec<String> = Vec::new();
+    let mut states: Vec<State> = Vec::new();
+    let mut transitions: Vec<Transition> = Vec::new();
+
+    for &line in lines.iter().skip(1) {
+        if line.starts_with("%%") || line == "}" {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("direction ") {
+            if let Some(d) = parse_dir(rest.trim()) {
+                dir = d;
+            }
+            continue;
+        }
+        if line.starts_with("note ") {
+            continue; // notes not laid out yet
+        }
+
+        // Transition: `A --> B` (optionally `: label`), endpoints may be `[*]`.
+        if let Some(pos) = line.find("-->") {
+            let from_tok = line[..pos].trim();
+            let after = line[pos + 3..].trim();
+            let (to_tok, label) = match after.split_once(':') {
+                Some((t, l)) => (t.trim(), Some(l.trim().to_string()).filter(|s| !s.is_empty())),
+                None => (after, None),
+            };
+            let from = intern_state(&mut ids, &mut states, from_tok, true);
+            let to = intern_state(&mut ids, &mut states, to_tok, false);
+            transitions.push(Transition { from, to, label });
+            continue;
+        }
+
+        // `state "desc" as id`, `state id <<choice>>`, `state id { ... }`, `state id`.
+        if let Some(rest) = line.strip_prefix("state ") {
+            parse_state_decl(rest.trim(), &mut ids, &mut states);
+            continue;
+        }
+
+        // `id : description`.
+        if let Some((id, desc)) = line.split_once(':') {
+            let id = id.trim();
+            if !id.is_empty() && id.split_whitespace().count() == 1 {
+                let idx = intern_state(&mut ids, &mut states, id, false);
+                states[idx].label = desc.trim().to_string();
+            }
+            continue;
+        }
+        // A bare state id on its own line.
+        if line.split_whitespace().count() == 1 && line != "{" {
+            intern_state(&mut ids, &mut states, line, false);
+        }
+    }
+
+    if states.is_empty() {
+        return None;
+    }
+    Some(StateMachine { dir, states, transitions })
+}
+
+/// Parse the text after `state `: `"desc" as id`, `id <<choice>>`, `id {`, `id`.
+fn parse_state_decl(rest: &str, ids: &mut Vec<String>, states: &mut Vec<State>) {
+    // `state "Long description" as id`
+    if let Some(after_quote) = rest.strip_prefix('"') {
+        if let Some((desc, tail)) = after_quote.split_once('"') {
+            if let Some(id) = tail.trim().strip_prefix("as ") {
+                let idx = intern_state(ids, states, id.trim(), false);
+                states[idx].label = desc.to_string();
+                return;
+            }
+        }
+    }
+    let id = rest.trim_end_matches('{').trim();
+    let (id, kind) = if let Some(p) = id.find("<<") {
+        let stereo = &id[p..];
+        let kind = if stereo.contains("choice") { StateKind::Choice } else { StateKind::Normal };
+        (id[..p].trim(), kind)
+    } else {
+        (id, StateKind::Normal)
+    };
+    if let Some(name) = id.split_whitespace().next() {
+        let idx = intern_state(ids, states, name, false);
+        if kind == StateKind::Choice {
+            states[idx].kind = StateKind::Choice;
+        }
+    }
+}
+
+/// Intern a state by token. `[*]` maps to a single Start node when it is the
+/// source of a transition, or a single End node when it is the target.
+fn intern_state(ids: &mut Vec<String>, states: &mut Vec<State>, tok: &str, is_source: bool) -> usize {
+    let (key, label, kind) = if tok == "[*]" {
+        if is_source {
+            ("\u{1}start", String::new(), StateKind::Start)
+        } else {
+            ("\u{1}end", String::new(), StateKind::End)
+        }
+    } else {
+        (tok, tok.to_string(), StateKind::Normal)
+    };
+    if let Some(i) = ids.iter().position(|n| n == key) {
+        i
+    } else {
+        ids.push(key.to_string());
+        states.push(State { id: key.to_string(), label, kind });
+        ids.len() - 1
+    }
+}
+
+const STATE_DOT: f64 = 18.0;
+const STATE_CHOICE: f64 = 34.0;
+
+fn state_node_size(s: &State) -> (f64, f64) {
+    match s.kind {
+        StateKind::Start | StateKind::End => (STATE_DOT, STATE_DOT),
+        StateKind::Choice => (STATE_CHOICE, STATE_CHOICE),
+        StateKind::Normal => (node_width(&s.label).max(70.0), NODE_H),
+    }
+}
+
+/// Lay a state machine out into pixel space using longest-path layering along
+/// its direction (default top-down), edges clipped to node borders.
+pub fn layout_state(sm: &StateMachine) -> StateScene {
+    let n = sm.states.len();
+    let sizes: Vec<(f64, f64)> = sm.states.iter().map(state_node_size).collect();
+    let edges_g: Vec<Edge> = sm
+        .transitions
+        .iter()
+        .map(|t| Edge { from: t.from, to: t.to, label: None })
+        .collect();
+    let layer = longest_path_layers(n, &edges_g);
+    let max_layer = layer.iter().copied().max().unwrap_or(0);
+    let horizontal = sm.dir.horizontal();
+
+    let mut by_layer: Vec<Vec<usize>> = vec![Vec::new(); max_layer + 1];
+    for (idx, &l) in layer.iter().enumerate() {
+        by_layer[l].push(idx);
+    }
+
+    let cross = |id: usize| if horizontal { sizes[id].1 } else { sizes[id].0 };
+    let main = |id: usize| if horizontal { sizes[id].0 } else { sizes[id].1 };
+
+    let layer_cross: Vec<f64> = by_layer
+        .iter()
+        .map(|ids| {
+            ids.iter().map(|&id| cross(id)).sum::<f64>()
+                + SIBLING_GAP * ids.len().saturating_sub(1) as f64
+        })
+        .collect();
+    let cross_canvas = layer_cross.iter().cloned().fold(0.0, f64::max);
+
+    let mut nodes = vec![
+        StateNode { label: String::new(), kind: StateKind::Normal, x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
+        n
+    ];
+    let mut acc = MARGIN;
+    for (l, ids) in by_layer.iter().enumerate() {
+        let layer_main = ids.iter().map(|&id| main(id)).fold(0.0, f64::max);
+        let mut c = MARGIN + (cross_canvas - layer_cross[l]) / 2.0;
+        for &id in ids {
+            let (w, h) = sizes[id];
+            // Center each node within its layer's main extent.
+            let main_off = acc + (layer_main - main(id)) / 2.0;
+            let (x, y) = if horizontal { (main_off, c) } else { (c, main_off) };
+            nodes[id] = StateNode {
+                label: sm.states[id].label.clone(),
+                kind: sm.states[id].kind,
+                x,
+                y,
+                w,
+                h,
+            };
+            c += cross(id) + SIBLING_GAP;
+        }
+        acc += layer_main + LAYER_GAP;
+    }
+    let main_canvas = acc - LAYER_GAP + MARGIN;
+    let (width, height) = if horizontal {
+        (main_canvas, cross_canvas + 2.0 * MARGIN)
+    } else {
+        (cross_canvas + 2.0 * MARGIN, main_canvas)
+    };
+
+    let edges = sm
+        .transitions
+        .iter()
+        .map(|t| {
+            let a = &nodes[t.from];
+            let b = &nodes[t.to];
+            let ac = (a.x + a.w / 2.0, a.y + a.h / 2.0);
+            let bc = (b.x + b.w / 2.0, b.y + b.h / 2.0);
+            let from = clip_rect((a.x, a.y, a.w, a.h), bc);
+            let to = clip_rect((b.x, b.y, b.w, b.h), ac);
+            SceneEdge {
+                from,
+                to,
+                label: t.label.clone(),
+                label_pos: ((from.0 + to.0) / 2.0, (from.1 + to.1) / 2.0),
+            }
+        })
+        .collect();
+
+    StateScene { width: width.max(MARGIN * 2.0), height, nodes, edges }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1212,6 +1541,14 @@ mod tests {
         match parse(src) {
             Some(Diagram::Class(c)) => c,
             other => panic!("expected a class diagram, got {other:?}"),
+        }
+    }
+
+    /// Parse `src` expecting a state diagram, panicking otherwise.
+    fn state(src: &str) -> StateMachine {
+        match parse(src) {
+            Some(Diagram::State(s)) => s,
+            other => panic!("expected a state diagram, got {other:?}"),
         }
     }
 
@@ -1405,5 +1742,61 @@ mod tests {
         assert!(s.boxes[1].y > s.boxes[0].y, "Dog should be below Animal");
         assert_eq!(s.edges.len(), 1);
         assert_eq!(s.edges[0].left, Marker::Triangle);
+    }
+
+    // ----- state diagrams -----
+
+    #[test]
+    fn state_start_end_are_shared_pseudo_states() {
+        let s = state("stateDiagram-v2\n[*] --> Idle\nIdle --> Running\nRunning --> [*]");
+        // Start, Idle, Running, End.
+        assert_eq!(s.state_count(), 4);
+        assert_eq!(s.transition_count(), 3);
+        let kinds: Vec<StateKind> = s.states.iter().map(|st| st.kind).collect();
+        assert!(kinds.contains(&StateKind::Start));
+        assert!(kinds.contains(&StateKind::End));
+        assert_eq!(kinds.iter().filter(|k| **k == StateKind::Normal).count(), 2);
+    }
+
+    #[test]
+    fn state_transition_labels_and_decls() {
+        let s = state(
+            "stateDiagram-v2\nstate \"Powered On\" as On\nOff --> On : flip\nstate Choosing <<choice>>",
+        );
+        let on = s.states.iter().find(|st| st.id == "On").unwrap();
+        assert_eq!(on.label, "Powered On");
+        let choosing = s.states.iter().find(|st| st.id == "Choosing").unwrap();
+        assert_eq!(choosing.kind, StateKind::Choice);
+        let t = s.transitions.iter().find(|t| t.label.is_some()).unwrap();
+        assert_eq!(t.label.as_deref(), Some("flip"));
+    }
+
+    #[test]
+    fn state_layout_flows_downward() {
+        let s = layout_state(&state("stateDiagram-v2\n[*] --> A\nA --> [*]"));
+        assert_eq!(s.nodes.len(), 3);
+        // Start dot at top, end dot at bottom, A in the middle.
+        let start = s.nodes.iter().find(|n| n.kind == StateKind::Start).unwrap();
+        let end = s.nodes.iter().find(|n| n.kind == StateKind::End).unwrap();
+        assert!(end.y > start.y, "end should be below start");
+        // Pseudo-states are small dots.
+        assert!(start.w < 24.0 && start.h < 24.0);
+    }
+
+    #[test]
+    fn state_cycle_does_not_inflate_layout() {
+        // Running <-> Paused is a cycle; without back-edge removal the layering
+        // would push nodes many layers apart. The canvas should stay compact.
+        let s = layout_state(&state(
+            "stateDiagram-v2\n[*] --> Idle\nIdle --> Running\nRunning --> Paused\nPaused --> Running\nRunning --> [*]",
+        ));
+        // 5 nodes over ~4 layers; height stays bounded (no runaway).
+        assert!(s.height < 6.0 * (NODE_H + LAYER_GAP), "height={}", s.height);
+    }
+
+    #[test]
+    fn unsupported_still_none_after_new_types() {
+        assert!(parse("erDiagram\nA ||--o{ B : has").is_none());
+        assert!(parse("gantt\ntitle X").is_none());
     }
 }
