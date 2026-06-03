@@ -96,16 +96,20 @@ pub enum ThemeId {
     Daylight,
     /// Maximum-contrast dark theme for accessibility.
     HighContrast,
+    /// Black surfaces, green phosphor text — the "terminal / Matrix" look.
+    Matrix,
 }
 
 impl ThemeId {
-    pub const ALL: [ThemeId; 3] = [ThemeId::Midnight, ThemeId::Daylight, ThemeId::HighContrast];
+    pub const ALL: [ThemeId; 4] =
+        [ThemeId::Midnight, ThemeId::Daylight, ThemeId::HighContrast, ThemeId::Matrix];
 
     pub fn label(self) -> &'static str {
         match self {
             ThemeId::Midnight => "Midnight",
             ThemeId::Daylight => "Daylight",
             ThemeId::HighContrast => "High Contrast",
+            ThemeId::Matrix => "Matrix",
         }
     }
 
@@ -115,6 +119,7 @@ impl ThemeId {
             ThemeId::Midnight => "midnight",
             ThemeId::Daylight => "daylight",
             ThemeId::HighContrast => "high-contrast",
+            ThemeId::Matrix => "matrix",
         }
     }
 
@@ -122,6 +127,7 @@ impl ThemeId {
         match key {
             "daylight" => ThemeId::Daylight,
             "high-contrast" => ThemeId::HighContrast,
+            "matrix" => ThemeId::Matrix,
             _ => ThemeId::Midnight,
         }
     }
@@ -372,11 +378,56 @@ impl ThemeTokens {
         }
     }
 
+    /// Black surfaces, green phosphor text — the classic terminal aesthetic.
+    pub fn matrix() -> ThemeTokens {
+        let green = Rgb::hex(0x00FF41);
+        ThemeTokens {
+            id: ThemeId::Matrix,
+            dark: true,
+            window_background: Rgb::hex(0x000000),
+            chrome: Rgb::hex(0x010601),
+            panel: Rgb::hex(0x020B04),
+            panel_alt: Rgb::hex(0x05180A),
+            editor_bg: Rgb::hex(0x000300),
+            card: Rgb::hex(0x07210D),
+            border: Rgb::hex(0x0E5A22),
+            border_soft: Rgb::hex(0x093D17),
+            text_primary: Rgb::hex(0x3BFF6B),
+            text_secondary: Rgb::hex(0x23C24A),
+            text_muted: Rgb::hex(0x18913A),
+            accent: green,
+            term_bg: Rgb::hex(0x000000),
+            term_fg: green,
+            orange: green,
+            amber: Rgb::hex(0x9BE05A),
+            green: Rgb::hex(0x33FF66),
+            green_deep: Rgb::hex(0x1FA841),
+            blue: Rgb::hex(0x2AE6A0),
+            cyan: Rgb::hex(0x4DFFC4),
+            red: Rgb::hex(0xFF4D4D),
+            yellow: Rgb::hex(0xCFFF4D),
+            magenta: Rgb::hex(0x7CFF8F),
+            selection: Rgb::hex(0x0E4A1E),
+            hover: Rgb::hex(0x0A3315),
+            syn_plain: Rgb::hex(0x3BFF6B),
+            syn_keyword: green,
+            syn_control: Rgb::hex(0x66FF99),
+            syn_number: Rgb::hex(0xB6FF6E),
+            syn_string: Rgb::hex(0x9BFF5A),
+            syn_comment: Rgb::hex(0x1F8A3C),
+            syn_function: Rgb::hex(0x4DFFC4),
+            syn_identifier: Rgb::hex(0x3BFF6B),
+            syn_operator: Rgb::hex(0x66CC7A),
+            syn_line_number: Rgb::hex(0x155C26),
+        }
+    }
+
     pub fn for_id(id: ThemeId) -> ThemeTokens {
         match id {
             ThemeId::Midnight => ThemeTokens::midnight(),
             ThemeId::Daylight => ThemeTokens::daylight(),
             ThemeId::HighContrast => ThemeTokens::high_contrast(),
+            ThemeId::Matrix => ThemeTokens::matrix(),
         }
     }
 
@@ -495,6 +546,17 @@ mod tests {
         assert_eq!(t.editor_bg, Rgb::hex(0x000000));
         assert_eq!(t.text_primary, Rgb::hex(0xFFFFFF));
         assert!(luminance(t.text_primary) - luminance(t.editor_bg) > 0.9);
+    }
+
+    #[test]
+    fn matrix_is_black_with_green_text() {
+        let t = ThemeTokens::matrix();
+        assert!(t.dark);
+        assert_eq!(t.window_background, Rgb::hex(0x000000));
+        assert_eq!(t.accent, Rgb::hex(0x00FF41));
+        // green-dominant text + syntax
+        let g = |c: Rgb| c.g > c.r && c.g > c.b;
+        assert!(g(t.text_primary) && g(t.term_fg) && g(t.syn_keyword) && g(t.syn_plain));
     }
 
     #[test]
