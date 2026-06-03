@@ -221,6 +221,7 @@ popover button:hover { background-color: @mf_hover; }
     padding: 0 2px;
 }
 .mf-header-action:hover { color: @mf_text_primary; background-color: @mf_hover; }
+.mf-tab-actions { margin-right: 4px; }
 
 /* Table column headers */
 .mf-col-header { padding: 3px 8px; border-bottom: 1px solid @mf_border_soft; }

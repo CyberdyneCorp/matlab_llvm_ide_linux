@@ -83,6 +83,7 @@ pub mod name {
     pub const FLOWCHART: &str = "mf-flowchart-symbolic";
 
     pub const REFRESH: &str = "view-refresh-symbolic";
+    pub const COPY: &str = "edit-copy-symbolic";
     pub const CLOSE: &str = "window-close-symbolic";
     pub const ADD: &str = "list-add-symbolic";
     pub const TRASH: &str = "user-trash-symbolic";
