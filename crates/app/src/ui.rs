@@ -1702,6 +1702,69 @@ fn goto_problem(app: &Rc<AppState>, file: &str, line: usize) {
     }
 }
 
+/// Export the selected figure to a PNG: a runtime figure writes its captured
+/// bytes verbatim; a series figure is re-rendered to an offscreen surface.
+fn export_selected_figure(app: &Rc<AppState>) {
+    use matforge_core::models::PlotFigure;
+    let Some(id) = app.vm.plots.selected_id.get() else {
+        app.vm.status_bar.set_message("No figure selected to export");
+        return;
+    };
+    let Some(figure) = app.vm.plots.figures.with(|f| f.iter().find(|fig| fig.id == id).cloned())
+    else {
+        return;
+    };
+
+    let render_png = |fig: &PlotFigure| -> Option<Vec<u8>> {
+        if let Some(png) = &fig.png_data {
+            return Some(png.clone());
+        }
+        // Re-render the series chart to an ARGB32 surface, then PNG-encode it via
+        // GDK (cairo's own `png` feature isn't enabled in this gtk4 build).
+        let (w, h) = (900, 600);
+        let mut surface =
+            gtk::cairo::ImageSurface::create(gtk::cairo::Format::ARgb32, w, h).ok()?;
+        {
+            let ctx = gtk::cairo::Context::new(&surface).ok()?;
+            crate::plot_render::draw_figure(&ctx, w as f64, h as f64, fig);
+        }
+        let stride = surface.stride() as usize;
+        surface.flush();
+        let data = surface.data().ok()?;
+        let bytes = gtk::glib::Bytes::from(&data[..]);
+        let texture = gtk::gdk::MemoryTexture::new(
+            w,
+            h,
+            gtk::gdk::MemoryFormat::B8g8r8a8Premultiplied,
+            &bytes,
+            stride,
+        );
+        Some(texture.save_to_png_bytes().to_vec())
+    };
+    let Some(png) = render_png(&figure) else {
+        app.vm.console.log(ConsoleLevel::Error, "could not render figure to PNG");
+        return;
+    };
+
+    let suggested = format!(
+        "{}.png",
+        figure.title.split(['·', ' ']).next().unwrap_or("figure").trim().replace(' ', "_")
+    );
+    let dialog = gtk::FileDialog::builder().title("Export Figure").initial_name(suggested).build();
+    let parent = MAIN_WINDOW.with(|w| w.borrow().clone());
+    let app = app.clone();
+    dialog.save(parent.as_ref(), gio::Cancellable::NONE, move |result| {
+        if let Ok(file) = result {
+            if let Some(path) = file.path() {
+                match std::fs::write(&path, &png) {
+                    Ok(()) => app.vm.status_bar.set_message(format!("Exported {}", path.display())),
+                    Err(e) => app.vm.console.log(ConsoleLevel::Error, format!("export failed: {e}")),
+                }
+            }
+        }
+    });
+}
+
 // ---- Right column (Workspace ⇄ Plots) -------------------------------------
 
 fn build_right_column(app: &Rc<AppState>) -> Paned {
@@ -1973,6 +2036,12 @@ fn build_plots(app: &Rc<AppState>) -> GtkBox {
         add.connect_clicked(move |_| app.plot_inspected());
     }
     let refresh = header_action(ic::REFRESH);
+    let export = header_action(ic::SAVE);
+    export.set_tooltip_text(Some("Export selected figure as PNG"));
+    {
+        let app = app.clone();
+        export.connect_clicked(move |_| export_selected_figure(&app));
+    }
     let trash = header_action(ic::TRASH);
     let clear = header_action(ic::CLEAR);
     {
@@ -1992,7 +2061,7 @@ fn build_plots(app: &Rc<AppState>) -> GtkBox {
         let app = app.clone();
         close.connect_clicked(move |_| app.vm.layout.plots_visible.set(false));
     }
-    panel.append(&panel_header("PLOTS", &[add, refresh, trash, clear, close]));
+    panel.append(&panel_header("PLOTS", &[add, refresh, export, trash, clear, close]));
 
     let list = ListBox::new();
     let list_scroll = ScrolledWindow::new();
