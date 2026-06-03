@@ -48,10 +48,13 @@ pub fn build(window: &ApplicationWindow, app: Rc<AppState>) {
     inner.set_end_child(Some(&right));
     inner.set_resize_start_child(true);
     inner.set_resize_end_child(false);
-    inner.set_shrink_start_child(false);
-    inner.set_shrink_end_child(false);
+    // Let both sides shrink past their natural size when the window is narrow, so
+    // the center + right never overflow into each other (the old no-shrink pair
+    // overlapped the console onto the workspace on smaller screens).
+    inner.set_shrink_start_child(true);
+    inner.set_shrink_end_child(true);
     // No fixed position: the editor expands, the right region keeps its size
-    // request (workspace + plots), so nothing overflows the window.
+    // request (workspace + plots).
 
     // sidebar | (center|right) — draggable divider, sidebar keeps its size.
     let outer = Paned::new(Orientation::Horizontal);
@@ -2947,13 +2950,14 @@ fn build_right_column(app: &Rc<AppState>) -> Paned {
 
     let paned = Paned::new(Orientation::Horizontal);
     paned.set_wide_handle(true);
-    paned.set_size_request(620, -1);
+    // A more compact right column so it doesn't dominate smaller screens.
+    paned.set_size_request(440, -1);
     paned.add_css_class("mf-border-left");
     paned.set_start_child(Some(&workspace));
     paned.set_end_child(Some(&plots));
     paned.set_resize_start_child(true);
     paned.set_resize_end_child(true);
-    paned.set_position(320);
+    paned.set_position(230);
 
     {
         let workspace = workspace.clone();
@@ -3181,14 +3185,19 @@ fn attach_var_menu(btn: &Button, app: &Rc<AppState>, name: &str) {
     btn.add_controller(drag);
 }
 
+/// Workspace column widths (chars). VALUE (width 0) hexpands; the rest are fixed.
+/// Kept compact so the panel fits a narrow right column. Shared by the header
+/// and each variable row so they stay aligned.
+const WS_COLS: [(&str, i32); 4] = [("NAME", 9), ("VALUE", 0), ("TYPE", 7), ("SIZE", 6)];
+
 fn ws_columns_header() -> GtkBox {
     let row = GtkBox::new(Orientation::Horizontal, 0);
     row.add_css_class("mf-col-header");
-    for (text, chars, expand) in [("NAME", 12, false), ("VALUE", 0, true), ("TYPE", 10, false), ("SIZE", 8, false)] {
+    for (text, chars) in WS_COLS {
         let l = Label::new(Some(text));
         l.add_css_class("mf-col-title");
         l.set_xalign(0.0);
-        if expand {
+        if chars == 0 {
             l.set_hexpand(true);
         } else {
             l.set_width_chars(chars);
@@ -3203,20 +3212,17 @@ fn ws_variable_row(v: &matforge_core::models::WorkspaceVariable) -> Button {
     btn.set_has_frame(false);
     btn.add_css_class("mf-row");
     let row = GtkBox::new(Orientation::Horizontal, 0);
-    let cells = [
-        (v.name.clone(), 12, false),
-        (if v.preview.is_empty() { "—".into() } else { v.preview.clone() }, 0, true),
-        (v.dtype.display_name(), 10, false),
-        (v.size.clone(), 8, false),
-    ];
-    for (text, chars, expand) in cells {
+    let preview = if v.preview.is_empty() { "—".into() } else { v.preview.clone() };
+    let texts = [v.name.clone(), preview, v.dtype.display_name().to_string(), v.size.clone()];
+    for ((_, chars), text) in WS_COLS.iter().zip(texts) {
         let l = Label::new(Some(&text));
         l.set_xalign(0.0);
         l.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        if expand {
+        if *chars == 0 {
             l.set_hexpand(true);
+            l.set_width_chars(6); // keep VALUE from forcing the panel wide
         } else {
-            l.set_width_chars(chars);
+            l.set_width_chars(*chars);
         }
         row.append(&l);
     }
