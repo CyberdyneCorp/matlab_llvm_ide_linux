@@ -210,6 +210,52 @@ impl FlowchartViewModel {
         self.execution_node.set(id);
     }
 
+    /// A structural execution order for the visual step: a depth-first walk from
+    /// the Start node, following each node's outgoing edges in order and visiting
+    /// every node once (so loops are walked a single time). Any nodes not reached
+    /// from Start are appended in document order, so nothing is skipped. This is
+    /// purely structural — no value evaluation, so branches are all explored.
+    pub fn execution_order(&self) -> Vec<String> {
+        use std::collections::{HashMap, HashSet};
+        self.document.with(|doc| {
+            let Some(flow) = doc.flows.first() else { return Vec::new() };
+            let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
+            for e in &flow.edges {
+                adj.entry(e.from.node.as_str()).or_default().push(e.to.node.as_str());
+            }
+            let start = flow
+                .nodes
+                .iter()
+                .find(|n| n.kind == NodeKind::Start)
+                .or_else(|| flow.nodes.first());
+            let mut order: Vec<String> = Vec::new();
+            let mut visited: HashSet<&str> = HashSet::new();
+            if let Some(s) = start {
+                let mut stack: Vec<&str> = vec![s.id.as_str()];
+                while let Some(id) = stack.pop() {
+                    if !visited.insert(id) {
+                        continue;
+                    }
+                    order.push(id.to_string());
+                    if let Some(children) = adj.get(id) {
+                        // Reverse so the first outgoing edge is stepped first.
+                        for &c in children.iter().rev() {
+                            if !visited.contains(c) {
+                                stack.push(c);
+                            }
+                        }
+                    }
+                }
+            }
+            for n in &flow.nodes {
+                if !visited.contains(n.id.as_str()) {
+                    order.push(n.id.clone());
+                }
+            }
+            order
+        })
+    }
+
     pub fn undo(&self) {
         if let Some(prev) = self.undo_stack.borrow_mut().pop() {
             self.redo_stack.borrow_mut().push(self.document.get());
@@ -258,6 +304,36 @@ mod tests {
         let vm = FlowchartViewModel::empty("D", SchemaKind::ControlFlow);
         assert_eq!(vm.node_count(), 2);
         assert_eq!(vm.edge_count(), 1);
+    }
+
+    #[test]
+    fn execution_order_starts_at_start_and_covers_all() {
+        let vm = FlowchartViewModel::empty("D", SchemaKind::ControlFlow);
+        let a = vm.add_node(NodeKind::Assignment, 0.0, 0.0);
+        vm.add_edge("main_start", "out", &a, "in");
+        vm.add_edge(&a, "out", "main_end", "in");
+        let order = vm.execution_order();
+        assert_eq!(order.first().map(String::as_str), Some("main_start"));
+        // Every node appears exactly once.
+        assert_eq!(order.len(), vm.node_count());
+        let set: std::collections::HashSet<_> = order.iter().cloned().collect();
+        assert_eq!(set.len(), order.len());
+        assert!(order.contains(&a));
+        assert!(order.contains(&"main_end".to_string()));
+    }
+
+    #[test]
+    fn execution_order_terminates_on_cycles() {
+        let vm = FlowchartViewModel::empty("D", SchemaKind::ControlFlow);
+        let n = vm.add_node(NodeKind::Assignment, 0.0, 0.0);
+        vm.add_edge("main_start", "out", &n, "in");
+        vm.add_edge(&n, "out", "main_start", "in"); // back edge → cycle
+        let order = vm.execution_order();
+        // Despite the cycle, each node is visited exactly once.
+        assert_eq!(order.len(), vm.node_count());
+        let set: std::collections::HashSet<_> = order.iter().cloned().collect();
+        assert_eq!(set.len(), order.len());
+        assert_eq!(order[0], "main_start");
     }
 
     #[test]
