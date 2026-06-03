@@ -31,6 +31,7 @@ mod runner;
 mod services_impl;
 mod settings_view;
 mod theme_css;
+mod video_view;
 mod ui;
 
 use app_state::AppState;
@@ -85,6 +86,20 @@ fn build_main_window(app: &Application) {
     ui::build(&window, app.clone());
 
     install_theming(&window, &app);
+
+    // When a program writes a video (VideoWriter), play it back in-IDE.
+    {
+        let app2 = app.clone();
+        let last_video = app.vm.last_video.clone();
+        last_video.subscribe(move |v| {
+            let Some(path) = v.as_ref().map(std::path::PathBuf::from) else { return };
+            if path.exists() {
+                let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                app2.vm.toast.show(format!("🎬 Playing {name}"));
+                video_view::open(&app2, &path);
+            }
+        });
+    }
 
     // Save the session (layout + open tabs + folder) on a clean window close.
     {
@@ -184,6 +199,9 @@ fn build_main_window(app: &Application) {
 
     window.present();
 
+    if let Ok(v) = std::env::var("MATFORGE_VIDEO") {
+        video_view::open(&app, std::path::Path::new(&v));
+    }
     if std::env::var("MATFORGE_PREFS").is_ok() {
         settings_view::open(&app, Some(&window));
     }
