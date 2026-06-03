@@ -37,6 +37,13 @@ impl DType {
         }
     }
 
+    /// Whether `disp(var)` yields a numeric matrix the inspector can parse.
+    /// Also a safety gate: `disp` on a struct currently crashes the matlabc
+    /// REPL, so the IDE must not probe non-matrix variables.
+    pub fn is_inspectable_matrix(&self) -> bool {
+        matches!(self, DType::Double | DType::Int32 | DType::Complex | DType::Logical)
+    }
+
     /// Map a MATLAB `whos` class string onto a `DType`.
     pub fn from_class(class: &str) -> DType {
         match class {
@@ -176,6 +183,16 @@ mod tests {
         assert_eq!(DType::from_class("BankAccount"), DType::Object("BankAccount".into()));
         assert_eq!(DType::Object("BankAccount".into()).display_name(), "BankAccount");
         assert_eq!(DType::Struct.display_name(), "struct");
+    }
+
+    #[test]
+    fn only_numeric_types_are_inspectable() {
+        assert!(DType::Double.is_inspectable_matrix());
+        assert!(DType::Int32.is_inspectable_matrix());
+        assert!(DType::Logical.is_inspectable_matrix());
+        assert!(!DType::Struct.is_inspectable_matrix());
+        assert!(!DType::Cell.is_inspectable_matrix());
+        assert!(!DType::Object("BankAccount".into()).is_inspectable_matrix());
     }
 
     #[test]

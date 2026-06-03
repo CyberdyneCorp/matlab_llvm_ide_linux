@@ -90,6 +90,22 @@ impl AppState {
     /// by `MainViewModel::feed_repl_line`.
     pub fn inspect_variable(self: &Rc<Self>, name: &str) {
         self.vm.workspace.select(name);
+        // Guard: `disp(struct)` (and other non-matrix classes) currently crashes
+        // the matlabc REPL, so don't probe variables the inspector can't parse.
+        let dtype = self
+            .vm
+            .workspace
+            .variables
+            .with(|vs| vs.iter().find(|v| v.name == name).map(|v| v.dtype.clone()));
+        if let Some(dt) = dtype {
+            if !dt.is_inspectable_matrix() {
+                self.vm.status_bar.set_message(format!(
+                    "{name}: {} values can't be inspected yet",
+                    dt.display_name()
+                ));
+                return;
+            }
+        }
         if self.ensure_repl() {
             if let Some(session) = self.repl.borrow_mut().as_mut() {
                 let probe = format!(
