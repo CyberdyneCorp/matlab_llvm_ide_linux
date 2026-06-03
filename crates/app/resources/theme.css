@@ -271,3 +271,93 @@ entry.mf-terminal-entry, entry.mf-terminal-entry > text {
 .mf-pill-running { background-color: @mf_green; color: #0a1410; }
 .mf-pill-idle    { background-color: @mf_panel_alt; color: @mf_text_secondary; }
 .mf-pill-live    { background-color: @mf_blue; color: #06121d; }
+
+/* ============================================================ *
+ *  Polish pass — interaction states, inputs, scrollbars, motion
+ * ============================================================ */
+
+/* Smooth, consistent hover/selection transitions. */
+.mf-tool, .mf-row, .mf-activity-item, .mf-header-action, .mf-tab, .mf-tab-close,
+button, list > row, listview > row {
+    transition: background-color 130ms ease, color 130ms ease, border-color 130ms ease;
+}
+
+/* Rounded selection + hover for list rows and panel rows. */
+.mf-row { border-radius: 5px; margin: 0 2px; }
+.mf-row.selected, list > row:selected, listview > row:selected { border-radius: 5px; }
+
+/* Tabs: an accent underline marks the active tab. */
+.mf-tab.active { border-bottom: 2px solid @mf_accent; }
+
+/* Slim, themed scrollbars that fade up on hover. */
+scrollbar { background-color: transparent; border: none; }
+scrollbar slider {
+    background-color: alpha(@mf_text_muted, 0.45);
+    border-radius: 8px;
+    min-width: 7px;
+    min-height: 7px;
+    margin: 2px;
+    transition: background-color 130ms ease;
+}
+scrollbar slider:hover { background-color: alpha(@mf_text_muted, 0.8); }
+scrollbar.overlay-indicator slider { min-width: 5px; min-height: 5px; }
+
+/* Text entries (search, settings, dialogs). */
+entry {
+    background-color: @mf_panel_alt;
+    color: @mf_text_primary;
+    border: 1px solid @mf_border_soft;
+    border-radius: 5px;
+    caret-color: @mf_accent;
+    padding: 3px 8px;
+    transition: border-color 130ms ease;
+}
+entry:focus-within { border-color: @mf_accent; }
+
+/* Dropdowns (target / theme / accent pickers). */
+dropdown > button {
+    background-color: @mf_panel_alt;
+    color: @mf_text_primary;
+    border: 1px solid @mf_border_soft;
+    border-radius: 5px;
+}
+dropdown > button:hover { background-color: @mf_card; }
+
+/* Sliders (UI font size). */
+scale > trough { background-color: @mf_border; border-radius: 6px; min-height: 5px; }
+scale > trough > highlight { background-color: @mf_accent; border-radius: 6px; }
+scale > trough > slider {
+    background-color: @mf_text_primary;
+    border-radius: 50%;
+    min-width: 14px;
+    min-height: 14px;
+}
+
+/* Paned drag handles: barely-there until needed. */
+paned > separator {
+    background-color: @mf_border_soft;
+    min-width: 1px;
+    min-height: 1px;
+    transition: background-color 130ms ease;
+}
+paned > separator:hover { background-color: @mf_accent; }
+
+/* Notebook tab headers (console / inspector tabs). */
+notebook > header tab { color: @mf_text_secondary; transition: color 130ms ease; }
+notebook > header tab:checked { color: @mf_text_primary; }
+notebook > header tab:hover { color: @mf_text_primary; }
+
+/* Subtle depth on cards. */
+.mf-card { box-shadow: 0 1px 3px alpha(black, 0.22); }
+
+/* Toast (transient action feedback). */
+.mf-toast {
+    background-color: @mf_card;
+    color: @mf_text_primary;
+    border: 1px solid @mf_border;
+    border-radius: 8px;
+    padding: 6px 14px;
+    margin-bottom: 36px;
+    box-shadow: 0 4px 14px alpha(black, 0.35);
+    font-size: __FS_SM__;
+}
