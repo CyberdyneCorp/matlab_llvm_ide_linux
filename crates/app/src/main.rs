@@ -152,6 +152,10 @@ fn build_main_window(app: &Application) {
     }
 
     window.present();
+
+    if std::env::var("MATFORGE_PREFS").is_ok() {
+        settings_view::open(&app, Some(&window));
+    }
 }
 
 /// Install a swappable `CssProvider` driven by the appearance view model: render
