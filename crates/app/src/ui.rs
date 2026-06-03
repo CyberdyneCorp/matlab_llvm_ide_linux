@@ -1707,26 +1707,39 @@ fn build_center(app: &Rc<AppState>) -> GtkBox {
     editor_nb.add_css_class("mf-editor");
     EDITOR_NB.with(|e| *e.borrow_mut() = Some(editor_nb.clone()));
 
+    let welcome = build_welcome(app);
     let console = build_console(app);
     center.append(&editor_nb);
+    center.append(&welcome);
     center.append(&console);
 
-    // Command-window mode: with nothing open in the center notebook (no source
-    // tab and no flowchart), hide it and let the console (the MATLAB command
-    // window / REPL workspace) fill the center. Driven by the notebook's page
-    // count so it accounts for flowchart pages, which are not editor.tabs.
+    // Three center states, driven by what's open:
+    //   • a source/flowchart tab open → editor + a docked console;
+    //   • a folder open but no tab → the console (MATLAB command window) fills;
+    //   • nothing open → the Welcome start screen.
     let update_center = {
+        let app = app.clone();
         let editor_nb = editor_nb.clone();
+        let welcome = welcome.clone();
         let console = console.clone();
         move || {
-            if editor_nb.n_pages() == 0 {
+            let pages = editor_nb.n_pages();
+            let has_folder = app.vm.project.root_url.get().is_some();
+            if pages > 0 {
+                editor_nb.set_visible(true);
+                welcome.set_visible(false);
+                console.set_vexpand(false);
+                console.set_size_request(-1, 220);
+            } else if has_folder {
                 editor_nb.set_visible(false);
+                welcome.set_visible(false);
                 console.set_vexpand(true);
                 console.set_size_request(-1, -1);
             } else {
-                editor_nb.set_visible(true);
+                editor_nb.set_visible(false);
+                welcome.set_visible(true);
                 console.set_vexpand(false);
-                console.set_size_request(-1, 220);
+                console.set_size_request(-1, 180);
             }
         }
     };
@@ -1739,7 +1752,125 @@ fn build_center(app: &Rc<AppState>) -> GtkBox {
         let f = update_center.clone();
         editor_nb.connect_page_removed(move |_, _, _| f());
     }
+    {
+        let f = update_center.clone();
+        app.vm.project.root_url.subscribe(move |_| f());
+    }
     center
+}
+
+/// The start screen shown when nothing is open: quick actions, recent folders,
+/// and a few examples to get a researcher productive immediately.
+fn build_welcome(app: &Rc<AppState>) -> GtkBox {
+    use matforge_core::services::preferences::Preferences;
+
+    let outer = GtkBox::new(Orientation::Vertical, 0);
+    outer.set_vexpand(true);
+    let scroll = ScrolledWindow::new();
+    scroll.set_vexpand(true);
+    let card = GtkBox::new(Orientation::Vertical, 10);
+    card.set_halign(gtk::Align::Center);
+    card.set_valign(gtk::Align::Center);
+    card.set_vexpand(true);
+    card.set_margin_top(40);
+    card.set_margin_bottom(40);
+    card.set_size_request(440, -1);
+    scroll.set_child(Some(&card));
+    outer.append(&scroll);
+
+    let logo = Label::new(Some("M"));
+    logo.add_css_class("mf-logo");
+    logo.set_halign(gtk::Align::Center);
+    card.append(&logo);
+    let title = Label::new(Some("MatForge IDE"));
+    title.add_css_class("mf-empty-title");
+    card.append(&title);
+    let tag = Label::new(Some("A home for MATLAB-LLVM data science and engineering."));
+    tag.add_css_class("mf-text-muted");
+    card.append(&tag);
+
+    // Quick actions.
+    let actions = GtkBox::new(Orientation::Horizontal, 8);
+    actions.set_halign(gtk::Align::Center);
+    actions.set_margin_top(8);
+    let new_btn = Button::with_label("New File");
+    new_btn.add_css_class("mf-compile-cta");
+    {
+        let app = app.clone();
+        new_btn.connect_clicked(move |_| new_untitled(&app));
+    }
+    let open_btn = Button::with_label("Open Folder…");
+    open_btn.add_css_class("mf-compile-cta");
+    {
+        let app = app.clone();
+        open_btn.connect_clicked(move |_| {
+            if let Some(win) = MAIN_WINDOW.with(|w| w.borrow().clone()) {
+                pick_folder(&win, &app);
+            }
+        });
+    }
+    actions.append(&new_btn);
+    actions.append(&open_btn);
+    card.append(&actions);
+
+    // Recent folders.
+    let recent = Preferences::load().recent;
+    if !recent.is_empty() {
+        card.append(&welcome_header("RECENT"));
+        for entry in recent.iter().take(6) {
+            let name = std::path::Path::new(entry)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| entry.clone());
+            let btn = welcome_link(&format!("📁  {name}"), entry);
+            let app = app.clone();
+            let path = entry.clone();
+            btn.connect_clicked(move |_| {
+                let _ = app.vm.open_folder(std::path::Path::new(&path));
+            });
+            card.append(&btn);
+        }
+    }
+
+    // Examples.
+    card.append(&welcome_header("EXAMPLES"));
+    let ex_script = welcome_link("📄  New MATLAB script", "untitled.m");
+    {
+        let app = app.clone();
+        ex_script.connect_clicked(move |_| new_untitled(&app));
+    }
+    card.append(&ex_script);
+    let ex_signal = welcome_link("🔀  Signal-flow model", "mflowLink demo");
+    {
+        let app = app.clone();
+        ex_signal.connect_clicked(move |_| open_demo_flowchart(&app, true));
+    }
+    card.append(&ex_signal);
+    let ex_control = welcome_link("◇  Control-flow model", "flowchart demo");
+    {
+        let app = app.clone();
+        ex_control.connect_clicked(move |_| open_demo_flowchart(&app, false));
+    }
+    card.append(&ex_control);
+
+    outer
+}
+
+fn welcome_header(text: &str) -> Label {
+    let l = Label::new(Some(text));
+    l.add_css_class("mf-panel-header");
+    l.set_halign(gtk::Align::Start);
+    l.set_margin_top(12);
+    l
+}
+
+fn welcome_link(label: &str, tooltip: &str) -> Button {
+    let b = Button::with_label(label);
+    b.set_has_frame(false);
+    b.add_css_class("mf-row");
+    b.set_halign(gtk::Align::Start);
+    b.set_tooltip_text(Some(tooltip));
+    b
 }
 
 /// Public so `main` can open a file at startup (demo / verification).
