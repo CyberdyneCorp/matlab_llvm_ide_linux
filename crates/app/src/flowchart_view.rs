@@ -115,8 +115,10 @@ pub fn build_flowchart_view(
         }
     }
 
-    // Click to select (clears selection when clicking empty canvas).
+    // Click to select (clears selection when clicking empty canvas). Left button
+    // only, so the middle-button pan gesture below has the diagram to itself.
     let click = gtk::GestureClick::new();
+    click.set_button(gtk::gdk::BUTTON_PRIMARY);
     {
         let fc = fc.clone();
         let canvas2 = canvas.clone();
@@ -130,8 +132,10 @@ pub fn build_flowchart_view(
     }
     canvas.add_controller(click);
 
-    // Drag: from a port → draw an edge; from a body → move the node.
+    // Drag: from a port → draw an edge; from a body → move the node. Left button
+    // only — the middle button pans.
     let drag = gtk::GestureDrag::new();
+    drag.set_button(gtk::gdk::BUTTON_PRIMARY);
     let drag_state: Rc<RefCell<Option<DragMode>>> = Rc::new(RefCell::new(None));
     {
         let fc = fc.clone();
@@ -215,6 +219,25 @@ pub fn build_flowchart_view(
         });
     }
     canvas.add_controller(drag);
+
+    // Middle-button drag pans the canvas (offset from the pan at drag start).
+    let pan = gtk::GestureDrag::new();
+    pan.set_button(gtk::gdk::BUTTON_MIDDLE);
+    let pan_origin: Rc<Cell<(f64, f64)>> = Rc::new(Cell::new((0.0, 0.0)));
+    {
+        let fc = fc.clone();
+        let pan_origin = pan_origin.clone();
+        pan.connect_drag_begin(move |_g, _x, _y| pan_origin.set(fc.pan.get()));
+    }
+    {
+        let fc = fc.clone();
+        let pan_origin = pan_origin.clone();
+        pan.connect_drag_update(move |_g, dx, dy| {
+            let (ox, oy) = pan_origin.get();
+            fc.set_pan(ox + dx, oy + dy);
+        });
+    }
+    canvas.add_controller(pan);
 
     // Scroll to zoom.
     let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
@@ -362,14 +385,26 @@ fn build_flow_toolbar(
     bar.add_css_class("mf-border-bottom");
 
     // Collapse / show the BLOCKS palette to give the diagram the full width.
+    // The visibility lives in the layout view model so it persists across runs
+    // and stays in sync across all open flowchart tabs.
     let toggle = gtk::ToggleButton::new();
     toggle.set_icon_name("view-list-symbolic");
-    toggle.set_active(true);
     toggle.add_css_class("mf-header-action");
     toggle.set_tooltip_text(Some("Show / hide the blocks palette"));
+    let visible = app.vm.layout.flow_palette_visible.get();
+    toggle.set_active(visible);
+    palette.set_visible(visible);
+    {
+        let app = app.clone();
+        toggle.connect_toggled(move |t| app.vm.layout.flow_palette_visible.set(t.is_active()));
+    }
     {
         let palette = palette.clone();
-        toggle.connect_toggled(move |t| palette.set_visible(t.is_active()));
+        let toggle = toggle.clone();
+        app.vm.layout.flow_palette_visible.subscribe(move |v| {
+            palette.set_visible(*v);
+            toggle.set_active(*v);
+        });
     }
     bar.append(&toggle);
 

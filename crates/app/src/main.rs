@@ -80,6 +80,7 @@ fn build_main_window(app: &Application) {
     app.vm.layout.sidebar_visible.set(prefs.layout.sidebar_visible);
     app.vm.layout.workspace_visible.set(prefs.layout.workspace_visible);
     app.vm.layout.plots_visible.set(prefs.layout.plots_visible);
+    app.vm.layout.flow_palette_visible.set(prefs.layout.flow_palette_visible);
 
     ui::build(&window, app.clone());
 
@@ -251,6 +252,7 @@ fn save_prefs(app: &Rc<AppState>) {
     prefs.layout.sidebar_visible = l.sidebar_visible.get();
     prefs.layout.workspace_visible = l.workspace_visible.get();
     prefs.layout.plots_visible = l.plots_visible.get();
+    prefs.layout.flow_palette_visible = l.flow_palette_visible.get();
 
     prefs.open_tabs = app.vm.editor.tabs.with(|ts| {
         ts.iter().filter_map(|t| t.url.as_ref().map(|u| u.display().to_string())).collect()

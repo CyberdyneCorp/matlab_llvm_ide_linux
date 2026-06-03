@@ -288,17 +288,42 @@ fn build_model_canvas(vm: &Rc<MflowLinkViewModel>) -> GtkBox {
     let canvas = DrawingArea::new();
     canvas.set_vexpand(true);
     canvas.set_hexpand(true);
+    // The model auto-fits each frame; this offset lets the middle button pan it.
+    let user_pan: Rc<std::cell::Cell<(f64, f64)>> = Rc::new(std::cell::Cell::new((0.0, 0.0)));
     {
         let vm = vm.clone();
+        let user_pan = user_pan.clone();
         canvas.set_draw_func(move |_a, ctx, w, h| {
             vm.document.with(|doc| {
                 let bounds = flow_render::content_bounds(doc);
-                let vp = fit_viewport(bounds, w as f64, h as f64);
+                let mut vp = fit_viewport(bounds, w as f64, h as f64);
+                let (ux, uy) = user_pan.get();
+                vp.pan = (vp.pan.0 + ux, vp.pan.1 + uy);
                 let bps = std::collections::BTreeMap::new();
                 flow_render::draw_document(ctx, w as f64, h as f64, doc, vp, None, &bps, None);
             });
         });
     }
+
+    // Middle-button drag pans the model (offset from the pan at drag start).
+    let pan = gtk::GestureDrag::new();
+    pan.set_button(gtk::gdk::BUTTON_MIDDLE);
+    let pan_origin: Rc<std::cell::Cell<(f64, f64)>> = Rc::new(std::cell::Cell::new((0.0, 0.0)));
+    {
+        let user_pan = user_pan.clone();
+        let pan_origin = pan_origin.clone();
+        pan.connect_drag_begin(move |_g, _x, _y| pan_origin.set(user_pan.get()));
+    }
+    {
+        let canvas2 = canvas.clone();
+        pan.connect_drag_update(move |_g, dx, dy| {
+            let (ox, oy) = pan_origin.get();
+            user_pan.set((ox + dx, oy + dy));
+            canvas2.queue_draw();
+        });
+    }
+    canvas.add_controller(pan);
+
     v.append(&canvas);
     v
 }
