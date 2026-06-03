@@ -484,6 +484,18 @@ fn build_flow_toolbar(
     }
     bar.append(&toggle);
 
+    // Open the full Block Library (all blocks, grouped + searchable) in its own
+    // window, so the inline palette can stay collapsed for more canvas room.
+    let library = Button::from_icon_name("view-grid-symbolic");
+    library.add_css_class("mf-header-action");
+    library.set_tooltip_text(Some("Block Library — browse all blocks"));
+    {
+        let app = app.clone();
+        let fc = fc.clone();
+        library.connect_clicked(move |_| crate::block_library::open(&app, &fc));
+    }
+    bar.append(&library);
+
     let save = Button::with_label("Save");
     save.add_css_class("mf-tool");
     {

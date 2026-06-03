@@ -15,6 +15,7 @@ use matforge_core::services::settings::Settings;
 use matforge_core::viewmodels::MainViewModel;
 
 mod app_state;
+mod block_library;
 mod e2e;
 mod editor_view;
 mod flow_render;
