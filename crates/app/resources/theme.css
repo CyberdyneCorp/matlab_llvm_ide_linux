@@ -345,8 +345,13 @@ paned > separator {
 paned > separator:hover { background-color: @mf_accent; }
 
 /* Notebook tab headers (console / inspector tabs). */
-notebook > header tab { color: @mf_text_secondary; transition: color 130ms ease; }
-notebook > header tab:checked { color: @mf_text_primary; }
+notebook > header tab {
+    color: @mf_text_secondary;
+    padding: 4px 12px;
+    border-bottom: 2px solid transparent;
+    transition: color 130ms ease, border-color 130ms ease;
+}
+notebook > header tab:checked { color: @mf_text_primary; border-bottom-color: @mf_accent; }
 notebook > header tab:hover { color: @mf_text_primary; }
 
 /* Subtle depth on cards. */

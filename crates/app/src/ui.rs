@@ -2301,20 +2301,35 @@ fn build_console(app: &Rc<AppState>) -> GtkBox {
     }
     let console_scroll = ScrolledWindow::new();
     console_scroll.set_child(Some(&console_view));
-    nb.append_page(&console_scroll, Some(&Label::new(Some("CONSOLE"))));
+    // An empty-state hint shown over the console until it has any output.
+    let console_empty = empty_state(
+        "utilities-terminal-symbolic",
+        "Console is empty",
+        "Run code or type a MATLAB command below.",
+    );
+    console_empty.set_can_target(false); // clicks pass through to the view
+    let console_overlay = gtk::Overlay::new();
+    console_overlay.set_child(Some(&console_scroll));
+    console_overlay.add_overlay(&console_empty);
+    nb.append_page(&console_overlay, Some(&Label::new(Some("CONSOLE"))));
 
     let render = {
         let app = app.clone();
         let buf = console_view.buffer();
+        let console_empty = console_empty.clone();
         move || {
             buf.set_text("");
+            let mut any = false;
             let all = app.vm.console.messages.get().into_iter().chain(app.vm.repl.transcript.get());
             for m in all {
+                any = true;
                 let mut end = buf.end_iter();
                 buf.insert_with_tags_by_name(&mut end, &format!("{}\n", m.text), &[level_tag(m.level)]);
             }
+            console_empty.set_visible(!any);
         }
     };
+    render();
     {
         let render = render.clone();
         app.vm.console.messages.subscribe(move |_| render());
@@ -2328,11 +2343,23 @@ fn build_console(app: &Rc<AppState>) -> GtkBox {
     let problems = ListBox::new();
     let problems_scroll = ScrolledWindow::new();
     problems_scroll.set_child(Some(&problems));
-    nb.append_page(&problems_scroll, Some(&Label::new(Some("PROBLEMS"))));
+    // A friendly empty state, centered over the (empty) list.
+    let problems_empty = empty_state(
+        "emblem-ok-symbolic",
+        "No problems detected",
+        "Errors and warnings from compile and run show up here.",
+    );
+    problems_empty.set_can_target(false);
+    let problems_overlay = gtk::Overlay::new();
+    problems_overlay.set_child(Some(&problems_scroll));
+    problems_overlay.add_overlay(&problems_empty);
+    nb.append_page(&problems_overlay, Some(&Label::new(Some("PROBLEMS"))));
     {
         let app = app.clone();
+        let problems_empty = problems_empty.clone();
         app.clone().vm.console.problems.bind(move |diags| {
             clear_list(&problems);
+            problems_empty.set_visible(diags.is_empty());
             for d in diags {
                 let (icon, cls) = match d.level {
                     DiagnosticLevel::Error => ("✕", "mf-log-error"),
