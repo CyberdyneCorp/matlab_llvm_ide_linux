@@ -3,10 +3,12 @@
 //! involved, a trait with a real implementation and an in-crate fake. View
 //! models depend only on the traits, so they unit-test against the fakes.
 
+pub mod brackets;
 pub mod chart_trace;
 pub mod compiler;
 pub mod dap;
 pub mod filesystem;
+pub mod fuzzy;
 pub mod flowchart_codec;
 pub mod highlighter;
 pub mod parsers;

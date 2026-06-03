@@ -8,6 +8,7 @@
 //! redraws on scroll, mapping buffer↔window coordinates via the text view. All
 //! state lives in the view models; this only draws from them.
 
+use std::cell::RefCell;
 use std::f64::consts::PI;
 use std::rc::Rc;
 
@@ -20,6 +21,20 @@ use crate::app_state::AppState;
 use crate::highlight;
 
 const GUTTER_WIDTH: i32 = 52;
+
+thread_local! {
+    /// The code view that last had focus — the target of in-editor find / goto.
+    static ACTIVE_VIEW: RefCell<Option<TextView>> = const { RefCell::new(None) };
+}
+
+/// The currently-focused code editor's `TextView`, if any.
+pub fn active_view() -> Option<TextView> {
+    ACTIVE_VIEW.with(|c| c.borrow().clone())
+}
+
+fn set_active_view(view: &TextView) {
+    ACTIVE_VIEW.with(|c| *c.borrow_mut() = Some(view.clone()));
+}
 
 /// Build the editor surface for a tab. Returns the container widget.
 pub fn build_code_view(
@@ -36,8 +51,17 @@ pub fn build_code_view(
     buffer.set_text(contents);
     highlight::ensure_tags(&buffer);
     highlight::apply(&buffer, language);
+    // Caret decorations. `current-line` is created first (lowest priority) so the
+    // debugger's `exec-line` background wins on the executing line; its colour and
+    // `bracket-match`'s are refreshed per-theme on each cursor move.
+    if buffer.tag_table().lookup("current-line").is_none() {
+        buffer.create_tag(Some("current-line"), &[]);
+    }
     if buffer.tag_table().lookup("exec-line").is_none() {
         buffer.create_tag(Some("exec-line"), &[("paragraph-background", &"#2c2a16")]);
+    }
+    if buffer.tag_table().lookup("bracket-match").is_none() {
+        buffer.create_tag(Some("bracket-match"), &[]);
     }
 
     // Edits: re-highlight + sync content/dirty.
@@ -55,8 +79,10 @@ pub fn build_code_view(
         buffer.connect_cursor_position_notify(move |b| {
             let it = b.iter_at_offset(b.cursor_position());
             app.vm.status_bar.set_cursor(it.line() as usize + 1, it.line_offset() as usize + 1);
+            update_caret_decorations(b);
         });
     }
+    update_caret_decorations(&buffer);
 
     // TextView is the direct scrollable child of the ScrolledWindow.
     let scroll = ScrolledWindow::new();
@@ -165,12 +191,74 @@ pub fn build_code_view(
     }
     view.add_controller(keys);
 
+    // Track the focused editor as the find / go-to-line target.
+    set_active_view(&view);
+    {
+        let focus = gtk::EventControllerFocus::new();
+        let view2 = view.clone();
+        focus.connect_enter(move |_| set_active_view(&view2));
+        view.add_controller(focus);
+    }
+
     crate::e2e::set_active_gutter(&gutter);
 
     let hbox = GtkBox::new(Orientation::Horizontal, 0);
     hbox.append(&gutter);
     hbox.append(&scroll);
     hbox
+}
+
+/// Refresh the caret decorations on cursor moves: a subtle current-line
+/// background (theme `hover`) plus a `bracket-match` accent on the bracket pair
+/// when the caret sits next to one. Both tags are re-coloured for the active
+/// theme each call, so they follow theme switches without rebuilding the buffer.
+fn update_caret_decorations(buffer: &gtk::TextBuffer) {
+    let tokens = crate::theme_css::current();
+    let table = buffer.tag_table();
+    let (bounds_start, bounds_end) = buffer.bounds();
+
+    // Current line: tint the caret's paragraph. `paragraph-background` colours
+    // the whole line regardless of how much of it the tag covers.
+    if let Some(cl) = table.lookup("current-line") {
+        cl.set_property("paragraph-background", tokens.hover.to_css());
+        buffer.remove_tag(&cl, &bounds_start, &bounds_end);
+        let cursor = buffer.iter_at_offset(buffer.cursor_position());
+        if let Some(ls) = buffer.iter_at_line(cursor.line()) {
+            let mut le = ls;
+            if !le.ends_line() {
+                le.forward_to_line_end();
+            }
+            buffer.apply_tag(&cl, &ls, &le);
+        }
+    }
+
+    // Bracket match: highlight the pair when the caret abuts a bracket.
+    if let Some(bm) = table.lookup("bracket-match") {
+        bm.set_property("foreground", tokens.accent.to_css());
+        bm.set_property("weight", 700i32);
+        buffer.remove_tag(&bm, &bounds_start, &bounds_end);
+        let text: Vec<char> = buffer
+            .text(&bounds_start, &bounds_end, false)
+            .chars()
+            .collect();
+        let pos = buffer.cursor_position() as usize;
+        // Prefer the bracket just before the caret, then the one just after.
+        for probe in [pos.checked_sub(1), Some(pos)].into_iter().flatten() {
+            if let Some(m) = matforge_core::services::brackets::matching_bracket(&text, probe) {
+                highlight_char(buffer, &bm, probe);
+                highlight_char(buffer, &bm, m);
+                break;
+            }
+        }
+    }
+}
+
+/// Apply `tag` to the single character at `offset`.
+fn highlight_char(buffer: &gtk::TextBuffer, tag: &gtk::TextTag, offset: usize) {
+    let start = buffer.iter_at_offset(offset as i32);
+    let mut end = start;
+    end.forward_char();
+    buffer.apply_tag(tag, &start, &end);
 }
 
 fn draw_gutter(ctx: &cairo::Context, height: i32, view: &TextView, app: &Rc<AppState>, tab_id: u64) {
