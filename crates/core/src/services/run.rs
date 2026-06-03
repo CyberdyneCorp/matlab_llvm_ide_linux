@@ -38,10 +38,12 @@ impl RunPlan {
     }
 
     /// The clang link command: `(program, args)`. Mirrors the doc's recipe
-    /// exactly (`-std=c++20 -O2 -Wno-override-module … -ldl -lpthread
-    /// -Wl,-dead_strip -o <bin>`).
-    pub fn link_command(&self, runtime_archive: &Path) -> (String, Vec<String>) {
-        let args = vec![
+    /// (`-std=c++20 -O2 -Wno-override-module … -ldl -lpthread -Wl,-dead_strip
+    /// -o <bin>`). `extra_libs` are appended after the runtime archive (and
+    /// before `-o`) so libraries the runtime pulls in — e.g. FFmpeg for
+    /// `VideoWriter` — resolve in left-to-right link order.
+    pub fn link_command(&self, runtime_archive: &Path, extra_libs: &[String]) -> (String, Vec<String>) {
+        let mut args = vec![
             "-std=c++20".to_string(),
             "-O2".to_string(),
             "-Wno-override-module".to_string(),
@@ -51,9 +53,10 @@ impl RunPlan {
             "-lpthread".to_string(),
             // GNU ld dead-strip (the doc's macOS `-Wl,-dead_strip` equivalent).
             "-Wl,--gc-sections".to_string(),
-            "-o".to_string(),
-            self.bin_path.to_string_lossy().into_owned(),
         ];
+        args.extend(extra_libs.iter().cloned());
+        args.push("-o".to_string());
+        args.push(self.bin_path.to_string_lossy().into_owned());
         ("clang++".to_string(), args)
     }
 }
@@ -91,7 +94,7 @@ mod tests {
     #[test]
     fn link_command_matches_doc_recipe() {
         let plan = RunPlan::new(Path::new("/proj/diff.m"), Path::new("/tmp"));
-        let (prog, args) = plan.link_command(Path::new("/rt/libMatlabRuntime.a"));
+        let (prog, args) = plan.link_command(Path::new("/rt/libMatlabRuntime.a"), &[]);
         assert_eq!(prog, "clang++");
         assert_eq!(args[0], "-std=c++20");
         assert!(args.contains(&"-Wno-override-module".to_string()));
@@ -100,6 +103,20 @@ mod tests {
         // ends with -o <bin>
         assert_eq!(args[args.len() - 2], "-o");
         assert_eq!(args[args.len() - 1], "/tmp/diff");
+    }
+
+    #[test]
+    fn extra_libs_land_after_the_archive_and_before_output() {
+        let plan = RunPlan::new(Path::new("/proj/vid.m"), Path::new("/tmp"));
+        let extra = vec!["-lavformat".to_string(), "-lavcodec".to_string()];
+        let (_prog, args) = plan.link_command(Path::new("/rt/libMatlabRuntime.a"), &extra);
+        let archive = args.iter().position(|a| a == "/rt/libMatlabRuntime.a").unwrap();
+        let avformat = args.iter().position(|a| a == "-lavformat").unwrap();
+        let out = args.iter().position(|a| a == "-o").unwrap();
+        // FFmpeg libs must resolve the archive's references (after it) and come
+        // before the `-o <bin>` tail.
+        assert!(archive < avformat && avformat < out);
+        assert_eq!(args[args.len() - 1], "/tmp/vid");
     }
 
     #[test]
