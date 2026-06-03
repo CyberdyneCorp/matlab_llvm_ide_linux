@@ -21,6 +21,9 @@ pub struct MflowLinkViewModel {
     pub state: Property<SimState>,
     /// Bumped on every appended sample so views can throttle redraws.
     pub sample_count: Property<usize>,
+    /// Playback position: how many samples the scopes currently show. Follows
+    /// the live trace while running; afterwards Play/Step/Rewind scrub it.
+    pub cursor: Property<usize>,
 }
 
 impl MflowLinkViewModel {
@@ -30,7 +33,34 @@ impl MflowLinkViewModel {
             trace: Property::new(SimTrace::new()),
             state: Property::new(SimState::Idle),
             sample_count: Property::new(0),
+            cursor: Property::new(0),
         }
+    }
+
+    pub fn total_samples(&self) -> usize {
+        self.trace.with(|t| t.rows.len())
+    }
+
+    /// Advance the playback cursor by one sample (clamped to the trace length).
+    pub fn step(&self) {
+        let total = self.total_samples();
+        self.cursor.update(|c| *c = (*c + 1).min(total));
+    }
+
+    /// Move the playback cursor to `n` (clamped).
+    pub fn set_cursor(&self, n: usize) {
+        let total = self.total_samples();
+        self.cursor.set(n.min(total));
+    }
+
+    /// Rewind playback to the start (keeps the collected trace).
+    pub fn rewind(&self) {
+        self.cursor.set(0);
+    }
+
+    /// True once the cursor has reached the end of the trace.
+    pub fn at_end(&self) -> bool {
+        self.cursor.get() >= self.total_samples()
     }
 
     /// Mark the simulation as started and clear any prior trace.
@@ -48,6 +78,11 @@ impl MflowLinkViewModel {
         if added {
             let n = self.trace.with(|t| t.rows.len());
             self.sample_count.set(n);
+            // While collecting, the cursor tracks the live edge so scopes fill
+            // in real time; after Finished it can be scrubbed independently.
+            if self.state.get() == SimState::Running {
+                self.cursor.set(n);
+            }
         }
     }
 
@@ -74,6 +109,7 @@ impl MflowLinkViewModel {
     pub fn reset(&self) {
         self.trace.set(SimTrace::new());
         self.sample_count.set(0);
+        self.cursor.set(0);
         self.state.set(SimState::Idle);
     }
 
@@ -148,5 +184,33 @@ mod tests {
         assert_eq!(vm.state.get(), SimState::Idle);
         assert_eq!(vm.sample_count.get(), 0);
         assert_eq!(vm.signal_count(), 0);
+        assert_eq!(vm.cursor.get(), 0);
+    }
+
+    #[test]
+    fn cursor_follows_live_then_scrubs() {
+        let vm = vm();
+        vm.start();
+        vm.feed_line("t,a");
+        vm.feed_line("0.0,1.0");
+        vm.feed_line("0.1,2.0");
+        vm.feed_line("0.2,3.0");
+        // While running, the cursor tracks the live edge.
+        assert_eq!(vm.cursor.get(), 3);
+        assert_eq!(vm.total_samples(), 3);
+        vm.finish();
+        // Rewind + step scrubs independently, clamped at the end.
+        vm.rewind();
+        assert_eq!(vm.cursor.get(), 0);
+        vm.step();
+        vm.step();
+        assert_eq!(vm.cursor.get(), 2);
+        assert!(!vm.at_end());
+        vm.step();
+        vm.step(); // clamps
+        assert_eq!(vm.cursor.get(), 3);
+        assert!(vm.at_end());
+        vm.set_cursor(99);
+        assert_eq!(vm.cursor.get(), 3);
     }
 }

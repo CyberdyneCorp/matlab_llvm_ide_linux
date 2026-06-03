@@ -87,46 +87,98 @@ fn build_transport(
     play.add_css_class("mf-run");
     let pause = Button::with_label("⏸ Pause");
     pause.add_css_class("mf-tool");
+    let step = Button::with_label("⏭ Step");
+    step.add_css_class("mf-tool");
     let stop = Button::with_label("⏹ Stop");
     stop.add_css_class("mf-tool");
     stop.add_css_class("mf-stop");
-    let reset = Button::with_label("⟲ Reset");
+    let reset = Button::with_label("⟲ Restart");
     reset.add_css_class("mf-tool");
+
+    // Playback timer that scrubs the cursor through a finished trace.
+    let timer: Rc<RefCell<Option<gtk::glib::SourceId>>> = Rc::new(RefCell::new(None));
+    let stop_timer = {
+        let timer = timer.clone();
+        move || {
+            if let Some(id) = timer.borrow_mut().take() {
+                id.remove();
+            }
+        }
+    };
 
     {
         let app = app.clone();
         let vm = vm.clone();
         let sim = sim.clone();
-        play.connect_clicked(move |_| start_simulation(&app, &vm, &sim, path.as_deref()));
-    }
-    {
-        let vm = vm.clone();
-        pause.connect_clicked(move |_| {
-            if vm.state.get() == SimState::Paused {
-                vm.resume();
-            } else {
-                vm.pause();
+        let timer = timer.clone();
+        play.connect_clicked(move |_| match vm.state.get() {
+            // First Play collects the trace live (the cursor follows the edge).
+            SimState::Idle => start_simulation(&app, &vm, &sim, path.as_deref()),
+            // Afterwards, Play animates the cursor through the collected trace.
+            _ => {
+                if vm.at_end() {
+                    vm.rewind();
+                }
+                if timer.borrow().is_none() {
+                    let vm2 = vm.clone();
+                    let timer2 = timer.clone();
+                    let id = gtk::glib::timeout_add_local(
+                        std::time::Duration::from_millis(33),
+                        move || {
+                            if vm2.at_end() {
+                                *timer2.borrow_mut() = None;
+                                gtk::glib::ControlFlow::Break
+                            } else {
+                                vm2.step();
+                                gtk::glib::ControlFlow::Continue
+                            }
+                        },
+                    );
+                    *timer.borrow_mut() = Some(id);
+                }
             }
         });
     }
     {
         let vm = vm.clone();
+        let stop_timer = stop_timer.clone();
+        pause.connect_clicked(move |_| {
+            stop_timer();
+            vm.pause();
+        });
+    }
+    {
+        let vm = vm.clone();
+        let stop_timer = stop_timer.clone();
+        step.connect_clicked(move |_| {
+            stop_timer();
+            vm.step();
+        });
+    }
+    {
+        let vm = vm.clone();
         let sim = sim.clone();
+        let stop_timer = stop_timer.clone();
         stop.connect_clicked(move |_| {
-            *sim.borrow_mut() = None; // kill
+            stop_timer();
+            *sim.borrow_mut() = None; // kill the simulator
             vm.finish();
         });
     }
     {
         let vm = vm.clone();
         let sim = sim.clone();
+        let stop_timer = stop_timer.clone();
         reset.connect_clicked(move |_| {
+            stop_timer();
             *sim.borrow_mut() = None;
-            vm.reset();
+            vm.finish(); // stop collecting, then rewind playback to the start
+            vm.rewind();
         });
     }
     bar.append(&play);
     bar.append(&pause);
+    bar.append(&step);
     bar.append(&stop);
     bar.append(&reset);
 
@@ -137,12 +189,15 @@ fn build_transport(
     let spacer = GtkBox::new(Orientation::Horizontal, 0);
     spacer.set_hexpand(true);
     bar.append(&spacer);
+    let pos = Label::new(Some("0 / 0"));
+    pos.add_css_class("mf-mono");
+    pos.set_margin_end(10);
+    bar.append(&pos);
     let clock = Label::new(Some("t = 0.000 s"));
     clock.add_css_class("mf-mono");
     bar.append(&clock);
 
     {
-        let vm = vm.clone();
         let status = status.clone();
         vm.state.bind(move |s| {
             status.set_text(match s {
@@ -153,12 +208,19 @@ fn build_transport(
             });
         });
     }
+    // Clock + position follow the playback cursor.
     {
         let vm = vm.clone();
         let clock = clock.clone();
-        let sc = vm.sample_count.clone();
-        sc.subscribe(move |_| {
-            let t = vm.trace.with(|tr| tr.last_time()).unwrap_or(0.0);
+        let pos = pos.clone();
+        let cur = vm.cursor.clone();
+        cur.bind(move |c| {
+            let total = vm.total_samples();
+            pos.set_text(&format!("{c} / {total}"));
+            let t = vm
+                .trace
+                .with(|tr| tr.time().get(c.saturating_sub(1)).copied())
+                .unwrap_or(0.0);
             clock.set_text(&format!("t = {t:.3} s"));
         });
     }
@@ -313,7 +375,12 @@ fn build_scopes(vm: &Rc<MflowLinkViewModel>) -> GtkBox {
                     let idx = i;
                     let title = name.clone();
                     da.set_draw_func(move |_a, ctx, w, h| {
-                        let (xs, ys) = vm2.trace.with(|t| t.series(idx));
+                        let (mut xs, mut ys) = vm2.trace.with(|t| t.series(idx));
+                        // Only draw up to the playback cursor (live edge while
+                        // collecting; scrubbed by play/step afterwards).
+                        let n = vm2.cursor.get().min(xs.len());
+                        xs.truncate(n);
+                        ys.truncate(n);
                         let fig = PlotFigure::series(idx as i32 + 1, title.clone(), PlotKind::Line2D, xs, ys);
                         crate::plot_render::draw_figure(ctx, w as f64, h as f64, &fig);
                     });
@@ -324,6 +391,16 @@ fn build_scopes(vm: &Rc<MflowLinkViewModel>) -> GtkBox {
                 for da in draws.borrow().iter() {
                     da.queue_draw();
                 }
+            }
+        });
+    }
+    // Redraw the scopes whenever the playback cursor moves (play / step / scrub).
+    {
+        let draws = draws.clone();
+        let cur = vm.cursor.clone();
+        cur.subscribe(move |_| {
+            for da in draws.borrow().iter() {
+                da.queue_draw();
             }
         });
     }
