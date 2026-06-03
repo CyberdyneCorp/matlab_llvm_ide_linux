@@ -39,9 +39,21 @@ just deb                    # -> target/debian/matforge_<version>_amd64.deb
 Packaging metadata (maintainer, depends on `libgtk-4-1`, asset map) lives in the
 `[package.metadata.deb]` block of `crates/app/Cargo.toml`.
 
-## Flatpak (sketch)
+## Flatpak
 
-A Flatpak manifest is not yet checked in. The runtime needs the
-`org.gnome.Platform` runtime (provides GTK 4); the `matlabc` toolchain would be
-exposed via a host-files filesystem permission or a separate extension, since it
-is an external native compiler rather than a bundled dependency.
+The manifest is `packaging/io.github.matforge.MatForge.yaml` (GNOME Platform 47
+runtime + the `rust-stable` SDK extension). Cargo builds offline in the sandbox,
+so dependencies are vendored via `cargo-sources.json`:
+
+```sh
+flatpak install flathub org.gnome.Sdk//47 org.gnome.Platform//47 \
+    org.freedesktop.Sdk.Extension.rust-stable//24.08
+# one-time: vendor the crate sources (flatpak-builder-tools)
+python3 flatpak-cargo-generator.py Cargo.lock -o packaging/cargo-sources.json
+flatpak-builder --user --install --force-clean build-dir \
+    packaging/io.github.matforge.MatForge.yaml
+```
+
+`matlabc` is an external native toolchain and is not bundled; the manifest grants
+`--filesystem=host` so the app finds it via `$MATLABC_PATH` or
+`~/.config/matforge/config.toml` on the host.
