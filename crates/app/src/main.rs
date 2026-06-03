@@ -23,6 +23,7 @@ mod flowchart_view;
 mod highlight;
 mod mflowlink_window;
 mod plot_render;
+mod statechart_window;
 mod process;
 mod runner;
 mod services_impl;
@@ -103,6 +104,14 @@ fn build_main_window(app: &Application) {
         if let Ok(text) = std::fs::read_to_string(&path) {
             if let Ok(doc) = matforge_core::services::flowchart_codec::decode_str(&text) {
                 mflowlink_window::open(&app, doc, Some(path), true);
+            }
+        }
+    }
+    if let Ok(p) = std::env::var("MATFORGE_STATECHART") {
+        let path = std::path::PathBuf::from(&p);
+        if let Ok(text) = std::fs::read_to_string(&path) {
+            if let Ok(doc) = matforge_core::services::flowchart_codec::decode_str(&text) {
+                statechart_window::open(&app, doc, Some(path), true);
             }
         }
     }

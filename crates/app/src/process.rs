@@ -112,19 +112,29 @@ impl Drop for SimHandle {
     }
 }
 
-/// Start `matlabc -simulate <file>`, streaming each output line to `on_line` on
-/// the GTK main loop (a `RUN_EXIT_PREFIX<code>` line marks completion).
+/// Start `matlabc -simulate <file>`, streaming its CSV output to `on_line`.
 pub fn run_simulation(
     matlabc: &Path,
     file: &Path,
     on_line: impl FnMut(String) + 'static,
 ) -> std::io::Result<SimHandle> {
-    let mut child = Command::new(matlabc)
-        .arg("-simulate")
-        .arg(file)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+    stream_child(Command::new(matlabc).arg("-simulate").arg(file), on_line)
+}
+
+/// Start `matlabc -emit-trace <file>`, streaming its JSON event log to `on_line`.
+pub fn run_chart_trace(
+    matlabc: &Path,
+    file: &Path,
+    on_line: impl FnMut(String) + 'static,
+) -> std::io::Result<SimHandle> {
+    stream_child(Command::new(matlabc).arg("-emit-trace").arg(file), on_line)
+}
+
+/// Spawn `cmd` with piped output, stream each line to `on_line` on the GTK main
+/// loop, and append `RUN_EXIT_PREFIX<code>` once it exits. Shared by the
+/// simulation + chart-trace runners; the returned handle kills the child.
+fn stream_child(cmd: &mut Command, on_line: impl FnMut(String) + 'static) -> std::io::Result<SimHandle> {
+    let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
     let stdout = child.stdout.take().expect("piped stdout");
     let stderr = child.stderr.take().expect("piped stderr");
     let child = Arc::new(Mutex::new(child));

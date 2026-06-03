@@ -309,6 +309,22 @@ fn build_palette(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>, path: Rc<Optio
         panel.append(&sim);
     }
 
+    // State-chart models get a Run action that opens the mStateflow window.
+    if fc.document.with(|d| d.schema_kind() == matforge_core::models::flowchart::SchemaKind::StateChart) {
+        let run = Button::with_label("▶ Run Chart");
+        run.add_css_class("mf-tool");
+        run.add_css_class("mf-run");
+        run.set_margin_start(6);
+        run.set_margin_end(6);
+        let app = app.clone();
+        let fc = fc.clone();
+        let path = path.clone();
+        run.connect_clicked(move |_| {
+            crate::statechart_window::open(&app, fc.document.get(), (*path).clone(), false);
+        });
+        panel.append(&run);
+    }
+
     let header = Label::new(Some("BLOCKS"));
     header.add_css_class("mf-panel-header");
     header.set_halign(gtk::Align::Start);
