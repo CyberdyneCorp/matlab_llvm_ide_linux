@@ -17,4 +17,4 @@ pub use node::{
     FlowNode, FlowPort, FlowPorts, FlowPosition, FlowSize, FlowUi, NodeData, NodeKind, NodeShape,
     ParamValue, PortAnchor,
 };
-pub use palette::{NodeCategory, SignalFlowParamSpec};
+pub use palette::{library_blocks, NodeCategory, SignalFlowParamSpec};

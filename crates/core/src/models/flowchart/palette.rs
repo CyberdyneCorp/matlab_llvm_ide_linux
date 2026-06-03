@@ -127,6 +127,37 @@ impl NodeCategory {
         use NodeCategory::*;
         [ChartStates, ChartJunctions, ChartFunctions]
     }
+
+    /// The dialect's display order (control-flow / signal-flow / state-chart).
+    pub fn order_for(schema: super::document::SchemaKind) -> Vec<NodeCategory> {
+        use super::document::SchemaKind;
+        match schema {
+            SchemaKind::ControlFlow => Self::control_flow_order().to_vec(),
+            SchemaKind::SignalFlow => Self::signal_flow_order().to_vec(),
+            SchemaKind::StateChart => Self::state_chart_order().to_vec(),
+        }
+    }
+}
+
+/// Every addable block for `schema`, grouped under its category in display order
+/// (empty categories dropped). The structural `Start`/`End` scaffold is excluded
+/// — they already live on the canvas. Drives the Block Library window.
+pub fn library_blocks(
+    schema: super::document::SchemaKind,
+) -> Vec<(NodeCategory, Vec<NodeKind>)> {
+    NodeCategory::order_for(schema)
+        .into_iter()
+        .filter_map(|cat| {
+            let kinds: Vec<NodeKind> = NodeKind::ALL
+                .iter()
+                .copied()
+                .filter(|k| {
+                    k.category() == cat && !matches!(k, NodeKind::Start | NodeKind::End)
+                })
+                .collect();
+            (!kinds.is_empty()).then_some((cat, kinds))
+        })
+        .collect()
 }
 
 /// One signal-flow block parameter shown by the inspector.
@@ -276,6 +307,29 @@ mod tests {
         assert_eq!(NodeCategory::Io.label(), "I/O");
         assert_eq!(NodeCategory::SignalRouting.label(), "Signal Routing");
         assert_eq!(NodeCategory::ChartFunctions.label(), "Chart Functions");
+    }
+
+    #[test]
+    fn library_groups_blocks_by_dialect() {
+        use super::super::document::SchemaKind;
+
+        // Signal-flow shows many blocks across its categories, all signal-flow,
+        // ordered with Sources first; no structural Start/End leak in.
+        let sig = library_blocks(SchemaKind::SignalFlow);
+        assert!(sig.len() >= 4, "expected several signal categories, got {}", sig.len());
+        assert_eq!(sig[0].0, NodeCategory::SignalSources);
+        let total: usize = sig.iter().map(|(_, ks)| ks.len()).sum();
+        assert!(total > 6, "library should list more than the curated palette ({total})");
+        for (cat, kinds) in &sig {
+            assert!(cat.is_signal_flow());
+            assert!(!kinds.is_empty());
+            assert!(kinds.iter().all(|k| !matches!(k, NodeKind::Start | NodeKind::End)));
+        }
+
+        // Control-flow and state-chart produce their own non-empty groupings.
+        assert!(!library_blocks(SchemaKind::ControlFlow).is_empty());
+        let chart = library_blocks(SchemaKind::StateChart);
+        assert!(chart.iter().all(|(c, _)| c.is_state_chart()));
     }
 
     #[test]
