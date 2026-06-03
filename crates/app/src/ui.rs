@@ -84,6 +84,26 @@ pub fn build(window: &ApplicationWindow, app: Rc<AppState>) {
     root.append(&middle);
     root.append(&build_status_bar(&app));
     window.set_child(Some(&root));
+
+    // Ctrl + scroll zooms the UI (capture phase so it beats scrollable children).
+    let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
+    scroll.set_propagation_phase(gtk::PropagationPhase::Capture);
+    {
+        let app = app.clone();
+        scroll.connect_scroll(move |c, _dx, dy| {
+            if c.current_event_state().contains(gtk::gdk::ModifierType::CONTROL_MASK) {
+                if dy < 0.0 {
+                    app.vm.appearance.zoom_in();
+                } else if dy > 0.0 {
+                    app.vm.appearance.zoom_out();
+                }
+                glib_stop()
+            } else {
+                gtk::glib::Propagation::Proceed
+            }
+        });
+    }
+    window.add_controller(scroll);
 }
 
 // ---- Menu bar + actions ----------------------------------------------------
@@ -189,6 +209,23 @@ fn build_menu_bar(window: &ApplicationWindow, app: &Rc<AppState>) -> gtk::Popove
         let w2 = w.clone();
         register("about", Rc::new(move || show_about(&w2)));
     }
+    {
+        let a = app.clone();
+        let w2 = w.clone();
+        register("preferences", Rc::new(move || crate::settings_view::open(&a, Some(&w2))));
+    }
+    {
+        let a = app.clone();
+        register("zoom-in", Rc::new(move || a.vm.appearance.zoom_in()));
+    }
+    {
+        let a = app.clone();
+        register("zoom-out", Rc::new(move || a.vm.appearance.zoom_out()));
+    }
+    {
+        let a = app.clone();
+        register("zoom-reset", Rc::new(move || a.vm.appearance.zoom_reset()));
+    }
 
     // Keyboard accelerators (shown automatically in the menu by GTK).
     if let Some(gapp) = window.application().and_then(|a| a.downcast::<gtk::Application>().ok()) {
@@ -210,6 +247,10 @@ fn build_menu_bar(window: &ApplicationWindow, app: &Rc<AppState>) -> gtk::Popove
             ("win.dbg-next", &["F10"]),
             ("win.dbg-step-in", &["F11"]),
             ("win.dbg-step-out", &["<Shift>F11"]),
+            ("win.preferences", &["<Ctrl>comma"]),
+            ("win.zoom-in", &["<Ctrl>equal", "<Ctrl>plus", "<Ctrl>KP_Add"]),
+            ("win.zoom-out", &["<Ctrl>minus", "<Ctrl>KP_Subtract"]),
+            ("win.zoom-reset", &["<Ctrl>0"]),
         ] {
             gapp.set_accels_for_action(action, accels);
         }
@@ -237,12 +278,22 @@ fn build_menu_bar(window: &ApplicationWindow, app: &Rc<AppState>) -> gtk::Popove
     let find_section = Menu::new();
     find_section.append(Some("Search in Files"), Some("win.find"));
     edit.append_section(None, &find_section);
+    let prefs_section = Menu::new();
+    prefs_section.append(Some("Preferences…"), Some("win.preferences"));
+    edit.append_section(None, &prefs_section);
     menubar.append_submenu(Some("Edit"), &edit);
 
     let view = Menu::new();
-    view.append(Some("Toggle Sidebar"), Some("win.toggle-sidebar"));
-    view.append(Some("Toggle Workspace"), Some("win.toggle-workspace"));
-    view.append(Some("Toggle Plots"), Some("win.toggle-plots"));
+    let zoom = Menu::new();
+    zoom.append(Some("Zoom In"), Some("win.zoom-in"));
+    zoom.append(Some("Zoom Out"), Some("win.zoom-out"));
+    zoom.append(Some("Reset Zoom"), Some("win.zoom-reset"));
+    view.append_section(None, &zoom);
+    let panels = Menu::new();
+    panels.append(Some("Toggle Sidebar"), Some("win.toggle-sidebar"));
+    panels.append(Some("Toggle Workspace"), Some("win.toggle-workspace"));
+    panels.append(Some("Toggle Plots"), Some("win.toggle-plots"));
+    view.append_section(None, &panels);
     menubar.append_submenu(Some("View"), &view);
 
     let run_menu = Menu::new();

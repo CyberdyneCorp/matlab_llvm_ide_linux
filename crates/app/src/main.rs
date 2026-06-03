@@ -27,6 +27,7 @@ mod statechart_window;
 mod process;
 mod runner;
 mod services_impl;
+mod settings_view;
 mod theme_css;
 mod ui;
 
