@@ -224,6 +224,15 @@ popover button:hover { background-color: @mf_hover; }
 .mf-tab-actions { margin-right: 4px; }
 .mf-tab-search { margin-left: 6px; margin-right: 4px; }
 
+/* Floating "Fit" button over the flowchart canvas. */
+.mf-flow-fit {
+    background-color: alpha(@mf_card, 0.92);
+    border: 1px solid @mf_border;
+    border-radius: 6px;
+    padding: 2px 10px;
+}
+.mf-flow-fit:hover { background-color: @mf_card; }
+
 /* New File chooser rows. */
 .mf-newdoc-row { padding: 8px 12px; margin: 0 4px; border-radius: 6px; }
 .mf-newdoc-row:hover { background-color: @mf_hover; }
