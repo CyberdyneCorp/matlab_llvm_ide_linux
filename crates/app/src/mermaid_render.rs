@@ -1,13 +1,14 @@
-//! Cairo painter for the Markdown preview's mermaid diagrams. Core lays the
-//! graph out into pixel-space [`Scene`] geometry; this only draws it (theme-aware
-//! node fills, borders, edge arrows, and labels), matching the flowchart canvas's
-//! visual style. Build a `DrawingArea` for a parsed scene with [`drawing_area`].
+//! Cairo painter for the Markdown preview's mermaid diagrams. Core lays a
+//! diagram out into pixel-space geometry; this only draws it (theme-aware fills,
+//! borders, arrows, and labels). Flowcharts paint a [`Scene`] of nodes + edges
+//! ([`drawing_area`]); sequence diagrams paint a [`SeqScene`] of lifelines +
+//! messages ([`drawing_area_seq`]).
 
 use gtk::cairo;
 use gtk::prelude::*;
 use gtk::DrawingArea;
 
-use matforge_core::services::mermaid::{Scene, Shape};
+use matforge_core::services::mermaid::{Arrow, Scene, SeqScene, Shape};
 use matforge_core::theme::Rgb;
 
 const FONT: f64 = 13.0;
@@ -147,4 +148,151 @@ fn label_chip(
     set_rgb(ctx, t.text_secondary);
     ctx.move_to(pos.0 - ext.width() / 2.0 - ext.x_bearing(), pos.1 + FONT / 2.0 - 2.0);
     ctx.show_text(label).ok();
+}
+
+// ----- sequence diagrams -----------------------------------------------------
+
+const SELF_LOOP_W: f64 = 44.0;
+
+/// A `DrawingArea` sized to `scene`, painting a sequence diagram on demand.
+pub fn drawing_area_seq(scene: SeqScene) -> DrawingArea {
+    let area = DrawingArea::new();
+    area.set_content_width(scene.width.ceil() as i32);
+    area.set_content_height(scene.height.ceil() as i32);
+    area.set_halign(gtk::Align::Start);
+    area.add_css_class("mf-md-mermaid");
+    area.set_draw_func(move |_a, ctx, _w, _h| draw_seq(ctx, &scene));
+    area
+}
+
+fn draw_seq(ctx: &cairo::Context, scene: &SeqScene) {
+    let t = crate::theme_css::current();
+    ctx.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+    ctx.set_font_size(FONT);
+
+    // Dashed lifelines first, behind everything.
+    set_rgb(ctx, t.border);
+    ctx.set_line_width(1.0);
+    ctx.set_dash(&[4.0, 3.0], 0.0);
+    for &(x, y_top, y_bottom) in &scene.lifelines {
+        ctx.move_to(x, y_top);
+        ctx.line_to(x, y_bottom);
+        ctx.stroke().ok();
+    }
+    ctx.set_dash(&[], 0.0);
+
+    // Messages.
+    for m in &scene.messages {
+        set_rgb(ctx, t.text_secondary);
+        ctx.set_line_width(1.5);
+        if m.dashed {
+            ctx.set_dash(&[5.0, 3.0], 0.0);
+        }
+        if m.self_loop {
+            draw_self_loop(ctx, m, &t);
+        } else {
+            ctx.move_to(m.from.0, m.from.1);
+            ctx.line_to(m.to.0, m.to.1);
+            ctx.stroke().ok();
+            ctx.set_dash(&[], 0.0);
+            message_head(ctx, m.from, m.to, m.arrow, &t);
+            if !m.label.is_empty() {
+                let mid = ((m.from.0 + m.to.0) / 2.0, m.from.1 - 5.0);
+                set_rgb(ctx, t.text_primary);
+                centered_text(ctx, &m.label, mid.0, mid.1);
+            }
+        }
+        ctx.set_dash(&[], 0.0);
+    }
+
+    // Boxes (participant headers/footers and notes) on top.
+    for b in &scene.boxes {
+        rounded_rect(ctx, b.x, b.y, b.w, b.h, 5.0);
+        set_rgb(ctx, if b.note { t.panel_alt } else { t.card });
+        ctx.fill_preserve().ok();
+        set_rgb(ctx, if b.note { t.border } else { t.accent });
+        ctx.set_line_width(1.5);
+        ctx.stroke().ok();
+        set_rgb(ctx, t.text_primary);
+        centered_text(ctx, &b.label, b.x + b.w / 2.0, b.y + b.h / 2.0);
+    }
+}
+
+/// Draw a self-message as a small loop to the right of the lifeline.
+fn draw_self_loop(
+    ctx: &cairo::Context,
+    m: &matforge_core::services::mermaid::SeqMessage,
+    t: &matforge_core::theme::ThemeTokens,
+) {
+    let x = m.from.0;
+    let (y1, y2) = (m.from.1, m.to.1);
+    let rx = x + SELF_LOOP_W;
+    ctx.move_to(x, y1);
+    ctx.line_to(rx, y1);
+    ctx.line_to(rx, y2);
+    ctx.line_to(x + 2.0, y2);
+    ctx.stroke().ok();
+    ctx.set_dash(&[], 0.0);
+    message_head(ctx, (rx, y2), (x, y2), m.arrow, t);
+    if !m.label.is_empty() {
+        set_rgb(ctx, t.text_primary);
+        if let Ok(ext) = ctx.text_extents(&m.label) {
+            ctx.move_to(rx + 6.0, (y1 + y2) / 2.0 + FONT / 2.0 - 3.0 - ext.y_bearing() / 2.0);
+            ctx.show_text(&m.label).ok();
+        }
+    }
+}
+
+/// Draw the arrowhead for a message ending at `to`, per its [`Arrow`] kind.
+fn message_head(
+    ctx: &cairo::Context,
+    from: (f64, f64),
+    to: (f64, f64),
+    arrow: Arrow,
+    t: &matforge_core::theme::ThemeTokens,
+) {
+    match arrow {
+        Arrow::Head => arrowhead(ctx, from, to, t.text_secondary),
+        Arrow::Open => open_head(ctx, from, to, t.text_secondary),
+        Arrow::Cross => cross_head(ctx, to, t.red),
+        Arrow::None => {}
+    }
+}
+
+/// An open `V`-shaped arrowhead (async messages).
+fn open_head(ctx: &cairo::Context, from: (f64, f64), to: (f64, f64), color: Rgb) {
+    let (dx, dy) = (to.0 - from.0, to.1 - from.1);
+    let len = (dx * dx + dy * dy).sqrt();
+    if len < 0.001 {
+        return;
+    }
+    let (ux, uy) = (dx / len, dy / len);
+    let (px, py) = (-uy, ux);
+    let s = 8.0;
+    set_rgb(ctx, color);
+    ctx.set_line_width(1.5);
+    ctx.move_to(to.0 - ux * s + px * s * 0.6, to.1 - uy * s + py * s * 0.6);
+    ctx.line_to(to.0, to.1);
+    ctx.line_to(to.0 - ux * s - px * s * 0.6, to.1 - uy * s - py * s * 0.6);
+    ctx.stroke().ok();
+}
+
+/// A small cross at the message end (lost / rejected message).
+fn cross_head(ctx: &cairo::Context, to: (f64, f64), color: Rgb) {
+    let s = 4.0;
+    set_rgb(ctx, color);
+    ctx.set_line_width(1.6);
+    ctx.move_to(to.0 - s, to.1 - s);
+    ctx.line_to(to.0 + s, to.1 + s);
+    ctx.move_to(to.0 + s, to.1 - s);
+    ctx.line_to(to.0 - s, to.1 + s);
+    ctx.stroke().ok();
+}
+
+/// Draw `label` centered on `(cx, cy)`.
+fn centered_text(ctx: &cairo::Context, label: &str, cx: f64, cy: f64) {
+    if let Ok(ext) = ctx.text_extents(label) {
+        ctx.move_to(cx - ext.width() / 2.0 - ext.x_bearing(), cy - ext.height() / 2.0 - ext.y_bearing());
+        ctx.show_text(label).ok();
+    }
 }
