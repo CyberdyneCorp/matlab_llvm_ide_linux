@@ -611,6 +611,7 @@ fn build_sidebar(app: &Rc<AppState>) -> Stack {
     stack.add_css_class("mf-border-right");
     stack.add_named(&build_explorer(app), Some("explorer"));
     stack.add_named(&build_search(app), Some("search"));
+    stack.add_named(&build_run_panel(app), Some("run"));
     stack.add_named(&build_compiler_panel(app), Some("compiler"));
     stack.add_named(&build_hdl_panel(app), Some("hdl"));
     stack.add_named(&build_docs_panel(app), Some("docs"));
@@ -621,6 +622,7 @@ fn build_sidebar(app: &Rc<AppState>) -> Stack {
         let name = match item {
             ActivityItem::Debug => "debug",
             ActivityItem::Search => "search",
+            ActivityItem::Run => "run",
             ActivityItem::Compiler => "compiler",
             ActivityItem::Hdl => "hdl",
             ActivityItem::Docs => "docs",
@@ -692,6 +694,157 @@ fn build_explorer(app: &Rc<AppState>) -> GtkBox {
     panel.append(&details);
 
     panel
+}
+
+// ---- Run panel -------------------------------------------------------------
+
+fn build_run_panel(app: &Rc<AppState>) -> GtkBox {
+    let panel = GtkBox::new(Orientation::Vertical, 0);
+
+    // Header with an idle / RUN / DEBUG badge.
+    let header = GtkBox::new(Orientation::Horizontal, 2);
+    header.add_css_class("mf-panel-header-row");
+    header.set_margin_start(8);
+    header.set_margin_end(8);
+    header.set_margin_top(5);
+    header.set_margin_bottom(3);
+    let title = Label::new(Some("RUN"));
+    title.add_css_class("mf-panel-header");
+    title.set_halign(gtk::Align::Start);
+    title.set_hexpand(true);
+    header.append(&title);
+    let badge = Label::new(Some("IDLE"));
+    badge.add_css_class("mf-build-badge");
+    header.append(&badge);
+    panel.append(&header);
+    {
+        let appc = app.clone();
+        let badge = badge.clone();
+        let update = move || {
+            let (text, class) = if appc.vm.toolbar.is_debugging.get() {
+                ("DEBUG", "mf-badge-fail")
+            } else if appc.vm.toolbar.is_running.get() {
+                ("RUN", "mf-badge-ok")
+            } else {
+                ("IDLE", "mf-badge-idle")
+            };
+            badge.set_text(text);
+            for c in ["mf-badge-ok", "mf-badge-fail", "mf-badge-idle"] {
+                badge.remove_css_class(c);
+            }
+            badge.add_css_class(class);
+        };
+        update();
+        let u1 = update.clone();
+        app.vm.toolbar.is_running.subscribe(move |_| u1());
+        app.vm.toolbar.is_debugging.subscribe(move |_| update());
+    }
+
+    let body = GtkBox::new(Orientation::Vertical, 0);
+    let scroll = ScrolledWindow::new();
+    scroll.set_vexpand(true);
+    scroll.set_child(Some(&body));
+    panel.append(&scroll);
+
+    // PROGRAM — active file + its folder.
+    body.append(&sub_header("PROGRAM"));
+    let program = Label::new(Some("No active file"));
+    program.add_css_class("mf-text-secondary");
+    program.set_halign(gtk::Align::Start);
+    program.set_margin_start(8);
+    program.set_wrap(true);
+    body.append(&program);
+    {
+        let appc = app.clone();
+        let program = program.clone();
+        let update = move |_: &Option<u64>| match appc.vm.editor.active_tab() {
+            Some(t) => match t.url {
+                Some(url) => {
+                    let dir = url.parent().map(|p| p.display().to_string()).unwrap_or_default();
+                    program.set_text(&format!("{}\n{}", t.name, dir));
+                }
+                None => program.set_text(&format!("{} — unsaved (Save to run / debug)", t.name)),
+            },
+            None => program.set_text("No active file"),
+        };
+        update(&None);
+        app.vm.editor.active_id.subscribe(update);
+    }
+
+    // ACTIONS — Run / Debug / Stop.
+    body.append(&sub_header("ACTIONS"));
+    let run = Button::with_label("▶  Run");
+    run.add_css_class("mf-compile-cta");
+    run.set_margin_start(8);
+    run.set_margin_end(8);
+    run.set_margin_top(2);
+    {
+        let app = app.clone();
+        run.connect_clicked(move |_| {
+            let settings = app.settings.clone();
+            runner::run(app.vm.clone(), &settings);
+        });
+    }
+    body.append(&run);
+    let debug = Button::with_label("🐞  Debug");
+    debug.add_css_class("mf-compile-cta");
+    debug.set_margin_start(8);
+    debug.set_margin_end(8);
+    debug.set_margin_top(4);
+    {
+        let app = app.clone();
+        debug.connect_clicked(move |_| app.start_debug());
+    }
+    body.append(&debug);
+    let stop = Button::with_label("■  Stop");
+    stop.add_css_class("mf-tool");
+    stop.add_css_class("mf-stop");
+    stop.set_margin_start(8);
+    stop.set_margin_end(8);
+    stop.set_margin_top(4);
+    {
+        let app = app.clone();
+        stop.connect_clicked(move |_| {
+            app.stop_debug();
+            app.vm.toolbar.is_running.set(false);
+        });
+    }
+    body.append(&stop);
+
+    // BINARIES — the resolved toolchain paths with existence checks.
+    body.append(&sub_header("BINARIES"));
+    body.append(&binary_row("matlabc", &app.settings.matlabc_path));
+    body.append(&binary_row("libMatlabRuntime.a", &app.settings.runtime_archive));
+    let note = Label::new(Some("Set $MATLABC_PATH or ~/.config/matforge/config.toml to override."));
+    note.add_css_class("mf-text-muted");
+    note.set_halign(gtk::Align::Start);
+    note.set_wrap(true);
+    note.set_margin_start(8);
+    note.set_margin_top(4);
+    note.set_margin_bottom(8);
+    body.append(&note);
+
+    panel
+}
+
+/// A BINARIES row: name, a ✓/✗ existence mark, and the path.
+fn binary_row(name: &str, path: &Path) -> GtkBox {
+    let row = GtkBox::new(Orientation::Vertical, 0);
+    row.set_margin_start(8);
+    row.set_margin_top(2);
+    let exists = path.exists();
+    let head = Label::new(Some(&format!("{} {name}", if exists { "✓" } else { "✗" })));
+    head.set_halign(gtk::Align::Start);
+    head.add_css_class(if exists { "mf-badge-ok" } else { "mf-badge-fail" });
+    let p = Label::new(Some(&path.display().to_string()));
+    p.add_css_class("mf-text-muted");
+    p.add_css_class("mf-mono");
+    p.set_halign(gtk::Align::Start);
+    p.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+    p.set_max_width_chars(28);
+    row.append(&head);
+    row.append(&p);
+    row
 }
 
 // ---- HDL panel -------------------------------------------------------------
