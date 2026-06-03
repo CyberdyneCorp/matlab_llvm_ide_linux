@@ -90,8 +90,9 @@ impl AppState {
     /// by `MainViewModel::feed_repl_line`.
     pub fn inspect_variable(self: &Rc<Self>, name: &str) {
         self.vm.workspace.select(name);
-        // Guard: `disp(struct)` (and other non-matrix classes) currently crashes
-        // the matlabc REPL, so don't probe variables the inspector can't parse.
+        // Guard: `disp(struct)` (and other non-matrix classes) currently
+        // segfaults the matlabc REPL (matlab_llvm#156), so don't probe
+        // variables the inspector can't parse.
         let dtype = self
             .vm
             .workspace

@@ -38,8 +38,9 @@ impl DType {
     }
 
     /// Whether `disp(var)` yields a numeric matrix the inspector can parse.
-    /// Also a safety gate: `disp` on a struct currently crashes the matlabc
-    /// REPL, so the IDE must not probe non-matrix variables.
+    /// Also a safety gate: `disp` on a struct/cell currently segfaults the
+    /// matlabc REPL (matlab_llvm#156), so the IDE must not probe non-matrix
+    /// variables.
     pub fn is_inspectable_matrix(&self) -> bool {
         matches!(self, DType::Double | DType::Int32 | DType::Complex | DType::Logical)
     }
