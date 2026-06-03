@@ -15,7 +15,6 @@ use gtk::prelude::*;
 use gtk::{cairo, Box as GtkBox, DrawingArea, Orientation, ScrolledWindow, TextView, TextWindowType};
 
 use matforge_core::services::highlighter::Language;
-use matforge_core::theme::{code, palette};
 
 use crate::app_state::AppState;
 use crate::highlight;
@@ -175,7 +174,7 @@ pub fn build_code_view(
 }
 
 fn draw_gutter(ctx: &cairo::Context, height: i32, view: &TextView, app: &Rc<AppState>, tab_id: u64) {
-    let (br, bg, bb) = code::BACKGROUND.to_unit();
+    let (br, bg, bb) = crate::theme_css::current().editor_bg.to_unit();
     ctx.set_source_rgb(br, bg, bb);
     let _ = ctx.paint();
     ctx.select_font_face("monospace", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
@@ -201,13 +200,13 @@ fn draw_gutter(ctx: &cairo::Context, height: i32, view: &TextView, app: &Rc<AppS
         let has_bp = tab.breakpoints.contains_key(&one_indexed);
 
         if has_bp {
-            let (r, g, b) = palette::ACCENT_RED.to_unit();
+            let (r, g, b) = crate::theme_css::current().red.to_unit();
             ctx.set_source_rgb(r, g, b);
             ctx.arc(9.0, center, 4.0, 0.0, 2.0 * PI);
             let _ = ctx.fill();
         }
         if is_exec {
-            let (r, g, b) = palette::ACCENT_YELLOW.to_unit();
+            let (r, g, b) = crate::theme_css::current().yellow.to_unit();
             ctx.set_source_rgb(r, g, b);
             ctx.move_to(18.0, center - 4.0);
             ctx.line_to(26.0, center);
@@ -216,9 +215,9 @@ fn draw_gutter(ctx: &cairo::Context, height: i32, view: &TextView, app: &Rc<AppS
             let _ = ctx.fill();
         }
         let (nr, ng, nb) = if is_exec {
-            palette::ACCENT_YELLOW.to_unit()
+            crate::theme_css::current().yellow.to_unit()
         } else {
-            code::LINE_NUMBER.to_unit()
+            crate::theme_css::current().syn_line_number.to_unit()
         };
         ctx.set_source_rgb(nr, ng, nb);
         let label = one_indexed.to_string();

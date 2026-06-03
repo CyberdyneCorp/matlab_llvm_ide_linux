@@ -35,6 +35,32 @@ metrics, and fonts are ported verbatim from `Theme.swift` into
 * **Workspace** (380 px): the `whos` variable table (Name · Size · Class).
 * **Status bar** (22 px): cursor position, status message, language, encoding.
 
+## Appearance, personalization & session
+
+Theming is data-driven and swappable at runtime. A `ThemeTokens` struct
+([`theme.rs`](../crates/core/src/theme.rs)) resolves every UI color; three
+built-in themes ship as data — **Midnight** (dark, the default), **Daylight**
+(light), and **High Contrast** — recolorable by an **Accent** hue. The
+`AppearanceViewModel` holds the active theme / accent / UI font scale / code
+font; on any change [`theme_css::render`](../crates/app/src/theme_css.rs)
+regenerates the stylesheet from the tokens (a generated `@define-color` block +
+scaled fonts) and a swappable `CssProvider` reloads it instantly. The Cairo
+renderers (plots, flowchart, gutter) read the same tokens, so the whole surface
+re-themes together — no restart.
+
+- **Preferences** dialog ([`settings_view.rs`](../crates/app/src/settings_view.rs))
+  via `Edit ▸ Preferences…` / `Ctrl+,` — theme, accent, font size, code font,
+  and the resolved toolchain paths.
+- **Font zoom** — `Ctrl+=` / `Ctrl+−` / `Ctrl+0` and `Ctrl+scroll`.
+- **Focus mode** (`Ctrl+Shift+F`, `View ▸ Focus Mode`) hides the activity bar,
+  sidebar, and right panels for distraction-free work.
+- **Persistence + session restore** — appearance, panel visibility, the open
+  tabs, last folder, and recent folders are saved to
+  `~/.config/matforge/config.toml` (a tested [`Preferences`](../crates/core/src/services/preferences.rs))
+  and restored on the next launch.
+- **Welcome screen** — shown when nothing is open: New / Open actions, recent
+  folders, and example models.
+
 ## Palette (from `Theme.Palette` / `Theme.Code`)
 
 | Role | Hex | Role | Hex |

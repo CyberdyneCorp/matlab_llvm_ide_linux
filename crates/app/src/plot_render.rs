@@ -6,13 +6,13 @@ use gtk::cairo;
 use gtk::prelude::*;
 
 use matforge_core::models::{MatrixView, PlotFigure, PlotKind};
-use matforge_core::theme::{palette, Rgb};
+use matforge_core::theme::Rgb;
 
 const MARGIN: f64 = 40.0;
 
 /// Draw `figure` filling a `w`×`h` Cairo surface.
 pub fn draw_figure(ctx: &cairo::Context, w: f64, h: f64, figure: &PlotFigure) {
-    fill(ctx, palette::EDITOR_BACKGROUND, 0.0, 0.0, w, h);
+    fill(ctx, crate::theme_css::current().editor_bg, 0.0, 0.0, w, h);
 
     // Runtime PNG figure: decode via GDK (no cairo `png` feature needed) and
     // blit. GDK downloads in cairo's native ARGB32 layout.
@@ -20,7 +20,7 @@ pub fn draw_figure(ctx: &cairo::Context, w: f64, h: f64, figure: &PlotFigure) {
         if blit_png(ctx, w, h, png) {
             return;
         }
-        set_color(ctx, palette::TEXT_SECONDARY);
+        set_color(ctx, crate::theme_css::current().text_secondary);
         ctx.move_to(MARGIN, h / 2.0);
         ctx.show_text(&format!("[figure: {}]", figure.title)).ok();
         return;
@@ -57,16 +57,16 @@ pub fn draw_figure(ctx: &cairo::Context, w: f64, h: f64, figure: &PlotFigure) {
     draw_axes(ctx, w, h, x_min, x_max, y_min, y_max);
 
     match figure.kind {
-        PlotKind::Scatter => draw_scatter(ctx, &xs, &figure.ys, &map, palette::ACCENT_BLUE),
+        PlotKind::Scatter => draw_scatter(ctx, &xs, &figure.ys, &map, crate::theme_css::current().blue),
         PlotKind::Bar | PlotKind::Histogram => {
             draw_bars(ctx, &figure.ys, x_min, x_max, &map, plot_w)
         }
         PlotKind::Spectrum => draw_area(ctx, &xs, &figure.ys, &map, h),
         _ => {
-            draw_line(ctx, &xs, &figure.ys, &map, palette::ACCENT_BLUE);
+            draw_line(ctx, &xs, &figure.ys, &map, crate::theme_css::current().blue);
             if !figure.ys2.is_empty() {
                 let xs2: Vec<f64> = (0..figure.ys2.len()).map(|i| i as f64).collect();
-                draw_line(ctx, &xs2, &figure.ys2, &map, palette::ACCENT_GREEN);
+                draw_line(ctx, &xs2, &figure.ys2, &map, crate::theme_css::current().green);
             }
         }
     }
@@ -77,7 +77,7 @@ pub fn draw_figure(ctx: &cairo::Context, w: f64, h: f64, figure: &PlotFigure) {
     }
 
     // Title.
-    set_color(ctx, palette::TEXT_PRIMARY);
+    set_color(ctx, crate::theme_css::current().text_primary);
     ctx.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Bold);
     ctx.set_font_size(12.0);
     ctx.move_to(MARGIN, 20.0);
@@ -87,7 +87,7 @@ pub fn draw_figure(ctx: &cairo::Context, w: f64, h: f64, figure: &PlotFigure) {
 /// Compact thumbnail render for the figure list: blits a runtime PNG (scaled to
 /// fit) or draws a bare series chart — no title, axis labels, or legend.
 pub fn draw_thumbnail(ctx: &cairo::Context, w: f64, h: f64, figure: &PlotFigure) {
-    fill(ctx, palette::EDITOR_BACKGROUND, 0.0, 0.0, w, h);
+    fill(ctx, crate::theme_css::current().editor_bg, 0.0, 0.0, w, h);
     if let Some(png) = &figure.png_data {
         blit_png(ctx, w, h, png);
         return;
@@ -115,28 +115,45 @@ pub fn draw_thumbnail(ctx: &cairo::Context, w: f64, h: f64, figure: &PlotFigure)
         (pad + norm(x, x_min, x_max) * plot_w, pad + (1.0 - norm(y, y_min, y_max)) * plot_h)
     };
     match figure.kind {
-        PlotKind::Scatter => draw_scatter(ctx, &xs, &figure.ys, &map, palette::ACCENT_BLUE),
+        PlotKind::Scatter => draw_scatter(ctx, &xs, &figure.ys, &map, crate::theme_css::current().blue),
         PlotKind::Bar | PlotKind::Histogram => draw_bars(ctx, &figure.ys, x_min, x_max, &map, plot_w),
-        _ => draw_line(ctx, &xs, &figure.ys, &map, palette::ACCENT_BLUE),
+        _ => draw_line(ctx, &xs, &figure.ys, &map, crate::theme_css::current().blue),
     }
 }
 
 fn draw_axes(ctx: &cairo::Context, w: f64, h: f64, x_min: f64, x_max: f64, y_min: f64, y_max: f64) {
-    set_color(ctx, palette::BORDER);
+    let t = crate::theme_css::current();
+    let plot_h = h - 2.0 * MARGIN;
+    const DIV: usize = 4;
+
+    // Faint horizontal gridlines + y tick labels at each division.
+    let (gr, gg, gb) = t.border.to_unit();
+    ctx.select_font_face("monospace", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+    ctx.set_font_size(9.0);
+    for i in 0..=DIV {
+        let frac = i as f64 / DIV as f64;
+        let py = MARGIN + (1.0 - frac) * plot_h;
+        ctx.set_source_rgba(gr, gg, gb, 0.4);
+        ctx.set_line_width(0.5);
+        ctx.move_to(MARGIN, py);
+        ctx.line_to(w - MARGIN, py);
+        ctx.stroke().ok();
+        let val = y_min + (y_max - y_min) * frac;
+        set_color(ctx, t.text_muted);
+        ctx.move_to(3.0, py + 3.0);
+        ctx.show_text(&format!("{val:.2}")).ok();
+    }
+
+    // Axis frame (solid L).
+    set_color(ctx, t.border);
     ctx.set_line_width(1.0);
     ctx.move_to(MARGIN, MARGIN);
     ctx.line_to(MARGIN, h - MARGIN);
     ctx.line_to(w - MARGIN, h - MARGIN);
     ctx.stroke().ok();
-    set_color(ctx, palette::TEXT_MUTED);
-    ctx.select_font_face("monospace", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
-    ctx.set_font_size(10.0);
-    // y range (left edge).
-    ctx.move_to(4.0, MARGIN + 4.0);
-    ctx.show_text(&format!("{y_max:.2}")).ok();
-    ctx.move_to(4.0, h - MARGIN);
-    ctx.show_text(&format!("{y_min:.2}")).ok();
+
     // x range (bottom corners).
+    set_color(ctx, t.text_muted);
     ctx.move_to(MARGIN, h - MARGIN + 12.0);
     ctx.show_text(&format!("{x_min:.2}")).ok();
     let x_hi = format!("{x_max:.2}");
@@ -148,8 +165,8 @@ fn draw_axes(ctx: &cairo::Context, w: f64, h: f64, x_min: f64, x_max: f64, y_min
 /// Two-entry legend in the top-right (series 1 = blue, series 2 = green).
 fn draw_legend(ctx: &cairo::Context, w: f64, source: Option<&str>) {
     let entries = [
-        (palette::ACCENT_BLUE, source.unwrap_or("series 1")),
-        (palette::ACCENT_GREEN, "series 2"),
+        (crate::theme_css::current().blue, source.unwrap_or("series 1")),
+        (crate::theme_css::current().green, "series 2"),
     ];
     ctx.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
     ctx.set_font_size(10.0);
@@ -159,7 +176,7 @@ fn draw_legend(ctx: &cairo::Context, w: f64, source: Option<&str>) {
         set_color(ctx, color);
         ctx.rectangle(x, y - 7.0, 12.0, 8.0);
         ctx.fill().ok();
-        set_color(ctx, palette::TEXT_SECONDARY);
+        set_color(ctx, crate::theme_css::current().text_secondary);
         ctx.move_to(x + 16.0, y);
         ctx.show_text(label).ok();
         y += 14.0;
@@ -190,7 +207,7 @@ fn draw_scatter(ctx: &cairo::Context, xs: &[f64], ys: &[f64], map: &impl Fn(f64,
 }
 
 fn draw_bars(ctx: &cairo::Context, ys: &[f64], _x_min: f64, _x_max: f64, map: &impl Fn(f64, f64) -> (f64, f64), plot_w: f64) {
-    set_color(ctx, palette::ACCENT_CYAN);
+    set_color(ctx, crate::theme_css::current().cyan);
     let n = ys.len().max(1);
     let bw = (plot_w / n as f64) * 0.7;
     for (i, &y) in ys.iter().enumerate() {
@@ -205,9 +222,9 @@ fn draw_bars(ctx: &cairo::Context, ys: &[f64], _x_min: f64, _x_max: f64, map: &i
 
 fn draw_area(ctx: &cairo::Context, xs: &[f64], ys: &[f64], map: &impl Fn(f64, f64) -> (f64, f64), h: f64) {
     ctx.set_source_rgba(
-        rgb_unit(palette::ACCENT_MAGENTA).0,
-        rgb_unit(palette::ACCENT_MAGENTA).1,
-        rgb_unit(palette::ACCENT_MAGENTA).2,
+        rgb_unit(crate::theme_css::current().magenta).0,
+        rgb_unit(crate::theme_css::current().magenta).1,
+        rgb_unit(crate::theme_css::current().magenta).2,
         0.35,
     );
     let base = h - MARGIN;
@@ -226,14 +243,14 @@ fn draw_area(ctx: &cairo::Context, xs: &[f64], ys: &[f64], map: &impl Fn(f64, f6
     }
     ctx.close_path();
     ctx.fill().ok();
-    draw_line(ctx, xs, ys, map, palette::ACCENT_MAGENTA);
+    draw_line(ctx, xs, ys, map, crate::theme_css::current().magenta);
 }
 
 /// Paint the empty-plots placeholder (dark background + hint) so the panel
 /// never shows a bare white surface.
 pub fn draw_empty(ctx: &cairo::Context, w: f64, h: f64) {
-    fill(ctx, palette::EDITOR_BACKGROUND, 0.0, 0.0, w, h);
-    set_color(ctx, palette::TEXT_MUTED);
+    fill(ctx, crate::theme_css::current().editor_bg, 0.0, 0.0, w, h);
+    set_color(ctx, crate::theme_css::current().text_muted);
     ctx.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
     ctx.set_font_size(12.0);
     let msg = "No figures yet.";
@@ -248,7 +265,7 @@ pub fn draw_empty(ctx: &cairo::Context, w: f64, h: f64) {
 
 /// Render a matrix as a cold→hot heatmap (blue → red) for the Matrix Viewer.
 pub fn draw_heatmap(ctx: &cairo::Context, w: f64, h: f64, m: &MatrixView) {
-    fill(ctx, palette::EDITOR_BACKGROUND, 0.0, 0.0, w, h);
+    fill(ctx, crate::theme_css::current().editor_bg, 0.0, 0.0, w, h);
     if m.rows == 0 || m.cols == 0 {
         return;
     }
@@ -257,7 +274,7 @@ pub fn draw_heatmap(ctx: &cairo::Context, w: f64, h: f64, m: &MatrixView) {
     let grid_w = (w - bar_w - 12.0).max(1.0);
     let cw = grid_w / m.cols as f64;
     let ch = (h / m.rows as f64).max(1.0);
-    let (cold, hot) = (palette::ACCENT_BLUE, palette::ACCENT_RED);
+    let (cold, hot) = (crate::theme_css::current().blue, crate::theme_css::current().red);
     for (r, row) in m.cells.iter().enumerate() {
         for (c, &v) in row.iter().enumerate() {
             let t = if (hi - lo).abs() < 1e-12 { 0.5 } else { (v - lo) / (hi - lo) };

@@ -34,7 +34,8 @@ pub fn build(window: &ApplicationWindow, app: Rc<AppState>) {
 
     let middle = GtkBox::new(Orientation::Horizontal, 0);
     middle.set_vexpand(true);
-    middle.append(&build_activity_bar(&app));
+    let activity = build_activity_bar(&app);
+    middle.append(&activity);
 
     let sidebar = build_sidebar(&app);
     let center = build_center(&app);
@@ -64,26 +65,89 @@ pub fn build(window: &ApplicationWindow, app: Rc<AppState>) {
     outer.set_position(220);
     middle.append(&outer);
 
-    // The whole right region is visible if either panel is; closing both hands
-    // the space to the editor.
-    {
-        let right = right.clone();
-        let plots_vis = app.vm.layout.plots_visible.clone();
-        app.vm.layout.workspace_visible.bind(move |v| right.set_visible(*v || plots_vis.get()));
-    }
-    {
-        let right = right.clone();
-        let ws_vis = app.vm.layout.workspace_visible.clone();
-        app.vm.layout.plots_visible.bind(move |v| right.set_visible(*v || ws_vis.get()));
-    }
-    {
+    // Panel visibility, zen-aware: the activity bar / sidebar / right region all
+    // follow their own flags unless Focus (zen) mode suppresses them.
+    let update_chrome = {
+        let app = app.clone();
+        let activity = activity.clone();
         let sidebar = sidebar.clone();
-        app.vm.layout.sidebar_visible.bind(move |v| sidebar.set_visible(*v));
+        let right = right.clone();
+        move || {
+            let l = &app.vm.layout;
+            activity.set_visible(l.chrome_visible());
+            sidebar.set_visible(l.sidebar_effective());
+            right.set_visible(l.right_effective());
+        }
+    };
+    update_chrome();
+    for prop in [
+        app.vm.layout.sidebar_visible.clone(),
+        app.vm.layout.workspace_visible.clone(),
+        app.vm.layout.plots_visible.clone(),
+    ] {
+        let f = update_chrome.clone();
+        prop.subscribe(move |_| f());
+    }
+    {
+        let f = update_chrome.clone();
+        app.vm.layout.zen.subscribe(move |_| f());
     }
 
     root.append(&middle);
     root.append(&build_status_bar(&app));
-    window.set_child(Some(&root));
+
+    // Transient toast feedback floats over the content (bottom-center).
+    let overlay = gtk::Overlay::new();
+    overlay.set_child(Some(&root));
+    let toast = Label::new(None);
+    toast.add_css_class("mf-toast");
+    toast.set_halign(gtk::Align::Center);
+    toast.set_valign(gtk::Align::End);
+    toast.set_visible(false);
+    overlay.add_overlay(&toast);
+    window.set_child(Some(&overlay));
+    {
+        let app = app.clone();
+        let toast = toast.clone();
+        let hide: Rc<std::cell::RefCell<Option<gtk::glib::SourceId>>> =
+            Rc::new(std::cell::RefCell::new(None));
+        let revision = app.vm.toast.revision.clone();
+        revision.subscribe(move |_| {
+            let Some(msg) = app.vm.toast.message.get() else { return };
+            toast.set_text(&msg);
+            toast.set_visible(true);
+            if let Some(id) = hide.borrow_mut().take() {
+                id.remove();
+            }
+            let toast2 = toast.clone();
+            let hide2 = hide.clone();
+            let id = gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(2200), move || {
+                toast2.set_visible(false);
+                *hide2.borrow_mut() = None;
+            });
+            *hide.borrow_mut() = Some(id);
+        });
+    }
+
+    // Ctrl + scroll zooms the UI (capture phase so it beats scrollable children).
+    let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
+    scroll.set_propagation_phase(gtk::PropagationPhase::Capture);
+    {
+        let app = app.clone();
+        scroll.connect_scroll(move |c, _dx, dy| {
+            if c.current_event_state().contains(gtk::gdk::ModifierType::CONTROL_MASK) {
+                if dy < 0.0 {
+                    app.vm.appearance.zoom_in();
+                } else if dy > 0.0 {
+                    app.vm.appearance.zoom_out();
+                }
+                glib_stop()
+            } else {
+                gtk::glib::Propagation::Proceed
+            }
+        });
+    }
+    window.add_controller(scroll);
 }
 
 // ---- Menu bar + actions ----------------------------------------------------
@@ -146,6 +210,10 @@ fn build_menu_bar(window: &ApplicationWindow, app: &Rc<AppState>) -> gtk::Popove
     }
     {
         let a = app.clone();
+        register("toggle-zen", Rc::new(move || a.vm.layout.toggle_zen()));
+    }
+    {
+        let a = app.clone();
         register("compile", Rc::new(move || runner::compile(&a.vm)));
     }
     {
@@ -189,6 +257,23 @@ fn build_menu_bar(window: &ApplicationWindow, app: &Rc<AppState>) -> gtk::Popove
         let w2 = w.clone();
         register("about", Rc::new(move || show_about(&w2)));
     }
+    {
+        let a = app.clone();
+        let w2 = w.clone();
+        register("preferences", Rc::new(move || crate::settings_view::open(&a, Some(&w2))));
+    }
+    {
+        let a = app.clone();
+        register("zoom-in", Rc::new(move || a.vm.appearance.zoom_in()));
+    }
+    {
+        let a = app.clone();
+        register("zoom-out", Rc::new(move || a.vm.appearance.zoom_out()));
+    }
+    {
+        let a = app.clone();
+        register("zoom-reset", Rc::new(move || a.vm.appearance.zoom_reset()));
+    }
 
     // Keyboard accelerators (shown automatically in the menu by GTK).
     if let Some(gapp) = window.application().and_then(|a| a.downcast::<gtk::Application>().ok()) {
@@ -202,6 +287,7 @@ fn build_menu_bar(window: &ApplicationWindow, app: &Rc<AppState>) -> gtk::Popove
             ("win.toggle-sidebar", &["<Ctrl>b"]),
             ("win.toggle-workspace", &["<Ctrl><Shift>w"]),
             ("win.toggle-plots", &["<Ctrl><Shift>p"]),
+            ("win.toggle-zen", &["<Ctrl><Shift>f"]),
             ("win.compile", &["<Ctrl><Shift>b"]),
             ("win.run", &["<Ctrl>r"]),
             ("win.stop", &["<Shift>F5"]),
@@ -210,6 +296,10 @@ fn build_menu_bar(window: &ApplicationWindow, app: &Rc<AppState>) -> gtk::Popove
             ("win.dbg-next", &["F10"]),
             ("win.dbg-step-in", &["F11"]),
             ("win.dbg-step-out", &["<Shift>F11"]),
+            ("win.preferences", &["<Ctrl>comma"]),
+            ("win.zoom-in", &["<Ctrl>equal", "<Ctrl>plus", "<Ctrl>KP_Add"]),
+            ("win.zoom-out", &["<Ctrl>minus", "<Ctrl>KP_Subtract"]),
+            ("win.zoom-reset", &["<Ctrl>0"]),
         ] {
             gapp.set_accels_for_action(action, accels);
         }
@@ -237,12 +327,23 @@ fn build_menu_bar(window: &ApplicationWindow, app: &Rc<AppState>) -> gtk::Popove
     let find_section = Menu::new();
     find_section.append(Some("Search in Files"), Some("win.find"));
     edit.append_section(None, &find_section);
+    let prefs_section = Menu::new();
+    prefs_section.append(Some("Preferences…"), Some("win.preferences"));
+    edit.append_section(None, &prefs_section);
     menubar.append_submenu(Some("Edit"), &edit);
 
     let view = Menu::new();
-    view.append(Some("Toggle Sidebar"), Some("win.toggle-sidebar"));
-    view.append(Some("Toggle Workspace"), Some("win.toggle-workspace"));
-    view.append(Some("Toggle Plots"), Some("win.toggle-plots"));
+    let zoom = Menu::new();
+    zoom.append(Some("Zoom In"), Some("win.zoom-in"));
+    zoom.append(Some("Zoom Out"), Some("win.zoom-out"));
+    zoom.append(Some("Reset Zoom"), Some("win.zoom-reset"));
+    view.append_section(None, &zoom);
+    let panels = Menu::new();
+    panels.append(Some("Toggle Sidebar"), Some("win.toggle-sidebar"));
+    panels.append(Some("Toggle Workspace"), Some("win.toggle-workspace"));
+    panels.append(Some("Toggle Plots"), Some("win.toggle-plots"));
+    panels.append(Some("Focus Mode"), Some("win.toggle-zen"));
+    view.append_section(None, &panels);
     menubar.append_submenu(Some("View"), &view);
 
     let run_menu = Menu::new();
@@ -1638,26 +1739,39 @@ fn build_center(app: &Rc<AppState>) -> GtkBox {
     editor_nb.add_css_class("mf-editor");
     EDITOR_NB.with(|e| *e.borrow_mut() = Some(editor_nb.clone()));
 
+    let welcome = build_welcome(app);
     let console = build_console(app);
     center.append(&editor_nb);
+    center.append(&welcome);
     center.append(&console);
 
-    // Command-window mode: with nothing open in the center notebook (no source
-    // tab and no flowchart), hide it and let the console (the MATLAB command
-    // window / REPL workspace) fill the center. Driven by the notebook's page
-    // count so it accounts for flowchart pages, which are not editor.tabs.
+    // Three center states, driven by what's open:
+    //   • a source/flowchart tab open → editor + a docked console;
+    //   • a folder open but no tab → the console (MATLAB command window) fills;
+    //   • nothing open → the Welcome start screen.
     let update_center = {
+        let app = app.clone();
         let editor_nb = editor_nb.clone();
+        let welcome = welcome.clone();
         let console = console.clone();
         move || {
-            if editor_nb.n_pages() == 0 {
+            let pages = editor_nb.n_pages();
+            let has_folder = app.vm.project.root_url.get().is_some();
+            if pages > 0 {
+                editor_nb.set_visible(true);
+                welcome.set_visible(false);
+                console.set_vexpand(false);
+                console.set_size_request(-1, 220);
+            } else if has_folder {
                 editor_nb.set_visible(false);
+                welcome.set_visible(false);
                 console.set_vexpand(true);
                 console.set_size_request(-1, -1);
             } else {
-                editor_nb.set_visible(true);
+                editor_nb.set_visible(false);
+                welcome.set_visible(true);
                 console.set_vexpand(false);
-                console.set_size_request(-1, 220);
+                console.set_size_request(-1, 180);
             }
         }
     };
@@ -1670,7 +1784,125 @@ fn build_center(app: &Rc<AppState>) -> GtkBox {
         let f = update_center.clone();
         editor_nb.connect_page_removed(move |_, _, _| f());
     }
+    {
+        let f = update_center.clone();
+        app.vm.project.root_url.subscribe(move |_| f());
+    }
     center
+}
+
+/// The start screen shown when nothing is open: quick actions, recent folders,
+/// and a few examples to get a researcher productive immediately.
+fn build_welcome(app: &Rc<AppState>) -> GtkBox {
+    use matforge_core::services::preferences::Preferences;
+
+    let outer = GtkBox::new(Orientation::Vertical, 0);
+    outer.set_vexpand(true);
+    let scroll = ScrolledWindow::new();
+    scroll.set_vexpand(true);
+    let card = GtkBox::new(Orientation::Vertical, 10);
+    card.set_halign(gtk::Align::Center);
+    card.set_valign(gtk::Align::Center);
+    card.set_vexpand(true);
+    card.set_margin_top(40);
+    card.set_margin_bottom(40);
+    card.set_size_request(440, -1);
+    scroll.set_child(Some(&card));
+    outer.append(&scroll);
+
+    let logo = Label::new(Some("M"));
+    logo.add_css_class("mf-logo");
+    logo.set_halign(gtk::Align::Center);
+    card.append(&logo);
+    let title = Label::new(Some("MatForge IDE"));
+    title.add_css_class("mf-empty-title");
+    card.append(&title);
+    let tag = Label::new(Some("A home for MATLAB-LLVM data science and engineering."));
+    tag.add_css_class("mf-text-muted");
+    card.append(&tag);
+
+    // Quick actions.
+    let actions = GtkBox::new(Orientation::Horizontal, 8);
+    actions.set_halign(gtk::Align::Center);
+    actions.set_margin_top(8);
+    let new_btn = Button::with_label("New File");
+    new_btn.add_css_class("mf-compile-cta");
+    {
+        let app = app.clone();
+        new_btn.connect_clicked(move |_| new_untitled(&app));
+    }
+    let open_btn = Button::with_label("Open Folder…");
+    open_btn.add_css_class("mf-compile-cta");
+    {
+        let app = app.clone();
+        open_btn.connect_clicked(move |_| {
+            if let Some(win) = MAIN_WINDOW.with(|w| w.borrow().clone()) {
+                pick_folder(&win, &app);
+            }
+        });
+    }
+    actions.append(&new_btn);
+    actions.append(&open_btn);
+    card.append(&actions);
+
+    // Recent folders.
+    let recent = Preferences::load().recent;
+    if !recent.is_empty() {
+        card.append(&welcome_header("RECENT"));
+        for entry in recent.iter().take(6) {
+            let name = std::path::Path::new(entry)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| entry.clone());
+            let btn = welcome_link(&format!("📁  {name}"), entry);
+            let app = app.clone();
+            let path = entry.clone();
+            btn.connect_clicked(move |_| {
+                let _ = app.vm.open_folder(std::path::Path::new(&path));
+            });
+            card.append(&btn);
+        }
+    }
+
+    // Examples.
+    card.append(&welcome_header("EXAMPLES"));
+    let ex_script = welcome_link("📄  New MATLAB script", "untitled.m");
+    {
+        let app = app.clone();
+        ex_script.connect_clicked(move |_| new_untitled(&app));
+    }
+    card.append(&ex_script);
+    let ex_signal = welcome_link("🔀  Signal-flow model", "mflowLink demo");
+    {
+        let app = app.clone();
+        ex_signal.connect_clicked(move |_| open_demo_flowchart(&app, true));
+    }
+    card.append(&ex_signal);
+    let ex_control = welcome_link("◇  Control-flow model", "flowchart demo");
+    {
+        let app = app.clone();
+        ex_control.connect_clicked(move |_| open_demo_flowchart(&app, false));
+    }
+    card.append(&ex_control);
+
+    outer
+}
+
+fn welcome_header(text: &str) -> Label {
+    let l = Label::new(Some(text));
+    l.add_css_class("mf-panel-header");
+    l.set_halign(gtk::Align::Start);
+    l.set_margin_top(12);
+    l
+}
+
+fn welcome_link(label: &str, tooltip: &str) -> Button {
+    let b = Button::with_label(label);
+    b.set_has_frame(false);
+    b.add_css_class("mf-row");
+    b.set_halign(gtk::Align::Start);
+    b.set_tooltip_text(Some(tooltip));
+    b
 }
 
 /// Public so `main` can open a file at startup (demo / verification).
@@ -1788,7 +2020,9 @@ fn save_as_dialog(app: &Rc<AppState>, id: u64, suggested: &str, contents: &str) 
                 if std::fs::write(&path, &contents).is_ok() {
                     app.vm.editor.save_as(id, &path);
                     rename_tab_label(id, &path);
+                    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                     app.vm.status_bar.set_message(format!("Saved {}", path.display()));
+                    app.vm.toast.show(format!("Saved {name}"));
                 } else {
                     app.vm.console.log(ConsoleLevel::Error, format!("save failed: {}", path.display()));
                 }
@@ -1801,7 +2035,9 @@ fn write_tab(app: &Rc<AppState>, id: u64, url: &Path, contents: &str) {
     match std::fs::write(url, contents) {
         Ok(()) => {
             app.vm.editor.mark_saved(id);
+            let name = url.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             app.vm.status_bar.set_message(format!("Saved {}", url.display()));
+            app.vm.toast.show(format!("Saved {name}"));
         }
         Err(e) => app.vm.console.log(ConsoleLevel::Error, format!("save failed: {e}")),
     }
@@ -2090,7 +2326,10 @@ fn export_selected_figure(app: &Rc<AppState>) {
         if let Ok(file) = result {
             if let Some(path) = file.path() {
                 match std::fs::write(&path, &png) {
-                    Ok(()) => app.vm.status_bar.set_message(format!("Exported {}", path.display())),
+                    Ok(()) => {
+                        app.vm.status_bar.set_message(format!("Exported {}", path.display()));
+                        app.vm.toast.show("Figure exported");
+                    }
                     Err(e) => app.vm.console.log(ConsoleLevel::Error, format!("export failed: {e}")),
                 }
             }

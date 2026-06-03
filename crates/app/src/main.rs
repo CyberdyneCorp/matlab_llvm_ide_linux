@@ -27,6 +27,8 @@ mod statechart_window;
 mod process;
 mod runner;
 mod services_impl;
+mod settings_view;
+mod theme_css;
 mod ui;
 
 use app_state::AppState;
@@ -37,7 +39,6 @@ const APP_ID: &str = "org.matlab_llvm.MatForge";
 fn main() -> glib::ExitCode {
     let app = Application::builder().application_id(APP_ID).build();
     app.connect_startup(|_| {
-        install_css();
         icons::install();
     });
     app.connect_activate(build_main_window);
@@ -63,7 +64,32 @@ fn build_main_window(app: &Application) {
     ));
     let app = AppState::new(vm, settings.clone());
 
+    // Apply persisted appearance before the first paint, then keep the CSS +
+    // Cairo renderers in sync with the appearance view model at runtime.
+    let prefs = matforge_core::services::preferences::Preferences::load();
+    app.vm.appearance.apply(
+        prefs.appearance.theme_id(),
+        prefs.appearance.accent_enum(),
+        prefs.appearance.font_scale,
+        prefs.appearance.code_font.clone(),
+    );
+    // Restore panel visibility before the panels are built.
+    app.vm.layout.sidebar_visible.set(prefs.layout.sidebar_visible);
+    app.vm.layout.workspace_visible.set(prefs.layout.workspace_visible);
+    app.vm.layout.plots_visible.set(prefs.layout.plots_visible);
+
     ui::build(&window, app.clone());
+
+    install_theming(&window, &app);
+
+    // Save the session (layout + open tabs + folder) on a clean window close.
+    {
+        let app = app.clone();
+        window.connect_close_request(move |_| {
+            save_prefs(&app);
+            gtk::glib::Propagation::Proceed
+        });
+    }
 
     // E2E state introspection (test-only; no-op unless the env var is set).
     if let Ok(path) = std::env::var("MATFORGE_E2E_STATE") {
@@ -123,6 +149,27 @@ fn build_main_window(app: &Application) {
     if std::env::var("MATFORGE_NORIGHT").is_ok() {
         app.vm.layout.workspace_visible.set(false);
     }
+    // Demo/verification: force a theme/accent at launch.
+    if let Ok(theme) = std::env::var("MATFORGE_THEME") {
+        app.vm.appearance.set_theme(matforge_core::theme::ThemeId::from_key(&theme));
+    }
+    if let Ok(accent) = std::env::var("MATFORGE_ACCENT") {
+        app.vm.appearance.set_accent(matforge_core::theme::Accent::from_key(&accent));
+    }
+    if std::env::var("MATFORGE_ZEN").is_ok() {
+        app.vm.layout.zen.set(true);
+    }
+
+    // Session restore: reopen the last folder + tabs when nothing was opened via
+    // env (so explicit MATFORGE_OPEN/FILE always win).
+    if std::env::var("MATFORGE_OPEN").is_err() && std::env::var("MATFORGE_FILE").is_err() {
+        if let Some(folder) = &prefs.last_folder {
+            let _ = app.vm.open_folder(std::path::Path::new(folder));
+        }
+        for tab in &prefs.open_tabs {
+            ui::open_file_path(&app, std::path::Path::new(tab));
+        }
+    }
 
     if !runner::matlabc_available(&settings) {
         app.vm.status_bar.set_message(format!(
@@ -132,12 +179,18 @@ fn build_main_window(app: &Application) {
     }
 
     window.present();
+
+    if std::env::var("MATFORGE_PREFS").is_ok() {
+        settings_view::open(&app, Some(&window));
+    }
 }
 
-/// Load the bundled CSS theme into the default display.
-fn install_css() {
+/// Install a swappable `CssProvider` driven by the appearance view model: render
+/// the stylesheet from the active theme tokens + font scale, and re-render on any
+/// appearance change (theme / accent / zoom). Also caches the tokens for the
+/// Cairo renderers and persists the choice.
+fn install_theming(window: &ApplicationWindow, app: &Rc<AppState>) {
     let provider = CssProvider::new();
-    provider.load_from_string(include_str!("../resources/theme.css"));
     if let Some(display) = gdk::Display::default() {
         gtk::style_context_add_provider_for_display(
             &display,
@@ -145,4 +198,57 @@ fn install_css() {
             gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
     }
+
+    let render = {
+        let app = app.clone();
+        let provider = provider.clone();
+        let window = window.clone();
+        move || {
+            let tokens = app.vm.appearance.tokens();
+            let scale = app.vm.appearance.font_scale.get();
+            provider.load_from_string(&theme_css::render(&tokens, scale));
+            theme_css::set_current(tokens);
+            // Re-tint the Cairo widgets (plots/flowchart/gutter) immediately.
+            window.queue_draw();
+            save_prefs(&app);
+        }
+    };
+    render(); // initial paint
+    app.vm.appearance.revision.subscribe(move |_| render());
+
+    // Toast on theme switches (not on every font-zoom tick).
+    {
+        let app = app.clone();
+        let theme_id = app.vm.appearance.theme_id.clone();
+        theme_id.subscribe(move |id| {
+            app.vm.toast.show(format!("Theme: {}", id.label()));
+        });
+    }
+}
+
+/// Persist appearance + layout + session (open tabs / last folder) to
+/// `config.toml`, preserving fields this build does not own.
+fn save_prefs(app: &Rc<AppState>) {
+    use matforge_core::services::preferences::Preferences;
+    let mut prefs = Preferences::load();
+
+    let a = &app.vm.appearance;
+    prefs.appearance.theme = a.theme_id.get().key().to_string();
+    prefs.appearance.accent = a.accent.get().key().to_string();
+    prefs.appearance.font_scale = a.font_scale.get();
+    prefs.appearance.code_font = a.code_font_family.get();
+
+    let l = &app.vm.layout;
+    prefs.layout.sidebar_visible = l.sidebar_visible.get();
+    prefs.layout.workspace_visible = l.workspace_visible.get();
+    prefs.layout.plots_visible = l.plots_visible.get();
+
+    prefs.open_tabs = app.vm.editor.tabs.with(|ts| {
+        ts.iter().filter_map(|t| t.url.as_ref().map(|u| u.display().to_string())).collect()
+    });
+    prefs.last_folder = app.vm.project.root_url.get().map(|u| u.display().to_string());
+    if let Some(folder) = prefs.last_folder.clone() {
+        prefs.push_recent(folder);
+    }
+    let _ = prefs.save();
 }
