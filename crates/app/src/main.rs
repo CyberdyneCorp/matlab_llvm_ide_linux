@@ -215,6 +215,15 @@ fn install_theming(window: &ApplicationWindow, app: &Rc<AppState>) {
     };
     render(); // initial paint
     app.vm.appearance.revision.subscribe(move |_| render());
+
+    // Toast on theme switches (not on every font-zoom tick).
+    {
+        let app = app.clone();
+        let theme_id = app.vm.appearance.theme_id.clone();
+        theme_id.subscribe(move |id| {
+            app.vm.toast.show(format!("Theme: {}", id.label()));
+        });
+    }
 }
 
 /// Persist appearance + layout + session (open tabs / last folder) to

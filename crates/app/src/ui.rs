@@ -95,7 +95,39 @@ pub fn build(window: &ApplicationWindow, app: Rc<AppState>) {
 
     root.append(&middle);
     root.append(&build_status_bar(&app));
-    window.set_child(Some(&root));
+
+    // Transient toast feedback floats over the content (bottom-center).
+    let overlay = gtk::Overlay::new();
+    overlay.set_child(Some(&root));
+    let toast = Label::new(None);
+    toast.add_css_class("mf-toast");
+    toast.set_halign(gtk::Align::Center);
+    toast.set_valign(gtk::Align::End);
+    toast.set_visible(false);
+    overlay.add_overlay(&toast);
+    window.set_child(Some(&overlay));
+    {
+        let app = app.clone();
+        let toast = toast.clone();
+        let hide: Rc<std::cell::RefCell<Option<gtk::glib::SourceId>>> =
+            Rc::new(std::cell::RefCell::new(None));
+        let revision = app.vm.toast.revision.clone();
+        revision.subscribe(move |_| {
+            let Some(msg) = app.vm.toast.message.get() else { return };
+            toast.set_text(&msg);
+            toast.set_visible(true);
+            if let Some(id) = hide.borrow_mut().take() {
+                id.remove();
+            }
+            let toast2 = toast.clone();
+            let hide2 = hide.clone();
+            let id = gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(2200), move || {
+                toast2.set_visible(false);
+                *hide2.borrow_mut() = None;
+            });
+            *hide.borrow_mut() = Some(id);
+        });
+    }
 
     // Ctrl + scroll zooms the UI (capture phase so it beats scrollable children).
     let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
@@ -1988,7 +2020,9 @@ fn save_as_dialog(app: &Rc<AppState>, id: u64, suggested: &str, contents: &str) 
                 if std::fs::write(&path, &contents).is_ok() {
                     app.vm.editor.save_as(id, &path);
                     rename_tab_label(id, &path);
+                    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                     app.vm.status_bar.set_message(format!("Saved {}", path.display()));
+                    app.vm.toast.show(format!("Saved {name}"));
                 } else {
                     app.vm.console.log(ConsoleLevel::Error, format!("save failed: {}", path.display()));
                 }
@@ -2001,7 +2035,9 @@ fn write_tab(app: &Rc<AppState>, id: u64, url: &Path, contents: &str) {
     match std::fs::write(url, contents) {
         Ok(()) => {
             app.vm.editor.mark_saved(id);
+            let name = url.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             app.vm.status_bar.set_message(format!("Saved {}", url.display()));
+            app.vm.toast.show(format!("Saved {name}"));
         }
         Err(e) => app.vm.console.log(ConsoleLevel::Error, format!("save failed: {e}")),
     }
@@ -2290,7 +2326,10 @@ fn export_selected_figure(app: &Rc<AppState>) {
         if let Ok(file) = result {
             if let Some(path) = file.path() {
                 match std::fs::write(&path, &png) {
-                    Ok(()) => app.vm.status_bar.set_message(format!("Exported {}", path.display())),
+                    Ok(()) => {
+                        app.vm.status_bar.set_message(format!("Exported {}", path.display()));
+                        app.vm.toast.show("Figure exported");
+                    }
                     Err(e) => app.vm.console.log(ConsoleLevel::Error, format!("export failed: {e}")),
                 }
             }

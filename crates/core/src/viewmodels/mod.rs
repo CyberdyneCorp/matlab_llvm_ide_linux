@@ -20,6 +20,7 @@ pub mod repl;
 pub mod search;
 pub mod statechart;
 pub mod status_bar;
+pub mod toast;
 pub mod toolbar;
 pub mod workspace;
 
@@ -39,5 +40,6 @@ pub use repl::ReplViewModel;
 pub use search::{SearchResult, SearchViewModel};
 pub use statechart::StateChartViewModel;
 pub use status_bar::StatusBarViewModel;
+pub use toast::ToastViewModel;
 pub use toolbar::ToolbarViewModel;
 pub use workspace::WorkspaceViewModel;
