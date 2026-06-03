@@ -5,6 +5,7 @@
 //! and call the verb methods. `MainViewModel` is the composition root.
 
 pub mod activity_bar;
+pub mod appearance;
 pub mod breakpoints;
 pub mod console;
 pub mod debug;
@@ -23,6 +24,7 @@ pub mod toolbar;
 pub mod workspace;
 
 pub use activity_bar::{ActivityBarViewModel, ActivityItem};
+pub use appearance::AppearanceViewModel;
 pub use breakpoints::BreakpointsViewModel;
 pub use console::ConsoleViewModel;
 pub use debug::{DebugState, DebugViewModel};

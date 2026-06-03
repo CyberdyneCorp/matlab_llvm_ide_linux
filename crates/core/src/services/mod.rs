@@ -10,6 +10,7 @@ pub mod filesystem;
 pub mod flowchart_codec;
 pub mod highlighter;
 pub mod parsers;
+pub mod preferences;
 pub mod run;
 pub mod sentinels;
 pub mod settings;

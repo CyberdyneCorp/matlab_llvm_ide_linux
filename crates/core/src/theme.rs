@@ -87,6 +87,312 @@ pub mod code {
     pub const LINE_NUMBER: Rgb = Rgb::hex(0x4A5870);
 }
 
+/// The built-in themes the user can switch between at runtime.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub enum ThemeId {
+    /// The signature dark theme (the original palette, refined).
+    Midnight,
+    /// A clean light theme for bright rooms / projectors.
+    Daylight,
+    /// Maximum-contrast dark theme for accessibility.
+    HighContrast,
+}
+
+impl ThemeId {
+    pub const ALL: [ThemeId; 3] = [ThemeId::Midnight, ThemeId::Daylight, ThemeId::HighContrast];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ThemeId::Midnight => "Midnight",
+            ThemeId::Daylight => "Daylight",
+            ThemeId::HighContrast => "High Contrast",
+        }
+    }
+
+    /// Stable id for persistence.
+    pub fn key(self) -> &'static str {
+        match self {
+            ThemeId::Midnight => "midnight",
+            ThemeId::Daylight => "daylight",
+            ThemeId::HighContrast => "high-contrast",
+        }
+    }
+
+    pub fn from_key(key: &str) -> ThemeId {
+        match key {
+            "daylight" => ThemeId::Daylight,
+            "high-contrast" => ThemeId::HighContrast,
+            _ => ThemeId::Midnight,
+        }
+    }
+}
+
+/// The brand accent hue the user can pick — recolors the single accent used by
+/// the logo, panel headers, the selected activity item, and primary buttons.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub enum Accent {
+    Amber,
+    Blue,
+    Green,
+    Violet,
+    Cyan,
+    Red,
+}
+
+impl Accent {
+    pub const ALL: [Accent; 6] =
+        [Accent::Amber, Accent::Blue, Accent::Green, Accent::Violet, Accent::Cyan, Accent::Red];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Accent::Amber => "Amber",
+            Accent::Blue => "Blue",
+            Accent::Green => "Green",
+            Accent::Violet => "Violet",
+            Accent::Cyan => "Cyan",
+            Accent::Red => "Red",
+        }
+    }
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Accent::Amber => "amber",
+            Accent::Blue => "blue",
+            Accent::Green => "green",
+            Accent::Violet => "violet",
+            Accent::Cyan => "cyan",
+            Accent::Red => "red",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Accent {
+        match key {
+            "blue" => Accent::Blue,
+            "green" => Accent::Green,
+            "violet" => Accent::Violet,
+            "cyan" => Accent::Cyan,
+            "red" => Accent::Red,
+            _ => Accent::Amber,
+        }
+    }
+
+    /// The accent's representative color.
+    pub fn rgb(self) -> Rgb {
+        match self {
+            Accent::Amber => Rgb::hex(0xE08A45),
+            Accent::Blue => Rgb::hex(0x4FA3E3),
+            Accent::Green => Rgb::hex(0x5EBE6E),
+            Accent::Violet => Rgb::hex(0xC678DD),
+            Accent::Cyan => Rgb::hex(0x64C8D6),
+            Accent::Red => Rgb::hex(0xE05B5B),
+        }
+    }
+}
+
+/// A resolved set of every color the UI needs — the single source of truth a
+/// theme provides. The GTK chrome renders these into CSS `@define-color`s and
+/// the Cairo renderers read them directly, so switching a theme re-tints the
+/// whole surface. Colors only; font sizes are scaled at render time.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ThemeTokens {
+    pub id: ThemeId,
+    pub dark: bool,
+    // Surfaces
+    pub window_background: Rgb,
+    pub chrome: Rgb,
+    pub panel: Rgb,
+    pub panel_alt: Rgb,
+    pub editor_bg: Rgb,
+    pub card: Rgb,
+    pub border: Rgb,
+    pub border_soft: Rgb,
+    // Text
+    pub text_primary: Rgb,
+    pub text_secondary: Rgb,
+    pub text_muted: Rgb,
+    // Brand accent (recolored by `Accent`)
+    pub accent: Rgb,
+    // Terminal (matrix-retro console)
+    pub term_bg: Rgb,
+    pub term_fg: Rgb,
+    // Named accents / status
+    pub orange: Rgb,
+    pub amber: Rgb,
+    pub green: Rgb,
+    pub green_deep: Rgb,
+    pub blue: Rgb,
+    pub cyan: Rgb,
+    pub red: Rgb,
+    pub yellow: Rgb,
+    pub magenta: Rgb,
+    // Interaction
+    pub selection: Rgb,
+    pub hover: Rgb,
+    // Syntax
+    pub syn_plain: Rgb,
+    pub syn_keyword: Rgb,
+    pub syn_control: Rgb,
+    pub syn_number: Rgb,
+    pub syn_string: Rgb,
+    pub syn_comment: Rgb,
+    pub syn_function: Rgb,
+    pub syn_identifier: Rgb,
+    pub syn_operator: Rgb,
+    pub syn_line_number: Rgb,
+}
+
+impl ThemeTokens {
+    /// The signature dark theme — reuses the original `palette`/`code` constants
+    /// verbatim so the default look does not change.
+    pub fn midnight() -> ThemeTokens {
+        ThemeTokens {
+            id: ThemeId::Midnight,
+            dark: true,
+            window_background: palette::WINDOW_BACKGROUND,
+            chrome: palette::CHROME,
+            panel: palette::PANEL,
+            panel_alt: palette::PANEL_ALT,
+            editor_bg: palette::EDITOR_BACKGROUND,
+            card: palette::CARD,
+            border: palette::BORDER,
+            border_soft: palette::BORDER_SOFT,
+            text_primary: Rgb::hex(0xE3E9F3),
+            text_secondary: Rgb::hex(0xA3B2C8),
+            text_muted: Rgb::hex(0x8090A8),
+            accent: palette::ACCENT_ORANGE,
+            term_bg: Rgb::hex(0x04070A),
+            term_fg: Rgb::hex(0x43D459),
+            orange: palette::ACCENT_ORANGE,
+            amber: palette::ACCENT_AMBER,
+            green: palette::ACCENT_GREEN,
+            green_deep: palette::ACCENT_GREEN_DEEP,
+            blue: palette::ACCENT_BLUE,
+            cyan: palette::ACCENT_CYAN,
+            red: palette::ACCENT_RED,
+            yellow: palette::ACCENT_YELLOW,
+            magenta: palette::ACCENT_MAGENTA,
+            selection: palette::SELECTION,
+            hover: palette::HOVER,
+            syn_plain: code::PLAIN,
+            syn_keyword: code::KEYWORD,
+            syn_control: code::CONTROL,
+            syn_number: code::NUMBER,
+            syn_string: code::STRING,
+            syn_comment: code::COMMENT,
+            syn_function: code::FUNCTION,
+            syn_identifier: code::IDENTIFIER,
+            syn_operator: code::OPERATOR,
+            syn_line_number: code::LINE_NUMBER,
+        }
+    }
+
+    /// A clean, low-contrast light theme.
+    pub fn daylight() -> ThemeTokens {
+        ThemeTokens {
+            id: ThemeId::Daylight,
+            dark: false,
+            window_background: Rgb::hex(0xF4F6FA),
+            chrome: Rgb::hex(0xE9EEF4),
+            panel: Rgb::hex(0xFFFFFF),
+            panel_alt: Rgb::hex(0xEFF3F8),
+            editor_bg: Rgb::hex(0xFFFFFF),
+            card: Rgb::hex(0xF6F8FB),
+            border: Rgb::hex(0xCBD5E3),
+            border_soft: Rgb::hex(0xDCE3EC),
+            text_primary: Rgb::hex(0x1B2430),
+            text_secondary: Rgb::hex(0x4A586B),
+            text_muted: Rgb::hex(0x8492A6),
+            accent: Rgb::hex(0xC9702C),
+            term_bg: Rgb::hex(0x0E1622),
+            term_fg: Rgb::hex(0x46D267),
+            orange: Rgb::hex(0xC9702C),
+            amber: Rgb::hex(0xB06A2C),
+            green: Rgb::hex(0x2E9E4B),
+            green_deep: Rgb::hex(0x1F7A38),
+            blue: Rgb::hex(0x2A7FD0),
+            cyan: Rgb::hex(0x1597A8),
+            red: Rgb::hex(0xCB4242),
+            yellow: Rgb::hex(0xB8862A),
+            magenta: Rgb::hex(0x9B4DB8),
+            selection: Rgb::hex(0xCBE0F7),
+            hover: Rgb::hex(0xE6ECF4),
+            syn_plain: Rgb::hex(0x1B2430),
+            syn_keyword: Rgb::hex(0x9B4DB8),
+            syn_control: Rgb::hex(0xC0392B),
+            syn_number: Rgb::hex(0x2E7D32),
+            syn_string: Rgb::hex(0xB5651D),
+            syn_comment: Rgb::hex(0x97A2B2),
+            syn_function: Rgb::hex(0x1565C0),
+            syn_identifier: Rgb::hex(0x1B2430),
+            syn_operator: Rgb::hex(0x546177),
+            syn_line_number: Rgb::hex(0xB0BAC8),
+        }
+    }
+
+    /// Maximum-contrast dark theme for accessibility.
+    pub fn high_contrast() -> ThemeTokens {
+        ThemeTokens {
+            id: ThemeId::HighContrast,
+            dark: true,
+            window_background: Rgb::hex(0x000000),
+            chrome: Rgb::hex(0x050505),
+            panel: Rgb::hex(0x0A0A0A),
+            panel_alt: Rgb::hex(0x141414),
+            editor_bg: Rgb::hex(0x000000),
+            card: Rgb::hex(0x161616),
+            border: Rgb::hex(0x3A3A3A),
+            border_soft: Rgb::hex(0x2A2A2A),
+            text_primary: Rgb::hex(0xFFFFFF),
+            text_secondary: Rgb::hex(0xD6D6D6),
+            text_muted: Rgb::hex(0xA6A6A6),
+            accent: Rgb::hex(0xFFB000),
+            term_bg: Rgb::hex(0x000000),
+            term_fg: Rgb::hex(0x00FF66),
+            orange: Rgb::hex(0xFFB000),
+            amber: Rgb::hex(0xFFC844),
+            green: Rgb::hex(0x33FF66),
+            green_deep: Rgb::hex(0x22CC55),
+            blue: Rgb::hex(0x4DA6FF),
+            cyan: Rgb::hex(0x33E0E0),
+            red: Rgb::hex(0xFF5555),
+            yellow: Rgb::hex(0xFFD740),
+            magenta: Rgb::hex(0xE066FF),
+            selection: Rgb::hex(0x224488),
+            hover: Rgb::hex(0x242424),
+            syn_plain: Rgb::hex(0xF2F2F2),
+            syn_keyword: Rgb::hex(0xE066FF),
+            syn_control: Rgb::hex(0xFF6E6E),
+            syn_number: Rgb::hex(0x7CFF7C),
+            syn_string: Rgb::hex(0xFFC07A),
+            syn_comment: Rgb::hex(0x9AA0A6),
+            syn_function: Rgb::hex(0x6EC1FF),
+            syn_identifier: Rgb::hex(0xF2F2F2),
+            syn_operator: Rgb::hex(0xD0D0D0),
+            syn_line_number: Rgb::hex(0x6A6A6A),
+        }
+    }
+
+    pub fn for_id(id: ThemeId) -> ThemeTokens {
+        match id {
+            ThemeId::Midnight => ThemeTokens::midnight(),
+            ThemeId::Daylight => ThemeTokens::daylight(),
+            ThemeId::HighContrast => ThemeTokens::high_contrast(),
+        }
+    }
+
+    /// Recolor the brand accent to `accent`, leaving everything else intact.
+    pub fn with_accent(mut self, accent: Accent) -> ThemeTokens {
+        self.accent = accent.rgb();
+        self
+    }
+}
+
+impl Default for ThemeTokens {
+    fn default() -> Self {
+        ThemeTokens::midnight()
+    }
+}
+
 /// Layout metrics in logical pixels (`Theme.Metrics`).
 pub mod metrics {
     pub const PANEL_HEADER_HEIGHT: i32 = 24;
@@ -156,5 +462,61 @@ mod tests {
         assert_eq!(metrics::ACTIVITY_BAR_WIDTH, 56);
         assert_eq!(metrics::LEFT_SIDEBAR_WIDTH, 220);
         assert_eq!(metrics::STATUS_BAR_HEIGHT, 22);
+    }
+
+    fn luminance(c: Rgb) -> f64 {
+        let (r, g, b) = c.to_unit();
+        0.2126 * r + 0.7152 * g + 0.0722 * b
+    }
+
+    #[test]
+    fn midnight_reuses_original_palette() {
+        let t = ThemeTokens::midnight();
+        assert_eq!(t.window_background, palette::WINDOW_BACKGROUND);
+        assert_eq!(t.editor_bg, palette::EDITOR_BACKGROUND);
+        assert_eq!(t.accent, palette::ACCENT_ORANGE);
+        assert_eq!(t.syn_keyword, code::KEYWORD);
+        assert!(t.dark);
+    }
+
+    #[test]
+    fn daylight_is_actually_light_and_legible() {
+        let t = ThemeTokens::daylight();
+        assert!(!t.dark);
+        // Light surfaces, dark text → high contrast the other way round.
+        assert!(luminance(t.window_background) > 0.8);
+        assert!(luminance(t.editor_bg) > 0.9);
+        assert!(luminance(t.text_primary) < 0.3);
+    }
+
+    #[test]
+    fn high_contrast_maximizes_text_contrast() {
+        let t = ThemeTokens::high_contrast();
+        assert_eq!(t.editor_bg, Rgb::hex(0x000000));
+        assert_eq!(t.text_primary, Rgb::hex(0xFFFFFF));
+        assert!(luminance(t.text_primary) - luminance(t.editor_bg) > 0.9);
+    }
+
+    #[test]
+    fn for_id_round_trips_through_keys() {
+        for id in ThemeId::ALL {
+            assert_eq!(ThemeId::from_key(id.key()), id);
+            assert_eq!(ThemeTokens::for_id(id).id, id);
+            assert!(!id.label().is_empty());
+        }
+    }
+
+    #[test]
+    fn accent_recolors_only_the_accent() {
+        let base = ThemeTokens::midnight();
+        let blue = base.with_accent(Accent::Blue);
+        assert_eq!(blue.accent, Accent::Blue.rgb());
+        // everything else untouched
+        assert_eq!(blue.window_background, base.window_background);
+        assert_eq!(blue.text_primary, base.text_primary);
+        for a in Accent::ALL {
+            assert_eq!(Accent::from_key(a.key()), a);
+            assert!(!a.label().is_empty());
+        }
     }
 }
