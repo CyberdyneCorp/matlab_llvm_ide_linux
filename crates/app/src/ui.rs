@@ -153,7 +153,7 @@ fn build_menu_bar(window: &ApplicationWindow, app: &Rc<AppState>) -> gtk::Popove
             "run",
             Rc::new(move || {
                 let settings = a.settings.clone();
-                runner::run(&a.vm, &settings);
+                runner::run(a.vm.clone(), &settings);
             }),
         );
     }
@@ -349,7 +349,7 @@ fn build_toolbar(window: &ApplicationWindow, app: &Rc<AppState>) -> GtkBox {
         let app = app.clone();
         run_btn.connect_clicked(move |_| {
             let settings = app.settings.clone();
-            runner::run(&app.vm, &settings);
+            runner::run(app.vm.clone(), &settings);
         });
     }
     let debug_btn = tool_button(ic::DEBUG, "Debug", Some("mf-debug"));

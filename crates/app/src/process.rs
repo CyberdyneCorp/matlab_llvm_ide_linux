@@ -16,8 +16,9 @@ use gtk::glib;
 use matforge_core::services::dap::{DapClient, DapFramer};
 
 /// Spawn a thread that reads `reader` line-by-line and forwards each (newline
-/// trimmed) line over `tx`.
-fn spawn_line_reader<R: Read + Send + 'static>(reader: R, tx: Sender<String>) {
+/// trimmed) line over `tx`. Returns the join handle so callers can wait for the
+/// stream to drain (the REPL/DAP sessions ignore it).
+fn spawn_line_reader<R: Read + Send + 'static>(reader: R, tx: Sender<String>) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let mut buf = BufReader::new(reader);
         let mut line = String::new();
@@ -33,7 +34,7 @@ fn spawn_line_reader<R: Read + Send + 'static>(reader: R, tx: Sender<String>) {
                 }
             }
         }
-    });
+    })
 }
 
 /// Drain `rx` on the GTK main loop, calling `on_line` for each received line.
@@ -44,6 +45,47 @@ fn pump_to_main_loop(rx: Receiver<String>, mut on_line: impl FnMut(String) + 'st
         }
         glib::ControlFlow::Continue
     });
+}
+
+// ---- Streaming run ---------------------------------------------------------
+
+/// Sentinel line appended after a streamed run finishes, carrying the exit code
+/// (e.g. `___MF_RUN_EXIT___0`). Lets the caller report completion on the main
+/// loop without blocking on the child.
+pub const RUN_EXIT_PREFIX: &str = "___MF_RUN_EXIT___";
+
+/// Run `bin` in `cwd`, streaming each stdout/stderr line to `on_line` on the
+/// GTK main loop as it is produced (so animations + long logs appear live), and
+/// finally a `RUN_EXIT_PREFIX<code>` line once the process exits and its output
+/// has fully drained. `figures` gates the figure-emit env var.
+pub fn run_streaming(
+    bin: &Path,
+    cwd: &Path,
+    figures: bool,
+    on_line: impl FnMut(String) + 'static,
+) -> std::io::Result<()> {
+    let mut cmd = Command::new(bin);
+    cmd.current_dir(cwd).stdout(Stdio::piped()).stderr(Stdio::piped());
+    if figures {
+        cmd.env("MATLAB_LLVM_IDE_FIGURES", "1");
+    }
+    let mut child = cmd.spawn()?;
+    let stdout = child.stdout.take().expect("piped stdout");
+    let stderr = child.stderr.take().expect("piped stderr");
+
+    let (tx, rx) = mpsc::channel::<String>();
+    let h_out = spawn_line_reader(stdout, tx.clone());
+    let h_err = spawn_line_reader(stderr, tx.clone());
+    // Emit the exit sentinel only after both pipes drain, so the final frame /
+    // last log line is delivered before "Finished".
+    thread::spawn(move || {
+        let _ = h_out.join();
+        let _ = h_err.join();
+        let code = child.wait().ok().and_then(|s| s.code()).unwrap_or(-1);
+        let _ = tx.send(format!("{RUN_EXIT_PREFIX}{code}"));
+    });
+    pump_to_main_loop(rx, on_line);
+    Ok(())
 }
 
 // ---- Live REPL -------------------------------------------------------------

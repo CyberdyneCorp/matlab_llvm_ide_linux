@@ -80,7 +80,7 @@ fn build_main_window(app: &Application) {
         runner::compile(&app.vm);
     }
     if std::env::var("MATFORGE_RUN").is_ok() {
-        runner::run(&app.vm, &settings);
+        runner::run(app.vm.clone(), &settings);
     }
     if let Ok(cmd) = std::env::var("MATFORGE_REPL") {
         app.repl_send(&cmd);

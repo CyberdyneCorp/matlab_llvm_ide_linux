@@ -6,11 +6,14 @@
 
 use std::path::Path;
 use std::process::Command;
+use std::rc::Rc;
 
 use matforge_core::models::ConsoleLevel;
 use matforge_core::services::run::RunPlan;
 use matforge_core::services::settings::Settings;
 use matforge_core::viewmodels::MainViewModel;
+
+use crate::process::{run_streaming, RUN_EXIT_PREFIX};
 
 /// Compile the active tab to the selected target and apply the result.
 pub fn compile(vm: &MainViewModel) {
@@ -18,8 +21,9 @@ pub fn compile(vm: &MainViewModel) {
     vm.run_compile(&ProcessCompilerService);
 }
 
-/// Run the active tab: emit LLVM IR, link with clang, execute, stream output.
-pub fn run(vm: &MainViewModel, settings: &Settings) {
+/// Run the active tab: emit LLVM IR, link with clang, then execute streaming its
+/// output live (so `drawnow` animations and long logs appear as they happen).
+pub fn run(vm: Rc<MainViewModel>, settings: &Settings) {
     let Some(tab) = vm.editor.active_tab() else {
         vm.status_bar.set_message("Nothing to run");
         return;
@@ -38,36 +42,39 @@ pub fn run(vm: &MainViewModel, settings: &Settings) {
         .output();
     let emit = match emit {
         Ok(o) if o.status.success() => o,
-        Ok(o) => return fail(vm, &String::from_utf8_lossy(&o.stderr)),
-        Err(e) => return fail(vm, &format!("matlabc: {e}")),
+        Ok(o) => return fail(&vm, &String::from_utf8_lossy(&o.stderr)),
+        Err(e) => return fail(&vm, &format!("matlabc: {e}")),
     };
     if std::fs::write(&plan.ll_path, &emit.stdout).is_err() {
-        return fail(vm, "could not write LLVM IR");
+        return fail(&vm, "could not write LLVM IR");
     }
 
     // 2. clang++ … -o stem
     let (clang, args) = plan.link_command(&settings.runtime_archive);
     match Command::new(&clang).args(&args).output() {
         Ok(o) if o.status.success() => {}
-        Ok(o) => return fail(vm, &String::from_utf8_lossy(&o.stderr)),
-        Err(e) => return fail(vm, &format!("clang: {e}")),
+        Ok(o) => return fail(&vm, &String::from_utf8_lossy(&o.stderr)),
+        Err(e) => return fail(&vm, &format!("clang: {e}")),
     }
 
-    // 3. execute and stream stdout to the REPL transcript via the sentinel path.
-    //    MATLAB_LLVM_IDE_FIGURES makes the matlab_plot runtime emit figures as
-    //    ___MF_FIG_*___ sentinels so they land in the Plots panel.
-    match Command::new(&plan.bin_path)
-        .env("MATLAB_LLVM_IDE_FIGURES", "1")
-        .output()
-    {
-        Ok(o) => {
-            let stdout = String::from_utf8_lossy(&o.stdout);
-            for line in stdout.lines() {
-                vm.feed_repl_line(line);
-            }
-            vm.status_bar.set_message(format!("Finished (exit {})", o.status.code().unwrap_or(-1)));
+    // 3. execute, streaming each output line to the REPL transcript + figure
+    //    pipeline as it is produced. MATLAB_LLVM_IDE_FIGURES makes the runtime
+    //    emit ___MF_FIG_*___ sentinels, so a `plot(...); drawnow` loop animates
+    //    the Plots panel live instead of only showing the final frame.
+    vm.toolbar.is_running.set(true);
+    let stem = plan.stem.clone();
+    let started = run_streaming(&plan.bin_path, &out_dir, true, move |line| {
+        if let Some(code) = line.strip_prefix(RUN_EXIT_PREFIX) {
+            vm.toolbar.is_running.set(false);
+            vm.status_bar.set_message(format!("Finished {stem} (exit {code})"));
+        } else {
+            vm.feed_repl_line(&line);
         }
-        Err(e) => fail(vm, &format!("exec: {e}")),
+    });
+    if let Err(e) = started {
+        // `vm` was moved into the closure; surface the spawn error on the status
+        // bar via a fresh log is not possible here, so leave a console message.
+        eprintln!("run: could not start {}: {e}", plan.bin_path.display());
     }
 }
 
