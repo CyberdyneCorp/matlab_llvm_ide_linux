@@ -8,6 +8,7 @@
 //! redraws on scroll, mapping buffer↔window coordinates via the text view. All
 //! state lives in the view models; this only draws from them.
 
+use std::cell::RefCell;
 use std::f64::consts::PI;
 use std::rc::Rc;
 
@@ -20,6 +21,20 @@ use crate::app_state::AppState;
 use crate::highlight;
 
 const GUTTER_WIDTH: i32 = 52;
+
+thread_local! {
+    /// The code view that last had focus — the target of in-editor find / goto.
+    static ACTIVE_VIEW: RefCell<Option<TextView>> = const { RefCell::new(None) };
+}
+
+/// The currently-focused code editor's `TextView`, if any.
+pub fn active_view() -> Option<TextView> {
+    ACTIVE_VIEW.with(|c| c.borrow().clone())
+}
+
+fn set_active_view(view: &TextView) {
+    ACTIVE_VIEW.with(|c| *c.borrow_mut() = Some(view.clone()));
+}
 
 /// Build the editor surface for a tab. Returns the container widget.
 pub fn build_code_view(
@@ -164,6 +179,15 @@ pub fn build_code_view(
         });
     }
     view.add_controller(keys);
+
+    // Track the focused editor as the find / go-to-line target.
+    set_active_view(&view);
+    {
+        let focus = gtk::EventControllerFocus::new();
+        let view2 = view.clone();
+        focus.connect_enter(move |_| set_active_view(&view2));
+        view.add_controller(focus);
+    }
 
     crate::e2e::set_active_gutter(&gutter);
 

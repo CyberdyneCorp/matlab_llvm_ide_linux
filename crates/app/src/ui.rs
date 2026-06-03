@@ -284,6 +284,12 @@ fn build_menu_bar(window: &ApplicationWindow, app: &Rc<AppState>) -> gtk::Popove
         let w2 = w.clone();
         register("quick-open", Rc::new(move || crate::palette::open_quick_open(&a, &w2)));
     }
+    register("find-in-editor", Rc::new(show_find_bar));
+    {
+        let a = app.clone();
+        let w2 = w.clone();
+        register("goto-line", Rc::new(move || goto_line_prompt(&a, &w2)));
+    }
 
     // Keyboard accelerators (shown automatically in the menu by GTK).
     if let Some(gapp) = window.application().and_then(|a| a.downcast::<gtk::Application>().ok()) {
@@ -293,7 +299,9 @@ fn build_menu_bar(window: &ApplicationWindow, app: &Rc<AppState>) -> gtk::Popove
             ("win.save", &["<Ctrl>s"]),
             ("win.close-tab", &["<Ctrl>w"]),
             ("win.quit", &["<Ctrl>q"]),
-            ("win.find", &["<Ctrl>f"]),
+            ("win.find", &["<Ctrl><Shift>f"]),
+            ("win.find-in-editor", &["<Ctrl>f"]),
+            ("win.goto-line", &["<Ctrl>g"]),
             ("win.toggle-sidebar", &["<Ctrl>b"]),
             ("win.toggle-workspace", &["<Ctrl><Shift>w"]),
             ("win.command-palette", &["<Ctrl><Shift>p"]),
@@ -336,6 +344,8 @@ fn build_menu_bar(window: &ApplicationWindow, app: &Rc<AppState>) -> gtk::Popove
     clip.append(Some("Select All"), Some("selection.select-all"));
     edit.append_section(None, &clip);
     let find_section = Menu::new();
+    find_section.append(Some("Find in File"), Some("win.find-in-editor"));
+    find_section.append(Some("Go to Line…"), Some("win.goto-line"));
     find_section.append(Some("Search in Files"), Some("win.find"));
     edit.append_section(None, &find_section);
     let go_section = Menu::new();
@@ -1734,6 +1744,187 @@ thread_local! {
     static EDITOR_NB: std::cell::RefCell<Option<Notebook>> = const { std::cell::RefCell::new(None) };
     static SEARCH_ENTRY: std::cell::RefCell<Option<Entry>> = const { std::cell::RefCell::new(None) };
     static MAIN_WINDOW: std::cell::RefCell<Option<ApplicationWindow>> = const { std::cell::RefCell::new(None) };
+    static FIND_BAR: std::cell::RefCell<Option<(gtk::Revealer, Entry)>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Reveal the in-editor find bar and focus its entry.
+fn show_find_bar() {
+    FIND_BAR.with(|f| {
+        if let Some((rev, entry)) = f.borrow().as_ref() {
+            rev.set_reveal_child(true);
+            entry.grab_focus();
+            entry.select_region(0, -1);
+        }
+    });
+}
+
+/// A small "Go to line" prompt; jumps the active editor tab on Enter.
+fn goto_line_prompt(app: &Rc<AppState>, parent: &ApplicationWindow) {
+    let Some(tab) = app.vm.editor.active_tab() else { return };
+    let win = gtk::Window::builder()
+        .transient_for(parent)
+        .modal(true)
+        .decorated(false)
+        .default_width(240)
+        .build();
+    win.add_css_class("mf-root");
+    let bar = GtkBox::new(Orientation::Vertical, 0);
+    bar.add_css_class("mf-window");
+    bar.add_css_class("mf-palette");
+    let entry = Entry::new();
+    entry.set_placeholder_text(Some("Go to line…"));
+    entry.set_margin_top(8);
+    entry.set_margin_bottom(8);
+    entry.set_margin_start(8);
+    entry.set_margin_end(8);
+    bar.append(&entry);
+    win.set_child(Some(&bar));
+    {
+        let app = app.clone();
+        let win = win.clone();
+        let tab_id = tab.id;
+        entry.connect_activate(move |e| {
+            if let Ok(line) = e.text().trim().parse::<usize>() {
+                app.vm.editor.request_goto(tab_id, line.max(1));
+            }
+            win.close();
+        });
+    }
+    let keys = gtk::EventControllerKey::new();
+    {
+        let win = win.clone();
+        keys.connect_key_pressed(move |_c, key, _code, _state| {
+            if key == gtk::gdk::Key::Escape {
+                win.close();
+                glib_stop()
+            } else {
+                gtk::glib::Propagation::Proceed
+            }
+        });
+    }
+    entry.add_controller(keys);
+    win.present();
+    entry.grab_focus();
+}
+
+/// The in-editor find bar: searches the focused editor's buffer with next / prev
+/// + a match count, slid in above the editor by Ctrl+F.
+fn build_find_bar() -> gtk::Revealer {
+    let rev = gtk::Revealer::new();
+    rev.set_transition_type(gtk::RevealerTransitionType::SlideDown);
+    let bar = GtkBox::new(Orientation::Horizontal, 6);
+    bar.add_css_class("mf-chrome");
+    bar.add_css_class("mf-border-bottom");
+    bar.set_margin_start(8);
+    bar.set_margin_end(8);
+    bar.set_margin_top(4);
+    bar.set_margin_bottom(4);
+
+    let entry = Entry::new();
+    entry.set_placeholder_text(Some("Find in file"));
+    entry.set_hexpand(true);
+    let count = Label::new(None);
+    count.add_css_class("mf-text-muted");
+    count.set_width_chars(11);
+    let prev = Button::from_icon_name("go-up-symbolic");
+    prev.add_css_class("mf-header-action");
+    let next = Button::from_icon_name("go-down-symbolic");
+    next.add_css_class("mf-header-action");
+    let close = Button::from_icon_name(ic::CLOSE);
+    close.add_css_class("mf-header-action");
+    bar.append(&entry);
+    bar.append(&count);
+    bar.append(&prev);
+    bar.append(&next);
+    bar.append(&close);
+    rev.set_child(Some(&bar));
+
+    let search = {
+        let count = count.clone();
+        move |query: &str, forward: bool, reset: bool| {
+            let Some(view) = editor_view::active_view() else { return };
+            let buffer = view.buffer();
+            if query.is_empty() {
+                count.set_text("");
+                return;
+            }
+            let flags = gtk::TextSearchFlags::CASE_INSENSITIVE | gtk::TextSearchFlags::TEXT_ONLY;
+            let (sel_start, sel_end) = buffer
+                .selection_bounds()
+                .unwrap_or_else(|| (buffer.start_iter(), buffer.start_iter()));
+            let found = if reset {
+                buffer.start_iter().forward_search(query, flags, None)
+            } else if forward {
+                sel_end
+                    .forward_search(query, flags, None)
+                    .or_else(|| buffer.start_iter().forward_search(query, flags, None))
+            } else {
+                sel_start
+                    .backward_search(query, flags, None)
+                    .or_else(|| buffer.end_iter().backward_search(query, flags, None))
+            };
+            if let Some((mut s, e)) = found {
+                buffer.select_range(&s, &e);
+                view.scroll_to_iter(&mut s, 0.15, false, 0.0, 0.0);
+            }
+            let mut n = 0;
+            let mut it = buffer.start_iter();
+            while let Some((_, e)) = it.forward_search(query, flags, None) {
+                n += 1;
+                it = e;
+            }
+            count.set_text(&match n {
+                0 => "no results".to_string(),
+                1 => "1 match".to_string(),
+                _ => format!("{n} matches"),
+            });
+        }
+    };
+
+    {
+        let search = search.clone();
+        entry.connect_changed(move |e| search(&e.text(), true, true));
+    }
+    {
+        let search = search.clone();
+        entry.connect_activate(move |e| search(&e.text(), true, false));
+    }
+    {
+        let search = search.clone();
+        let entry = entry.clone();
+        next.connect_clicked(move |_| search(&entry.text(), true, false));
+    }
+    {
+        let search = search.clone();
+        let entry = entry.clone();
+        prev.connect_clicked(move |_| search(&entry.text(), false, false));
+    }
+    let hide = {
+        let rev = rev.clone();
+        move || {
+            rev.set_reveal_child(false);
+            if let Some(v) = editor_view::active_view() {
+                v.grab_focus();
+            }
+        }
+    };
+    {
+        let hide = hide.clone();
+        close.connect_clicked(move |_| hide());
+    }
+    let keys = gtk::EventControllerKey::new();
+    keys.connect_key_pressed(move |_c, key, _code, _state| {
+        if key == gtk::gdk::Key::Escape {
+            hide();
+            glib_stop()
+        } else {
+            gtk::glib::Propagation::Proceed
+        }
+    });
+    entry.add_controller(keys);
+
+    FIND_BAR.with(|f| *f.borrow_mut() = Some((rev.clone(), entry)));
+    rev
 }
 
 /// Focus the find-in-files entry (used by the `Ctrl+F` action).
@@ -1748,6 +1939,8 @@ fn focus_search_entry() {
 fn build_center(app: &Rc<AppState>) -> GtkBox {
     let center = GtkBox::new(Orientation::Vertical, 0);
     center.set_hexpand(true);
+
+    center.append(&build_find_bar());
 
     let editor_nb = Notebook::new();
     editor_nb.set_vexpand(true);
