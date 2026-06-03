@@ -12,6 +12,7 @@ pub mod fuzzy;
 pub mod flowchart_codec;
 pub mod highlighter;
 pub mod markdown;
+pub mod mermaid;
 pub mod parsers;
 pub mod preferences;
 pub mod run;

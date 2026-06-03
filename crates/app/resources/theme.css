@@ -371,6 +371,23 @@ notebook > header tab:hover { color: @mf_text_primary; }
     color: @mf_text_primary;
     font-size: __FS_BASE__;
 }
+.mf-md-code {
+    background-color: @mf_editor_bg;
+    border: 1px solid @mf_border;
+    border-radius: 8px;
+}
+.mf-md-code-lang {
+    color: @mf_text_muted;
+    font-size: __FS_XS__;
+    padding: 3px 10px 0 10px;
+    text-transform: uppercase;
+}
+.mf-md-mermaid-wrap {
+    background-color: @mf_editor_bg;
+    border: 1px solid @mf_border;
+    border-radius: 8px;
+    padding: 8px;
+}
 
 /* Toast (transient action feedback). */
 .mf-toast {
