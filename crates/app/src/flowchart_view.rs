@@ -40,11 +40,11 @@ pub fn build_flowchart_view(
     path: Option<PathBuf>,
 ) -> GtkBox {
     let path = Rc::new(path);
-    let root = GtkBox::new(Orientation::Horizontal, 0);
+    let root = GtkBox::new(Orientation::Vertical, 0);
     root.set_hexpand(true);
     root.set_vexpand(true);
 
-    root.append(&build_palette(app, &fc, path.clone()));
+    let palette = build_palette(&fc);
 
     let canvas = DrawingArea::new();
     canvas.set_hexpand(true);
@@ -263,7 +263,18 @@ pub fn build_flowchart_view(
         });
     }
     overlay.add_overlay(&fit);
-    root.append(&overlay);
+
+    // A slim toolbar (Save / Compile / Simulate / undo·redo·delete + a Blocks
+    // toggle) sits above the palette+canvas row, so the palette is just the
+    // block list and can be collapsed to give the diagram the full width.
+    let toolbar = build_flow_toolbar(app, &fc, path.clone(), &palette);
+    let content = GtkBox::new(Orientation::Horizontal, 0);
+    content.set_hexpand(true);
+    content.set_vexpand(true);
+    content.append(&palette);
+    content.append(&overlay);
+    root.append(&toolbar);
+    root.append(&content);
 
     // The block inspector lives in the shared right-side panel: install it when
     // this flowchart tab is shown, remove it when hidden.
@@ -301,71 +312,13 @@ fn redraw_hooks() -> Vec<Hook> {
     vec![Hook::Doc, Hook::Sel, Hook::Zoom, Hook::Pan, Hook::Bp, Hook::Exec]
 }
 
-fn build_palette(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>, path: Rc<Option<PathBuf>>) -> GtkBox {
+/// The collapsible BLOCKS palette: a list of dialect-appropriate node kinds that
+/// drop a new block onto the canvas when clicked.
+fn build_palette(fc: &Rc<FlowchartViewModel>) -> GtkBox {
     let panel = GtkBox::new(Orientation::Vertical, 4);
     panel.add_css_class("mf-panel");
     panel.add_css_class("mf-border-right");
-    panel.set_size_request(150, -1);
-
-    // Save / Compile actions.
-    let toolbar = GtkBox::new(Orientation::Horizontal, 4);
-    toolbar.set_margin_start(6);
-    toolbar.set_margin_end(6);
-    toolbar.set_margin_top(6);
-    let save = Button::with_label("Save");
-    save.add_css_class("mf-tool");
-    save.set_hexpand(true);
-    {
-        let app = app.clone();
-        let fc = fc.clone();
-        let path = path.clone();
-        save.connect_clicked(move |_| save_flowchart(&app, &fc, path.as_deref()));
-    }
-    let compile = Button::with_label("Compile");
-    compile.add_css_class("mf-compile-cta");
-    compile.set_hexpand(true);
-    compile.set_tooltip_text(Some("Lower to MATLAB (matlabc -emit-matlab)"));
-    {
-        let app = app.clone();
-        let fc = fc.clone();
-        let path = path.clone();
-        compile.connect_clicked(move |_| emit_matlab(&app, &fc, path.as_deref()));
-    }
-    toolbar.append(&save);
-    toolbar.append(&compile);
-    panel.append(&toolbar);
-
-    // Signal-flow models get a Simulate action that opens the mflowLink window.
-    if fc.document.with(|d| d.schema_kind() == matforge_core::models::flowchart::SchemaKind::SignalFlow) {
-        let sim = Button::with_label("▶ Simulate");
-        sim.add_css_class("mf-tool");
-        sim.add_css_class("mf-run");
-        sim.set_margin_start(6);
-        sim.set_margin_end(6);
-        let app = app.clone();
-        let fc = fc.clone();
-        let path = path.clone();
-        sim.connect_clicked(move |_| {
-            crate::mflowlink_window::open(&app, fc.document.get(), (*path).clone(), false);
-        });
-        panel.append(&sim);
-    }
-
-    // State-chart models get a Run action that opens the mStateflow window.
-    if fc.document.with(|d| d.schema_kind() == matforge_core::models::flowchart::SchemaKind::StateChart) {
-        let run = Button::with_label("▶ Run Chart");
-        run.add_css_class("mf-tool");
-        run.add_css_class("mf-run");
-        run.set_margin_start(6);
-        run.set_margin_end(6);
-        let app = app.clone();
-        let fc = fc.clone();
-        let path = path.clone();
-        run.connect_clicked(move |_| {
-            crate::statechart_window::open(&app, fc.document.get(), (*path).clone(), false);
-        });
-        panel.append(&run);
-    }
+    panel.set_size_request(132, -1);
 
     let header = Label::new(Some("BLOCKS"));
     header.add_css_class("mf-panel-header");
@@ -393,35 +346,111 @@ fn build_palette(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>, path: Rc<Optio
     scroll.set_vexpand(true);
     scroll.set_child(Some(&list));
     panel.append(&scroll);
+    panel
+}
 
-    // Undo / redo / delete row.
-    let actions = GtkBox::new(Orientation::Horizontal, 4);
-    actions.set_margin_start(6);
-    actions.set_margin_bottom(6);
-    let undo = Button::with_label("↶");
-    undo.set_tooltip_text(Some("undo"));
+/// The flowchart editor's slim top toolbar: a Blocks-palette toggle, Save /
+/// Compile / dialect run action, and undo·redo·delete.
+fn build_flow_toolbar(
+    app: &Rc<AppState>,
+    fc: &Rc<FlowchartViewModel>,
+    path: Rc<Option<PathBuf>>,
+    palette: &GtkBox,
+) -> GtkBox {
+    let bar = GtkBox::new(Orientation::Horizontal, 4);
+    bar.add_css_class("mf-flow-toolbar");
+    bar.add_css_class("mf-border-bottom");
+
+    // Collapse / show the BLOCKS palette to give the diagram the full width.
+    let toggle = gtk::ToggleButton::new();
+    toggle.set_icon_name("view-list-symbolic");
+    toggle.set_active(true);
+    toggle.add_css_class("mf-header-action");
+    toggle.set_tooltip_text(Some("Show / hide the blocks palette"));
+    {
+        let palette = palette.clone();
+        toggle.connect_toggled(move |t| palette.set_visible(t.is_active()));
+    }
+    bar.append(&toggle);
+
+    let save = Button::with_label("Save");
+    save.add_css_class("mf-tool");
+    {
+        let app = app.clone();
+        let fc = fc.clone();
+        let path = path.clone();
+        save.connect_clicked(move |_| save_flowchart(&app, &fc, path.as_deref()));
+    }
+    bar.append(&save);
+
+    let compile = Button::with_label("Compile");
+    compile.add_css_class("mf-compile-cta");
+    compile.set_tooltip_text(Some("Lower to MATLAB (matlabc -emit-matlab)"));
+    {
+        let app = app.clone();
+        let fc = fc.clone();
+        let path = path.clone();
+        compile.connect_clicked(move |_| emit_matlab(&app, &fc, path.as_deref()));
+    }
+    bar.append(&compile);
+
+    // Signal-flow → Simulate (mflowLink); state-chart → Run Chart (mStateflow).
+    let schema = fc.document.with(|d| d.schema_kind());
+    use matforge_core::models::flowchart::SchemaKind;
+    if schema == SchemaKind::SignalFlow {
+        let sim = Button::with_label("▶ Simulate");
+        sim.add_css_class("mf-tool");
+        sim.add_css_class("mf-run");
+        let app = app.clone();
+        let fc = fc.clone();
+        let path = path.clone();
+        sim.connect_clicked(move |_| {
+            crate::mflowlink_window::open(&app, fc.document.get(), (*path).clone(), false);
+        });
+        bar.append(&sim);
+    } else if schema == SchemaKind::StateChart {
+        let run = Button::with_label("▶ Run Chart");
+        run.add_css_class("mf-tool");
+        run.add_css_class("mf-run");
+        let app = app.clone();
+        let fc = fc.clone();
+        let path = path.clone();
+        run.connect_clicked(move |_| {
+            crate::statechart_window::open(&app, fc.document.get(), (*path).clone(), false);
+        });
+        bar.append(&run);
+    }
+
+    // Push undo/redo/delete to the right.
+    let spacer = GtkBox::new(Orientation::Horizontal, 0);
+    spacer.set_hexpand(true);
+    bar.append(&spacer);
+
+    let undo = Button::from_icon_name("edit-undo-symbolic");
+    undo.add_css_class("mf-header-action");
+    undo.set_tooltip_text(Some("Undo"));
     {
         let fc = fc.clone();
         undo.connect_clicked(move |_| fc.undo());
     }
-    let redo = Button::with_label("↷");
-    redo.set_tooltip_text(Some("redo"));
+    let redo = Button::from_icon_name("edit-redo-symbolic");
+    redo.add_css_class("mf-header-action");
+    redo.set_tooltip_text(Some("Redo"));
     {
         let fc = fc.clone();
         redo.connect_clicked(move |_| fc.redo());
     }
-    let del = Button::with_label("🗑");
-    del.set_tooltip_text(Some("delete selected block"));
+    let del = Button::from_icon_name(crate::icons::name::TRASH);
+    del.add_css_class("mf-header-action");
+    del.set_tooltip_text(Some("Delete selected block"));
     {
         let fc = fc.clone();
         del.connect_clicked(move |_| fc.delete_selected());
     }
-    actions.append(&undo);
-    actions.append(&redo);
-    actions.append(&del);
-    panel.append(&actions);
-
-    panel
+    bar.append(&undo);
+    bar.append(&redo);
+    bar.append(&del);
+    bar
 }
 
 /// Center the chart in the canvas at a zoom that fits all nodes.

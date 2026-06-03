@@ -224,6 +224,12 @@ popover button:hover { background-color: @mf_hover; }
 .mf-tab-actions { margin-right: 4px; }
 .mf-tab-search { margin-left: 6px; margin-right: 4px; }
 
+/* Flowchart editor top toolbar. */
+.mf-flow-toolbar {
+    background-color: @mf_panel;
+    padding: 4px 8px;
+}
+
 /* Floating "Fit" button over the flowchart canvas. */
 .mf-flow-fit {
     background-color: alpha(@mf_card, 0.92);
