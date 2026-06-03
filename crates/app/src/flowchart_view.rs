@@ -132,6 +132,72 @@ pub fn build_flowchart_view(
     }
     canvas.add_controller(click);
 
+    // Right-click a node → context menu: toggle a breakpoint or delete the block.
+    let menu_pop = gtk::Popover::new();
+    menu_pop.set_parent(&canvas);
+    menu_pop.set_has_arrow(true);
+    let menu_target: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+    {
+        let menu = GtkBox::new(Orientation::Vertical, 1);
+        let bp = Button::with_label("Toggle Breakpoint");
+        bp.set_has_frame(false);
+        bp.set_halign(gtk::Align::Start);
+        {
+            let app = app.clone();
+            let fc = fc.clone();
+            let target = menu_target.clone();
+            let pop = menu_pop.clone();
+            bp.connect_clicked(move |_| {
+                if let Some(id) = target.borrow().clone() {
+                    if fc.node(&id).is_some_and(|n| n.kind.is_executable()) {
+                        fc.toggle_breakpoint(&id);
+                    } else {
+                        app.vm.toast.show("Breakpoints apply to executable blocks");
+                    }
+                }
+                pop.popdown();
+            });
+        }
+        menu.append(&bp);
+        let del = Button::with_label("Delete Block");
+        del.set_has_frame(false);
+        del.set_halign(gtk::Align::Start);
+        {
+            let fc = fc.clone();
+            let target = menu_target.clone();
+            let pop = menu_pop.clone();
+            del.connect_clicked(move |_| {
+                if let Some(id) = target.borrow().clone() {
+                    fc.select(Some(id));
+                    fc.delete_selected();
+                }
+                pop.popdown();
+            });
+        }
+        menu.append(&del);
+        menu_pop.set_child(Some(&menu));
+    }
+    let rclick = gtk::GestureClick::new();
+    rclick.set_button(gtk::gdk::BUTTON_SECONDARY);
+    {
+        let fc = fc.clone();
+        let canvas2 = canvas.clone();
+        let target = menu_target.clone();
+        let pop = menu_pop.clone();
+        rclick.connect_pressed(move |_g, _n, x, y| {
+            let vp = Viewport { pan: fc.pan.get(), zoom: fc.zoom.get() };
+            let world = flow_render::screen_to_world(vp, x, y);
+            if let Some(id) = fc.document.with(|d| flow_render::hit_test(d, world)) {
+                fc.select(Some(id.clone()));
+                *target.borrow_mut() = Some(id);
+                pop.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+                pop.popup();
+                canvas2.queue_draw();
+            }
+        });
+    }
+    canvas.add_controller(rclick);
+
     // Drag: from a port → draw an edge; from a body → move the node. Left button
     // only — the middle button pans.
     let drag = gtk::GestureDrag::new();
@@ -304,11 +370,21 @@ pub fn build_flowchart_view(
     let inspector: gtk::Widget = build_inspector_body(&fc).upcast();
     {
         let inspector = inspector.clone();
-        root.connect_map(move |_| crate::ui::flow_inspector_show(&inspector));
+        let fc = fc.clone();
+        let path = path.clone();
+        root.connect_map(move |_| {
+            crate::ui::flow_inspector_show(&inspector);
+            // Make this the Run/Debug target while its tab is visible.
+            crate::ui::set_active_flowchart(&fc, (*path).clone());
+        });
     }
     {
         let inspector = inspector.clone();
-        root.connect_unmap(move |_| crate::ui::flow_inspector_hide(&inspector));
+        let fc = fc.clone();
+        root.connect_unmap(move |_| {
+            crate::ui::flow_inspector_hide(&inspector);
+            crate::ui::clear_active_flowchart(&fc);
+        });
     }
     // Selecting a block surfaces the inspector tab.
     {
@@ -425,7 +501,9 @@ fn build_flow_toolbar(
         let app = app.clone();
         let fc = fc.clone();
         let path = path.clone();
-        compile.connect_clicked(move |_| emit_matlab(&app, &fc, path.as_deref()));
+        compile.connect_clicked(move |_| {
+            emit_matlab(&app, &fc, path.as_deref());
+        });
     }
     bar.append(&compile);
 
@@ -722,7 +800,13 @@ fn save_flowchart(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>, path: Option<
 }
 
 /// Save, then lower the chart to MATLAB and open the generated `.m` source.
-fn emit_matlab(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>, path: Option<&Path>) {
+/// Lower the flowchart to MATLAB via `matlabc -emit-matlab`, open the generated
+/// `.m` in an editor tab, and return its path (or `None` if compilation failed).
+pub(crate) fn emit_matlab(
+    app: &Rc<AppState>,
+    fc: &Rc<FlowchartViewModel>,
+    path: Option<&Path>,
+) -> Option<PathBuf> {
     // Persist to a real file matlabc can read (a temp file for demo charts).
     let owned;
     let mflow: &Path = match path {
@@ -736,18 +820,18 @@ fn emit_matlab(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>, path: Option<&Pa
         Ok(json) => {
             if let Err(e) = std::fs::write(mflow, json) {
                 app.vm.console.log(ConsoleLevel::Error, format!("save failed: {e}"));
-                return;
+                return None;
             }
         }
         Err(e) => {
             app.vm.console.log(ConsoleLevel::Error, format!("encode failed: {e}"));
-            return;
+            return None;
         }
     }
 
     if !app.settings.matlabc_path.exists() {
         app.vm.console.log(ConsoleLevel::Error, "matlabc not found — cannot compile flowchart");
-        return;
+        return None;
     }
     app.vm.status_bar.set_message("Compiling flowchart…");
     let output = Command::new(&app.settings.matlabc_path)
@@ -762,8 +846,12 @@ fn emit_matlab(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>, path: Option<&Pa
                 Ok(()) => {
                     crate::ui::open_file_path(app, &m_path);
                     app.vm.status_bar.set_message(format!("Generated {}", m_path.display()));
+                    Some(m_path)
                 }
-                Err(e) => app.vm.console.log(ConsoleLevel::Error, format!("write .m failed: {e}")),
+                Err(e) => {
+                    app.vm.console.log(ConsoleLevel::Error, format!("write .m failed: {e}"));
+                    None
+                }
             }
         }
         Ok(o) => {
@@ -772,7 +860,11 @@ fn emit_matlab(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>, path: Option<&Pa
                 app.vm.console.log(ConsoleLevel::Error, line.to_string());
             }
             app.vm.status_bar.set_message("Flowchart compile failed");
+            None
         }
-        Err(e) => app.vm.console.log(ConsoleLevel::Error, format!("matlabc: {e}")),
+        Err(e) => {
+            app.vm.console.log(ConsoleLevel::Error, format!("matlabc: {e}"));
+            None
+        }
     }
 }
