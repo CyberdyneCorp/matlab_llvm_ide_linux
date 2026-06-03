@@ -368,17 +368,26 @@ fn code_card(lang: &str, body: &str) -> GtkBox {
 
 /// A mermaid `DrawingArea` if the source parses, else a plain code-card fallback.
 fn mermaid_block(src: &str) -> GtkBox {
-    if let Some(graph) = matforge_core::services::mermaid::parse(src) {
-        let scene = matforge_core::services::mermaid::layout(&graph);
-        let area = crate::mermaid_render::drawing_area(scene);
-        let wrap = GtkBox::new(Orientation::Vertical, 0);
-        wrap.add_css_class("mf-md-mermaid-wrap");
-        wrap.set_halign(gtk::Align::Start);
-        wrap.append(&area);
-        wrap
-    } else {
+    use matforge_core::services::mermaid::{self, Diagram};
+    let area = match mermaid::parse(src) {
+        Some(Diagram::Flow(graph)) => {
+            Some(crate::mermaid_render::drawing_area(mermaid::layout(&graph)))
+        }
+        Some(Diagram::Sequence(seq)) => {
+            Some(crate::mermaid_render::drawing_area_seq(mermaid::layout_sequence(&seq)))
+        }
+        None => None,
+    };
+    match area {
+        Some(area) => {
+            let wrap = GtkBox::new(Orientation::Vertical, 0);
+            wrap.add_css_class("mf-md-mermaid-wrap");
+            wrap.set_halign(gtk::Align::Start);
+            wrap.append(&area);
+            wrap
+        }
         // Unsupported diagram type — show the source so nothing is lost.
-        code_card("mermaid", src)
+        None => code_card("mermaid", src),
     }
 }
 

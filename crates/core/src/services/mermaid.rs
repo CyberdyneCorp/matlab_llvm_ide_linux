@@ -1,15 +1,31 @@
-//! A self-contained renderer-agnostic parser + layout for the flowchart subset
-//! of [Mermaid](https://mermaid.js.org) (`graph` / `flowchart` diagrams). The
-//! editor's Markdown preview turns ```mermaid fences into real diagrams without
-//! shelling out to node/puppeteer: this module parses the text into a node/edge
-//! graph and lays it out with a simple longest-path layering, returning pixel
-//! coordinates that a Cairo `DrawingArea` paints (see `app/src/mermaid_render.rs`).
+//! A self-contained renderer-agnostic parser + layout for the [Mermaid](https://mermaid.js.org)
+//! diagram subset the editor's Markdown preview renders. ```mermaid fences become
+//! real Cairo diagrams without shelling out to node/puppeteer; this module parses
+//! the text and lays it out, returning pixel coordinates a Cairo `DrawingArea`
+//! paints (see `app/src/mermaid_render.rs`).
 //!
-//! Supported: directions `TD`/`TB`/`BT`/`LR`/`RL`; node shapes `[rect]`,
-//! `(round)`, `([stadium])`, `((circle))`, `{diamond}`, `{{hexagon}}`; edges
-//! `-->`, `---`, `-.->`, `==>` with `|label|` or `-- label -->` labels; chains
-//! `A --> B --> C`. Unsupported diagram types return `None` so the caller can
-//! fall back to showing the raw source. Pure and unit-tested.
+//! Two diagram families are supported via [`parse`] → [`Diagram`]:
+//! - **Flowcharts** (`graph` / `flowchart`): directions `TD`/`TB`/`BT`/`LR`/`RL`;
+//!   node shapes `[rect]`, `(round)`, `([stadium])`, `((circle))`, `{diamond}`,
+//!   `{{hexagon}}`; edges `-->`, `---`, `-.->`, `==>` with `|label|` or
+//!   `-- label -->` labels; chains `A --> B --> C`. Laid out by longest-path
+//!   layering → [`layout`] returns a [`Scene`] of nodes + edges.
+//! - **Sequence diagrams** (`sequenceDiagram`): `participant`/`actor` (with
+//!   `as` aliases), messages `->>`/`-->>`/`->`/`-->`/`-x`/`--x`/`-)`/`--)` with
+//!   `: text`, self-messages, and `Note over/left of/right of`. Laid out into
+//!   lifelines + messages → [`layout_sequence`] returns a [`SeqScene`].
+//!
+//! Unsupported diagram types return `None` so the caller falls back to the raw
+//! source. Pure and unit-tested.
+
+/// A parsed Mermaid diagram, tagged by family. Returned by [`parse`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum Diagram {
+    /// A `graph` / `flowchart` diagram; lay out with [`layout`].
+    Flow(Graph),
+    /// A `sequenceDiagram`; lay out with [`layout_sequence`].
+    Sequence(Sequence),
+}
 
 /// Diagram flow direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,8 +125,19 @@ pub struct Scene {
 
 // ----- parsing ---------------------------------------------------------------
 
-/// Parse Mermaid `src`. Returns `None` if it isn't a supported flowchart.
-pub fn parse(src: &str) -> Option<Graph> {
+/// Parse Mermaid `src` into a [`Diagram`], or `None` if it isn't a supported type.
+pub fn parse(src: &str) -> Option<Diagram> {
+    let header = src.lines().map(str::trim).find(|l| !l.is_empty())?;
+    let kw = header.split_whitespace().next().unwrap_or("");
+    match kw {
+        "graph" | "flowchart" => parse_flow(src).map(Diagram::Flow),
+        "sequenceDiagram" => parse_sequence(src).map(Diagram::Sequence),
+        _ => None,
+    }
+}
+
+/// Parse a `graph` / `flowchart` diagram. Returns `None` if it has no nodes.
+fn parse_flow(src: &str) -> Option<Graph> {
     let mut lines = src.lines().map(str::trim).filter(|l| !l.is_empty());
     let header = lines.next()?;
     // The header sets the direction; some diagrams also put `direction LR` on
@@ -473,13 +500,388 @@ fn clip_to_border(node: &SceneNode, target: (f64, f64)) -> (f64, f64) {
     (cx + dx * t, cy + dy * t)
 }
 
+// ===== sequence diagrams =====================================================
+
+/// The arrowhead style at a message's target end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Arrow {
+    /// No arrowhead (`->` / `-->`): a plain line.
+    None,
+    /// A solid filled triangle (`->>` / `-->>`).
+    Head,
+    /// An open async arrow (`-)` / `--)`).
+    Open,
+    /// A cross / lost-message marker (`-x` / `--x`).
+    Cross,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Participant {
+    label: String,
+}
+
+/// Which participants a note is attached to.
+#[derive(Debug, Clone, PartialEq)]
+enum NoteSpan {
+    Over(usize, Option<usize>),
+    LeftOf(usize),
+    RightOf(usize),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum SeqEvent {
+    Message {
+        from: usize,
+        to: usize,
+        label: String,
+        arrow: Arrow,
+        dashed: bool,
+    },
+    Note {
+        span: NoteSpan,
+        label: String,
+    },
+}
+
+/// A parsed sequence diagram (pre-layout): ordered participant columns + events.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Sequence {
+    participants: Vec<Participant>,
+    events: Vec<SeqEvent>,
+}
+
+impl Sequence {
+    pub fn participant_count(&self) -> usize {
+        self.participants.len()
+    }
+    pub fn event_count(&self) -> usize {
+        self.events.len()
+    }
+}
+
+/// A laid-out box (a participant header/footer, or a note) in a [`SeqScene`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct SeqBox {
+    pub label: String,
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+    /// True for note boxes (rendered with a distinct tint), false for participants.
+    pub note: bool,
+}
+
+/// A laid-out message arrow in a [`SeqScene`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct SeqMessage {
+    pub from: (f64, f64),
+    pub to: (f64, f64),
+    pub label: String,
+    pub dashed: bool,
+    pub arrow: Arrow,
+    /// A message to the same lifeline; the renderer draws a small loop instead
+    /// of a straight arrow. `from`/`to` carry the loop's top/bottom anchor.
+    pub self_loop: bool,
+}
+
+/// A fully laid-out sequence diagram, sized `width` × `height` pixels.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SeqScene {
+    pub width: f64,
+    pub height: f64,
+    /// One vertical dashed lifeline per participant: `(x, y_top, y_bottom)`.
+    pub lifelines: Vec<(f64, f64, f64)>,
+    pub boxes: Vec<SeqBox>,
+    pub messages: Vec<SeqMessage>,
+}
+
+/// Parse a `sequenceDiagram`. Returns `None` if it declares no participants.
+fn parse_sequence(src: &str) -> Option<Sequence> {
+    let mut lines = src.lines().map(str::trim).filter(|l| !l.is_empty());
+    lines.next()?; // consume the `sequenceDiagram` header
+
+    let mut ids: Vec<String> = Vec::new(); // participant ids in column order
+    let mut participants: Vec<Participant> = Vec::new();
+    let mut events: Vec<SeqEvent> = Vec::new();
+
+    // Intern a participant id, creating it (label = id) on first use.
+    let intern = |ids: &mut Vec<String>, parts: &mut Vec<Participant>, id: &str| -> usize {
+        if let Some(i) = ids.iter().position(|x| x == id) {
+            i
+        } else {
+            ids.push(id.to_string());
+            parts.push(Participant { label: id.to_string() });
+            ids.len() - 1
+        }
+    };
+
+    for line in lines {
+        if line.starts_with("%%") {
+            continue;
+        }
+        let first = line.split_whitespace().next().unwrap_or("");
+
+        // Declarations: `participant A`, `actor A`, `participant A as Alice`.
+        if first == "participant" || first == "actor" {
+            let rest = line[first.len()..].trim();
+            let (id, label) = match rest.split_once(" as ") {
+                Some((id, label)) => (id.trim(), label.trim()),
+                None => (rest, rest),
+            };
+            let idx = intern(&mut ids, &mut participants, id);
+            participants[idx].label = label.to_string();
+            continue;
+        }
+
+        // Notes: `Note over A,B: text`, `Note left of A: text`, `Note right of A: text`.
+        if first == "Note" || first == "note" {
+            if let Some((span, label)) = parse_note(&line[first.len()..], &mut ids, &mut participants, &intern) {
+                events.push(SeqEvent::Note { span, label });
+            }
+            continue;
+        }
+
+        // Block keywords we don't lay out yet — skip without breaking the diagram.
+        if matches!(
+            first,
+            "loop" | "alt" | "opt" | "par" | "and" | "else" | "end" | "rect"
+                | "activate" | "deactivate" | "autonumber" | "critical" | "break"
+        ) {
+            continue;
+        }
+
+        // Otherwise: a message `A->>B: text`.
+        if let Some((from, to, arrow, dashed, label)) =
+            parse_message(line, &mut ids, &mut participants, &intern)
+        {
+            events.push(SeqEvent::Message { from, to, label, arrow, dashed });
+        }
+    }
+
+    if participants.is_empty() {
+        return None;
+    }
+    Some(Sequence { participants, events })
+}
+
+type Intern<'a> = dyn Fn(&mut Vec<String>, &mut Vec<Participant>, &str) -> usize + 'a;
+
+/// Parse the part of a `Note ...` line after the `Note` keyword.
+fn parse_note(
+    rest: &str,
+    ids: &mut Vec<String>,
+    parts: &mut Vec<Participant>,
+    intern: &Intern,
+) -> Option<(NoteSpan, String)> {
+    let (spec, label) = rest.split_once(':')?;
+    let label = label.trim().to_string();
+    let spec = spec.trim();
+    if let Some(rest) = spec.strip_prefix("over ") {
+        let mut names = rest.split(',').map(str::trim);
+        let a = intern(ids, parts, names.next()?);
+        let b = names.next().map(|n| intern(ids, parts, n));
+        Some((NoteSpan::Over(a, b), label))
+    } else if let Some(rest) = spec.strip_prefix("left of ") {
+        Some((NoteSpan::LeftOf(intern(ids, parts, rest.trim())), label))
+    } else if let Some(rest) = spec.strip_prefix("right of ") {
+        Some((NoteSpan::RightOf(intern(ids, parts, rest.trim())), label))
+    } else {
+        None
+    }
+}
+
+/// Parse a message line `A<arrow>B: text`, interning both participants.
+fn parse_message(
+    line: &str,
+    ids: &mut Vec<String>,
+    parts: &mut Vec<Participant>,
+    intern: &Intern,
+) -> Option<(usize, usize, Arrow, bool, String)> {
+    // The message text (if any) follows the first ':'.
+    let (head, label) = match line.split_once(':') {
+        Some((h, l)) => (h.trim(), l.trim().to_string()),
+        None => (line.trim(), String::new()),
+    };
+    let (lhs, op, rhs) = split_message_op(head)?;
+    let dashed = op.starts_with("--");
+    let arrow = if op.ends_with(">>") {
+        Arrow::Head
+    } else if op.ends_with('x') {
+        Arrow::Cross
+    } else if op.ends_with(')') {
+        Arrow::Open
+    } else {
+        Arrow::None
+    };
+    let from = intern(ids, parts, lhs.trim());
+    let to = intern(ids, parts, rhs.trim());
+    Some((from, to, arrow, dashed, label))
+}
+
+/// Find the message operator in `head`, returning `(lhs, op, rhs)` as byte
+/// slices of `head`. Operators are matched longest-first so `-->>` beats `->>`,
+/// and the left identifier must be non-empty (so a leading `-` isn't an op).
+fn split_message_op(head: &str) -> Option<(&str, &str, &str)> {
+    const OPS: &[&str] = &["-->>", "->>", "-->", "--x", "--)", "->", "-x", "-)"];
+    for (bstart, _) in head.char_indices() {
+        if head[..bstart].trim().is_empty() {
+            continue; // need an identifier before the operator
+        }
+        for op in OPS {
+            if head[bstart..].starts_with(op) {
+                let bend = bstart + op.len();
+                return Some((&head[..bstart], &head[bstart..bend], &head[bend..]));
+            }
+        }
+    }
+    None
+}
+
+const SEQ_BOX_H: f64 = 36.0;
+const SEQ_COL_GAP: f64 = 40.0;
+const SEQ_ROW_H: f64 = 46.0;
+const SEQ_TOP: f64 = 16.0;
+
+/// Lay a sequence diagram out into pixel space: evenly-spaced participant
+/// columns with dashed lifelines, messages as horizontal arrows down the page,
+/// and notes as boxes over their participants.
+pub fn layout_sequence(seq: &Sequence) -> SeqScene {
+    let n = seq.participants.len();
+    let col_w: Vec<f64> = seq
+        .participants
+        .iter()
+        .map(|p| node_width(&p.label).max(MIN_W))
+        .collect();
+
+    // Column centers, left to right.
+    let mut centers = vec![0.0; n];
+    let mut x = MARGIN;
+    for i in 0..n {
+        centers[i] = x + col_w[i] / 2.0;
+        x += col_w[i] + SEQ_COL_GAP;
+    }
+    let content_right = x - SEQ_COL_GAP + MARGIN;
+
+    let top_box_y = SEQ_TOP;
+    let lifeline_top = top_box_y + SEQ_BOX_H;
+    let body_top = lifeline_top + 18.0;
+
+    let mut boxes: Vec<SeqBox> = Vec::new();
+    let mut messages: Vec<SeqMessage> = Vec::new();
+
+    // Walk events top-to-bottom, advancing y per event.
+    let mut y = body_top;
+    for ev in &seq.events {
+        match ev {
+            SeqEvent::Message { from, to, label, arrow, dashed } => {
+                if from == to {
+                    let lx = centers[*from];
+                    messages.push(SeqMessage {
+                        from: (lx, y),
+                        to: (lx, y + SEQ_ROW_H * 0.6),
+                        label: label.clone(),
+                        dashed: *dashed,
+                        arrow: *arrow,
+                        self_loop: true,
+                    });
+                    y += SEQ_ROW_H * 1.1;
+                } else {
+                    let (a, b) = (centers[*from], centers[*to]);
+                    messages.push(SeqMessage {
+                        from: (a, y),
+                        to: (b, y),
+                        label: label.clone(),
+                        dashed: *dashed,
+                        arrow: *arrow,
+                        self_loop: false,
+                    });
+                    y += SEQ_ROW_H;
+                }
+            }
+            SeqEvent::Note { span, label } => {
+                // Box centre and the minimum width its span must cover.
+                let (cx, span_w) = match span {
+                    NoteSpan::Over(a, Some(b)) => (
+                        (centers[*a] + centers[*b]) / 2.0,
+                        (centers[*b] - centers[*a]).abs() + col_w[*a].max(col_w[*b]),
+                    ),
+                    NoteSpan::Over(a, None) => (centers[*a], col_w[*a] + 24.0),
+                    NoteSpan::RightOf(a) => (centers[*a] + 80.0, 0.0),
+                    NoteSpan::LeftOf(a) => (centers[*a] - 80.0, 0.0),
+                };
+                let bw = node_width(label).max(span_w);
+                boxes.push(SeqBox {
+                    label: label.clone(),
+                    x: cx - bw / 2.0,
+                    y,
+                    w: bw,
+                    h: SEQ_BOX_H,
+                    note: true,
+                });
+                y += SEQ_ROW_H;
+            }
+        }
+    }
+
+    let body_bottom = y + 6.0;
+    let bottom_box_y = body_bottom;
+    let height = bottom_box_y + SEQ_BOX_H + MARGIN;
+
+    // Participant header + footer boxes and their lifelines.
+    let mut lifelines = Vec::with_capacity(n);
+    for i in 0..n {
+        let bx = centers[i] - col_w[i] / 2.0;
+        boxes.push(SeqBox {
+            label: seq.participants[i].label.clone(),
+            x: bx,
+            y: top_box_y,
+            w: col_w[i],
+            h: SEQ_BOX_H,
+            note: false,
+        });
+        boxes.push(SeqBox {
+            label: seq.participants[i].label.clone(),
+            x: bx,
+            y: bottom_box_y,
+            w: col_w[i],
+            h: SEQ_BOX_H,
+            note: false,
+        });
+        lifelines.push((centers[i], lifeline_top, bottom_box_y));
+    }
+
+    SeqScene {
+        width: content_right.max(MARGIN * 2.0),
+        height,
+        lifelines,
+        boxes,
+        messages,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// Parse `src` expecting a flowchart, panicking otherwise.
+    fn flow(src: &str) -> Graph {
+        match parse(src) {
+            Some(Diagram::Flow(g)) => g,
+            other => panic!("expected a flowchart, got {other:?}"),
+        }
+    }
+
+    /// Parse `src` expecting a sequence diagram, panicking otherwise.
+    fn seq(src: &str) -> Sequence {
+        match parse(src) {
+            Some(Diagram::Sequence(s)) => s,
+            other => panic!("expected a sequence diagram, got {other:?}"),
+        }
+    }
+
     #[test]
     fn parses_simple_chain() {
-        let g = parse("graph TD\nA --> B\nB --> C").unwrap();
+        let g = flow("graph TD\nA --> B\nB --> C");
         assert_eq!(g.dir, Dir::Down);
         assert_eq!(g.node_count(), 3);
         assert_eq!(g.edge_count(), 2);
@@ -487,7 +889,7 @@ mod tests {
 
     #[test]
     fn chained_edges_on_one_line() {
-        let g = parse("flowchart LR\nA --> B --> C").unwrap();
+        let g = flow("flowchart LR\nA --> B --> C");
         assert_eq!(g.dir, Dir::Right);
         assert_eq!(g.node_count(), 3);
         assert_eq!(g.edge_count(), 2);
@@ -495,7 +897,7 @@ mod tests {
 
     #[test]
     fn shapes_and_labels() {
-        let g = parse("graph TD\nA[Start] --> B(stop)\nC{maybe}").unwrap();
+        let g = flow("graph TD\nA[Start] --> B(stop)\nC{maybe}");
         assert_eq!(g.nodes[0].label, "Start");
         assert_eq!(g.nodes[0].shape, Shape::Rect);
         assert_eq!(g.nodes[1].label, "stop");
@@ -505,36 +907,35 @@ mod tests {
 
     #[test]
     fn edge_labels_pipe_and_mid() {
-        let g = parse("graph TD\nA -->|yes| B\nA -- no --> C").unwrap();
+        let g = flow("graph TD\nA -->|yes| B\nA -- no --> C");
         assert_eq!(g.edges[0].label.as_deref(), Some("yes"));
         assert_eq!(g.edges[1].label.as_deref(), Some("no"));
     }
 
     #[test]
     fn dotted_and_thick_links() {
-        let g = parse("graph LR\nA -.-> B\nB ==> C").unwrap();
+        let g = flow("graph LR\nA -.-> B\nB ==> C");
         assert_eq!(g.edge_count(), 2);
     }
 
     #[test]
     fn undirected_link_does_not_eat_target() {
-        let g = parse("graph TD\nA --- B").unwrap();
+        let g = flow("graph TD\nA --- B");
         assert_eq!(g.node_count(), 2);
         assert_eq!(g.edge_count(), 1);
         assert_eq!(g.nodes[1].id, "B");
     }
 
     #[test]
-    fn non_flowchart_returns_none() {
-        assert!(parse("sequenceDiagram\nAlice->>Bob: hi").is_none());
+    fn unsupported_diagram_returns_none() {
         assert!(parse("").is_none());
         assert!(parse("not a diagram").is_none());
+        assert!(parse("gantt\ntitle X").is_none());
     }
 
     #[test]
     fn layout_stacks_downward_for_td() {
-        let g = parse("graph TD\nA --> B").unwrap();
-        let s = layout(&g);
+        let s = layout(&flow("graph TD\nA --> B"));
         assert_eq!(s.nodes.len(), 2);
         // B sits below A and the canvas is taller than it is wide-ish.
         assert!(s.nodes[1].y > s.nodes[0].y, "B should be below A");
@@ -543,18 +944,76 @@ mod tests {
 
     #[test]
     fn layout_flows_rightward_for_lr() {
-        let g = parse("flowchart LR\nA --> B").unwrap();
-        let s = layout(&g);
+        let s = layout(&flow("flowchart LR\nA --> B"));
         assert!(s.nodes[1].x > s.nodes[0].x, "B should be right of A");
     }
 
     #[test]
     fn layout_edge_endpoints_on_borders() {
-        let g = parse("graph TD\nA --> B").unwrap();
-        let s = layout(&g);
+        let s = layout(&flow("graph TD\nA --> B"));
         let e = &s.edges[0];
         let a = &s.nodes[0];
         // The edge leaves A's bottom border.
         assert!((e.from.1 - (a.y + a.h)).abs() < 1.0);
+    }
+
+    // ----- sequence diagrams -----
+
+    #[test]
+    fn sequence_implicit_participants_in_order() {
+        let s = seq("sequenceDiagram\nAlice->>Bob: hi\nBob-->>Alice: yo");
+        assert_eq!(s.participant_count(), 2);
+        assert_eq!(s.participants[0].label, "Alice");
+        assert_eq!(s.participants[1].label, "Bob");
+        assert_eq!(s.event_count(), 2);
+    }
+
+    #[test]
+    fn sequence_participant_alias_and_order() {
+        let s = seq("sequenceDiagram\nparticipant B as Bob\nparticipant A as Alice\nA->>B: hi");
+        // Declaration order fixes the columns regardless of message order.
+        assert_eq!(s.participants[0].label, "Bob");
+        assert_eq!(s.participants[1].label, "Alice");
+    }
+
+    #[test]
+    fn sequence_arrow_kinds() {
+        let s = seq("sequenceDiagram\nA->>B: a\nA-->>B: b\nA-xB: c\nA-)B: d\nA->B: e");
+        let arrows: Vec<(Arrow, bool)> = s
+            .events
+            .iter()
+            .filter_map(|e| match e {
+                SeqEvent::Message { arrow, dashed, .. } => Some((*arrow, *dashed)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(arrows[0], (Arrow::Head, false));
+        assert_eq!(arrows[1], (Arrow::Head, true));
+        assert_eq!(arrows[2], (Arrow::Cross, false));
+        assert_eq!(arrows[3], (Arrow::Open, false));
+        assert_eq!(arrows[4], (Arrow::None, false));
+    }
+
+    #[test]
+    fn sequence_notes_and_self_message() {
+        let s = seq("sequenceDiagram\nA->>A: think\nNote over A,B: hmm\nNote right of A: ok");
+        let notes = s.events.iter().filter(|e| matches!(e, SeqEvent::Note { .. })).count();
+        assert_eq!(notes, 2);
+        // The self-message and the note's `B` both create participants.
+        assert_eq!(s.participant_count(), 2);
+    }
+
+    #[test]
+    fn sequence_layout_lifelines_and_self_loop() {
+        let s = layout_sequence(&seq("sequenceDiagram\nAlice->>Bob: hi\nBob->>Bob: ponder"));
+        assert_eq!(s.lifelines.len(), 2);
+        // Two participants → header + footer boxes = 4.
+        assert_eq!(s.boxes.iter().filter(|b| !b.note).count(), 4);
+        // Bob is right of Alice.
+        assert!(s.lifelines[1].0 > s.lifelines[0].0);
+        // The second message is a self-loop.
+        assert!(s.messages[1].self_loop);
+        // A downward flow: message 2 is below message 1.
+        assert!(s.messages[1].from.1 > s.messages[0].from.1);
     }
 }
