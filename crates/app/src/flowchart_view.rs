@@ -532,6 +532,51 @@ fn build_flow_toolbar(
             crate::statechart_window::open(&app, fc.document.get(), (*path).clone(), false);
         });
         bar.append(&run);
+    } else {
+        // Control-flow charts get a structural visual step: highlight each block
+        // in execution order (no value evaluation — runs need the DAP adapter).
+        let order: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+        let idx: Rc<Cell<usize>> = Rc::new(Cell::new(0));
+        let step = Button::with_label("Step ▸");
+        step.add_css_class("mf-tool");
+        step.set_tooltip_text(Some("Highlight the next block in execution order"));
+        {
+            let fc = fc.clone();
+            let order = order.clone();
+            let idx = idx.clone();
+            step.connect_clicked(move |_| {
+                if idx.get() == 0 {
+                    *order.borrow_mut() = fc.execution_order();
+                }
+                let next = order.borrow().get(idx.get()).cloned();
+                match next {
+                    Some(node) => {
+                        fc.set_execution_node(Some(node.clone()));
+                        fc.select(Some(node));
+                        idx.set(idx.get() + 1);
+                    }
+                    None => {
+                        // Past the last block → clear and restart on next click.
+                        fc.set_execution_node(None);
+                        idx.set(0);
+                    }
+                }
+            });
+        }
+        bar.append(&step);
+
+        let stop = Button::from_icon_name("media-playback-stop-symbolic");
+        stop.add_css_class("mf-header-action");
+        stop.set_tooltip_text(Some("Clear the step highlight"));
+        {
+            let fc = fc.clone();
+            let idx = idx.clone();
+            stop.connect_clicked(move |_| {
+                fc.set_execution_node(None);
+                idx.set(0);
+            });
+        }
+        bar.append(&stop);
     }
 
     // Push undo/redo/delete to the right.
