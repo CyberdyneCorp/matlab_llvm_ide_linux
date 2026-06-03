@@ -1745,6 +1745,8 @@ thread_local! {
     static SEARCH_ENTRY: std::cell::RefCell<Option<Entry>> = const { std::cell::RefCell::new(None) };
     static MAIN_WINDOW: std::cell::RefCell<Option<ApplicationWindow>> = const { std::cell::RefCell::new(None) };
     static FIND_BAR: std::cell::RefCell<Option<(gtk::Revealer, Entry)>> = const { std::cell::RefCell::new(None) };
+    /// The right-panel BLOCK INSPECTOR host: `(notebook, page index, body host)`.
+    static FLOW_INSPECTOR: std::cell::RefCell<Option<(Notebook, u32, GtkBox)>> = const { std::cell::RefCell::new(None) };
 }
 
 /// Reveal the in-editor find bar and focus its entry.
@@ -3012,6 +3014,19 @@ fn build_workspace(app: &Rc<AppState>) -> GtkBox {
     insp.append_page(&build_variable_inspector(app), Some(&Label::new(Some("VARIABLE INSPECTOR"))));
     insp.append_page(&build_matrix_viewer(app), Some(&Label::new(Some("MATRIX VIEWER"))));
     insp.append_page(&build_table_viewer(app), Some(&Label::new(Some("TABLE VIEWER"))));
+
+    // BLOCK INSPECTOR — host for the active flowchart's property editor. The
+    // flowchart view installs its inspector here when shown (so the diagram tab
+    // keeps the full width) and removes it when hidden.
+    let flow_host = GtkBox::new(Orientation::Vertical, 0);
+    flow_host.set_vexpand(true);
+    flow_host.append(&flow_inspector_placeholder());
+    let flow_scroll = ScrolledWindow::new();
+    flow_scroll.set_vexpand(true);
+    flow_scroll.set_child(Some(&flow_host));
+    let flow_page = insp.append_page(&flow_scroll, Some(&Label::new(Some("BLOCK INSPECTOR"))));
+    FLOW_INSPECTOR.with(|f| *f.borrow_mut() = Some((insp.clone(), flow_page, flow_host)));
+
     panel.append(&insp);
 
     // When a value is captured, jump to the Matrix Viewer so it's visible.
@@ -3025,6 +3040,51 @@ fn build_workspace(app: &Rc<AppState>) -> GtkBox {
     }
 
     panel
+}
+
+/// The placeholder shown in the BLOCK INSPECTOR tab when no flowchart is active.
+fn flow_inspector_placeholder() -> GtkBox {
+    empty_state(
+        ic::FLOWCHART,
+        "No block selected",
+        "Open a flowchart and select a block to edit its properties.",
+    )
+}
+
+/// Install `content` as the BLOCK INSPECTOR tab's body (called when a flowchart
+/// tab becomes visible).
+pub fn flow_inspector_show(content: &gtk::Widget) {
+    FLOW_INSPECTOR.with(|f| {
+        if let Some((_, _, host)) = &*f.borrow() {
+            while let Some(c) = host.first_child() {
+                host.remove(&c);
+            }
+            host.append(content);
+        }
+    });
+}
+
+/// Remove `content` from the BLOCK INSPECTOR tab if it is the current body,
+/// restoring the placeholder (called when a flowchart tab is hidden). Guarded so
+/// a tab switch that maps the next flowchart first doesn't wipe its inspector.
+pub fn flow_inspector_hide(content: &gtk::Widget) {
+    FLOW_INSPECTOR.with(|f| {
+        if let Some((_, _, host)) = &*f.borrow() {
+            if host.first_child().as_ref() == Some(content) {
+                host.remove(content);
+                host.append(&flow_inspector_placeholder());
+            }
+        }
+    });
+}
+
+/// Switch the right-side panel to the BLOCK INSPECTOR tab.
+pub fn flow_inspector_focus() {
+    FLOW_INSPECTOR.with(|f| {
+        if let Some((nb, page, _)) = &*f.borrow() {
+            nb.set_current_page(Some(*page));
+        }
+    });
 }
 
 /// Attach a right-click "Plot As…" / Inspect menu to a workspace variable row.

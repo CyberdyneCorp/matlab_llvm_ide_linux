@@ -241,8 +241,50 @@ pub fn build_flowchart_view(
         });
     }
 
-    root.append(&canvas);
-    root.append(&build_inspector(&fc, &canvas));
+    // The canvas fills the editor; a small "Fit" button floats in its corner
+    // (the old inspector column that held it has moved to the right-side panel).
+    let overlay = gtk::Overlay::new();
+    overlay.set_hexpand(true);
+    overlay.set_vexpand(true);
+    overlay.set_child(Some(&canvas));
+    let fit = Button::with_label("Fit");
+    fit.add_css_class("mf-tool");
+    fit.add_css_class("mf-flow-fit");
+    fit.set_tooltip_text(Some("Zoom to fit the whole chart"));
+    fit.set_halign(gtk::Align::End);
+    fit.set_valign(gtk::Align::Start);
+    fit.set_margin_top(8);
+    fit.set_margin_end(8);
+    {
+        let fc = fc.clone();
+        let canvas = canvas.clone();
+        fit.connect_clicked(move |_| {
+            fit_view(&fc, canvas.width() as f64, canvas.height() as f64);
+        });
+    }
+    overlay.add_overlay(&fit);
+    root.append(&overlay);
+
+    // The block inspector lives in the shared right-side panel: install it when
+    // this flowchart tab is shown, remove it when hidden.
+    let inspector: gtk::Widget = build_inspector_body(&fc).upcast();
+    {
+        let inspector = inspector.clone();
+        root.connect_map(move |_| crate::ui::flow_inspector_show(&inspector));
+    }
+    {
+        let inspector = inspector.clone();
+        root.connect_unmap(move |_| crate::ui::flow_inspector_hide(&inspector));
+    }
+    // Selecting a block surfaces the inspector tab.
+    {
+        let sel = fc.selected_id.clone();
+        sel.subscribe(move |id| {
+            if id.is_some() {
+                crate::ui::flow_inspector_focus();
+            }
+        });
+    }
     root
 }
 
@@ -399,42 +441,17 @@ fn fit_view(fc: &Rc<FlowchartViewModel>, cw: f64, ch: f64) {
 
 /// Right-hand property inspector. Rebuilds its fields whenever the selection
 /// changes; field edits flow straight into `fc.edit_node`.
-fn build_inspector(fc: &Rc<FlowchartViewModel>, canvas: &DrawingArea) -> GtkBox {
-    let panel = GtkBox::new(Orientation::Vertical, 4);
-    panel.add_css_class("mf-panel");
-    panel.add_css_class("mf-border-left");
-    panel.set_size_request(212, -1);
-
-    let head_row = GtkBox::new(Orientation::Horizontal, 4);
-    let header = Label::new(Some("INSPECTOR"));
-    header.add_css_class("mf-panel-header");
-    header.set_halign(gtk::Align::Start);
-    header.set_hexpand(true);
-    header.set_margin_start(8);
-    header.set_margin_top(6);
-    head_row.append(&header);
-    let fit = Button::with_label("Fit");
-    fit.add_css_class("mf-header-action");
-    fit.set_tooltip_text(Some("Zoom to fit the whole chart"));
-    fit.set_margin_end(6);
-    {
-        let fc = fc.clone();
-        let canvas = canvas.clone();
-        fit.connect_clicked(move |_| {
-            fit_view(&fc, canvas.width() as f64, canvas.height() as f64);
-        });
-    }
-    head_row.append(&fit);
-    panel.append(&head_row);
-
+/// Build the block-property editor body. It lives in the shared right-side
+/// BLOCK INSPECTOR tab (installed/removed as the flowchart tab is shown/hidden),
+/// so the diagram canvas keeps the full editor width.
+fn build_inspector_body(fc: &Rc<FlowchartViewModel>) -> ScrolledWindow {
     let body = GtkBox::new(Orientation::Vertical, 8);
-    body.set_margin_start(8);
-    body.set_margin_end(8);
-    body.set_margin_top(6);
+    body.set_margin_start(10);
+    body.set_margin_end(10);
+    body.set_margin_top(8);
     let scroll = ScrolledWindow::new();
     scroll.set_vexpand(true);
     scroll.set_child(Some(&body));
-    panel.append(&scroll);
 
     let rebuild = {
         let fc = fc.clone();
@@ -493,7 +510,7 @@ fn build_inspector(fc: &Rc<FlowchartViewModel>, canvas: &DrawingArea) -> GtkBox 
 
     rebuild();
     fc.selected_id.subscribe(move |_| rebuild());
-    panel
+    scroll
 }
 
 /// Which `FlowNode` field an inspector entry edits.
