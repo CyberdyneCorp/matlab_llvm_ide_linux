@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=MatForge IDE
+GenericName=MATLAB/LLVM IDE
+Comment=GTK4 IDE for the matlab_llvm compiler
+Exec=matforge %F
+Icon=matforge
+Terminal=false
+Categories=Development;IDE;
+MimeType=text/x-matlab;
+Keywords=matlab;llvm;compiler;ide;flowchart;
+StartupNotify=true

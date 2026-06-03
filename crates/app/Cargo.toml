@@ -13,6 +13,21 @@ default-run = "matforge"
 name = "matforge"
 path = "src/main.rs"
 
+# `cargo deb` packaging (cargo install cargo-deb). Installs the binary, desktop
+# entry, and icon to standard FHS locations.
+[package.metadata.deb]
+maintainer = "Leonardo Araujo dos Santos <leonardoaraujo.santos@gmail.com>"
+copyright = "2026, Leonardo Araujo dos Santos"
+extended-description = "GTK4 desktop front-end for the matlab_llvm compiler: editor with syntax highlighting, REPL, flowchart editor, plots, and compile/run integration."
+section = "devel"
+priority = "optional"
+depends = "$auto, libgtk-4-1"
+assets = [
+    ["target/release/matforge", "usr/bin/", "755"],
+    ["resources/matforge.desktop", "usr/share/applications/", "644"],
+    ["resources/matforge.svg", "usr/share/icons/hicolor/scalable/apps/matforge.svg", "644"],
+]
+
 [dependencies]
 matforge-core = { workspace = true }
 gtk = { package = "gtk4", version = "0.9", features = ["v4_12"] }

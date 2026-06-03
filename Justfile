@@ -128,6 +128,40 @@ shot out="/tmp/matforge.png": seed-demo build
     kill $pid 2>/dev/null || true
     echo "saved {{out}}"
 
+# ---- Packaging -------------------------------------------------------------
+
+PREFIX := env_var_or_default("PREFIX", env_var("HOME") + "/.local")
+
+# Build release + install the binary, desktop entry, and icon under $PREFIX
+# (default ~/.local — no root needed). Adds a per-user desktop launcher.
+install:
+    cargo build --release -p matforge
+    install -Dm755 target/release/matforge "{{PREFIX}}/bin/matforge"
+    install -Dm644 crates/app/resources/matforge.desktop "{{PREFIX}}/share/applications/matforge.desktop"
+    install -Dm644 crates/app/resources/matforge.svg "{{PREFIX}}/share/icons/hicolor/scalable/apps/matforge.svg"
+    @echo "installed to {{PREFIX}} — ensure {{PREFIX}}/bin is on PATH"
+
+# Remove a `just install`.
+uninstall:
+    rm -f "{{PREFIX}}/bin/matforge" \
+          "{{PREFIX}}/share/applications/matforge.desktop" \
+          "{{PREFIX}}/share/icons/hicolor/scalable/apps/matforge.svg"
+    @echo "removed from {{PREFIX}}"
+
+# Build a release tarball (binary + desktop + icon + README) under dist/.
+dist:
+    cargo build --release -p matforge
+    rm -rf dist/matforge && mkdir -p dist/matforge
+    cp target/release/matforge dist/matforge/
+    cp crates/app/resources/matforge.desktop crates/app/resources/matforge.svg dist/matforge/
+    cp README.md dist/matforge/ 2>/dev/null || true
+    tar -C dist -czf dist/matforge-linux-x86_64.tar.gz matforge
+    @echo "wrote dist/matforge-linux-x86_64.tar.gz"
+
+# Build a .deb (needs `cargo install cargo-deb`).
+deb:
+    cargo deb -p matforge
+
 # ---- Housekeeping ----------------------------------------------------------
 
 # Remove build artifacts.
