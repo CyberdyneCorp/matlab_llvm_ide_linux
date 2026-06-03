@@ -19,6 +19,7 @@ pub enum Language {
     Verilog,
     LlvmIr,
     Mlir,
+    Markdown,
     Plain,
 }
 
@@ -35,6 +36,7 @@ impl Language {
             "verilog" | "systemverilog" | "sv" | "v" | "verilog-a" | "va" => Language::Verilog,
             "llvm ir" | "llvm" | "ll" => Language::LlvmIr,
             "mlir" => Language::Mlir,
+            "markdown" | "md" => Language::Markdown,
             _ => Language::Plain,
         }
     }
@@ -49,6 +51,7 @@ impl Language {
             "sv" | "v" | "va" => Language::Verilog,
             "ll" => Language::LlvmIr,
             "mlir" => Language::Mlir,
+            "md" | "markdown" => Language::Markdown,
             _ => Language::Plain,
         }
     }
@@ -132,7 +135,7 @@ pub struct TokenSpan {
 /// Tokenize `source` for `language`, returning colored spans in source order.
 /// `Plain` language yields no spans (whole buffer keeps the default color).
 pub fn highlight(source: &str, language: Language) -> Vec<TokenSpan> {
-    if language == Language::Plain {
+    if language == Language::Plain || language == Language::Markdown {
         return Vec::new();
     }
     let kw = keywords(language);
@@ -343,7 +346,7 @@ fn line_comment_prefix(lang: Language) -> Option<&'static str> {
         }
         Language::Python => Some("#"),
         Language::LlvmIr => Some(";"),
-        Language::Plain => None,
+        Language::Markdown | Language::Plain => None,
     }
 }
 
@@ -376,7 +379,7 @@ fn keywords(lang: Language) -> HashSet<&'static str> {
         Language::Verilog => tables::VERILOG_KEYWORDS,
         Language::LlvmIr => tables::LLVM_KEYWORDS,
         Language::Mlir => tables::MLIR_KEYWORDS,
-        Language::Plain => &[],
+        Language::Markdown | Language::Plain => &[],
     })
 }
 
@@ -388,7 +391,7 @@ fn control_words(lang: Language) -> HashSet<&'static str> {
         Language::TypeScript => tables::TYPESCRIPT_CONTROL,
         Language::LlvmIr => tables::LLVM_CONTROL,
         Language::Mlir => tables::MLIR_CONTROL,
-        Language::Verilog | Language::Plain => &[],
+        Language::Verilog | Language::Markdown | Language::Plain => &[],
     })
 }
 
@@ -399,7 +402,7 @@ fn builtins(lang: Language) -> HashSet<&'static str> {
         Language::Python => tables::PYTHON_BUILTINS,
         Language::TypeScript => tables::TYPESCRIPT_BUILTINS,
         Language::Verilog => tables::VERILOG_BUILTINS,
-        Language::LlvmIr | Language::Mlir | Language::Plain => &[],
+        Language::LlvmIr | Language::Mlir | Language::Markdown | Language::Plain => &[],
     })
 }
 

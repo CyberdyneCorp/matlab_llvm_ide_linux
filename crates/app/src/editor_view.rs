@@ -205,7 +205,117 @@ pub fn build_code_view(
     let hbox = GtkBox::new(Orientation::Horizontal, 0);
     hbox.append(&gutter);
     hbox.append(&scroll);
+
+    // Markdown files get an Edit / Split / Preview sub-view with a live preview.
+    if language == Language::Markdown {
+        return build_markdown_container(&buffer, hbox);
+    }
     hbox
+}
+
+/// Wrap a Markdown editor in a header (Edit · Split · Preview toggle) plus a
+/// `Paned` whose right side is a live Pango-rendered preview of the buffer.
+fn build_markdown_container(buffer: &gtk::TextBuffer, editor: GtkBox) -> GtkBox {
+    let preview = gtk::Label::new(None);
+    preview.set_use_markup(true);
+    preview.set_wrap(true);
+    preview.set_xalign(0.0);
+    preview.set_yalign(0.0);
+    preview.set_selectable(true);
+    preview.set_margin_top(8);
+    preview.set_margin_bottom(8);
+    preview.set_margin_start(12);
+    preview.set_margin_end(12);
+    preview.add_css_class("mf-md-preview");
+
+    let preview_scroll = ScrolledWindow::new();
+    preview_scroll.set_child(Some(&preview));
+    preview_scroll.set_hexpand(true);
+    preview_scroll.set_vexpand(true);
+
+    let render = {
+        let preview = preview.clone();
+        move |b: &gtk::TextBuffer| {
+            let (s, e) = b.bounds();
+            let text = b.text(&s, &e, false);
+            preview.set_markup(&matforge_core::services::markdown::to_pango_markup(&text));
+        }
+    };
+    render(buffer);
+    {
+        let render = render.clone();
+        buffer.connect_changed(move |b| render(b));
+    }
+
+    let paned = gtk::Paned::new(Orientation::Horizontal);
+    paned.set_start_child(Some(&editor));
+    paned.set_end_child(Some(&preview_scroll));
+    paned.set_resize_start_child(true);
+    paned.set_resize_end_child(true);
+    paned.set_wide_handle(true);
+    paned.set_vexpand(true);
+    paned.set_hexpand(true);
+
+    // Header: a linked Edit / Split / Preview toggle.
+    let edit_btn = gtk::ToggleButton::with_label("Edit");
+    let split_btn = gtk::ToggleButton::with_label("Split");
+    let preview_btn = gtk::ToggleButton::with_label("Preview");
+    split_btn.set_group(Some(&edit_btn));
+    preview_btn.set_group(Some(&edit_btn));
+    split_btn.set_active(true);
+
+    let apply_mode = {
+        let editor = editor.clone();
+        let preview_scroll = preview_scroll.clone();
+        move |show_editor: bool, show_preview: bool| {
+            editor.set_visible(show_editor);
+            preview_scroll.set_visible(show_preview);
+        }
+    };
+    {
+        let apply = apply_mode.clone();
+        edit_btn.connect_toggled(move |b| {
+            if b.is_active() {
+                apply(true, false);
+            }
+        });
+    }
+    {
+        let apply = apply_mode.clone();
+        split_btn.connect_toggled(move |b| {
+            if b.is_active() {
+                apply(true, true);
+            }
+        });
+    }
+    {
+        let apply = apply_mode.clone();
+        preview_btn.connect_toggled(move |b| {
+            if b.is_active() {
+                apply(false, true);
+            }
+        });
+    }
+
+    let toggles = GtkBox::new(Orientation::Horizontal, 0);
+    toggles.add_css_class("linked");
+    toggles.append(&edit_btn);
+    toggles.append(&split_btn);
+    toggles.append(&preview_btn);
+
+    let header = GtkBox::new(Orientation::Horizontal, 0);
+    header.add_css_class("mf-md-toolbar");
+    header.set_halign(gtk::Align::End);
+    header.set_margin_top(4);
+    header.set_margin_bottom(4);
+    header.set_margin_start(8);
+    header.set_margin_end(8);
+    header.append(&toggles);
+
+    let container = GtkBox::new(Orientation::Vertical, 0);
+    container.append(&header);
+    container.append(&paned);
+    container
 }
 
 /// Refresh the caret decorations on cursor moves: a subtle current-line
