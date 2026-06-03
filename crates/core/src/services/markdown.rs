@@ -19,6 +19,12 @@ pub enum Block {
     Code { lang: String, body: String },
     /// A ```mermaid fenced block: the raw diagram source.
     Mermaid(String),
+    /// A pipe table: the header cells and the body rows (raw cell text; the
+    /// renderer applies inline formatting per cell via [`inline_markup`]).
+    Table {
+        header: Vec<String>,
+        rows: Vec<Vec<String>>,
+    },
 }
 
 /// Parse `src` into a sequence of renderable [`Block`]s.
@@ -96,12 +102,13 @@ pub fn parse(src: &str) -> Vec<Block> {
 
         // Pipe table: a header row followed by a `---|---` separator.
         if trimmed.contains('|') && next_is_table_sep(&lines, i) {
-            let mut rows = Vec::new();
+            let mut raw = Vec::new();
             while i < lines.len() && lines[i].contains('|') && !lines[i].trim().is_empty() {
-                rows.push(lines[i]);
+                raw.push(lines[i]);
                 i += 1;
             }
-            blocks.push(Block::Markup(render_table(&rows)));
+            let (header, rows) = table_cells(&raw);
+            blocks.push(Block::Table { header, rows });
             continue;
         }
 
@@ -154,9 +161,32 @@ pub fn to_pango_markup(src: &str) -> String {
             Block::Code { body, .. } | Block::Mermaid(body) => {
                 format!("<tt>{}</tt>", escape(&body))
             }
+            Block::Table { header, rows } => table_to_markup(&header, &rows),
         })
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+/// Render `text`'s inline spans (bold, italic, code, links) to Pango markup.
+/// Exposed so the GTK side can format individual table cells.
+pub fn inline_markup(text: &str) -> String {
+    inline(text)
+}
+
+/// Split raw pipe-table lines into `(header_cells, body_rows)`, dropping the
+/// `---|---` separator row. Cell text is trimmed but not inline-formatted.
+fn table_cells(raw: &[&str]) -> (Vec<String>, Vec<Vec<String>>) {
+    let split = |row: &str| -> Vec<String> {
+        row.trim()
+            .trim_start_matches('|')
+            .trim_end_matches('|')
+            .split('|')
+            .map(|c| c.trim().to_string())
+            .collect()
+    };
+    let header = raw.first().map(|r| split(r)).unwrap_or_default();
+    let rows = raw.iter().skip(2).map(|r| split(r)).collect();
+    (header, rows)
 }
 
 fn fence_marker(trimmed: &str) -> Option<&'static str> {
@@ -220,33 +250,21 @@ fn next_is_table_sep(lines: &[&str], i: usize) -> bool {
     })
 }
 
-/// Render pipe-table `rows` (including the header and `---` separator) as an
-/// aligned, monospaced block with a bold header.
-fn render_table(rows: &[&str]) -> String {
-    let split = |row: &str| -> Vec<String> {
-        row.trim()
-            .trim_start_matches('|')
-            .trim_end_matches('|')
-            .split('|')
-            .map(|c| c.trim().to_string())
-            .collect()
-    };
-    // Skip the separator row (index 1) when laying out cells.
-    let cell_rows: Vec<Vec<String>> = rows
-        .iter()
-        .enumerate()
-        .filter(|(idx, _)| *idx != 1)
-        .map(|(_, r)| split(r))
+/// Render a split table as an aligned, monospaced block with a bold header.
+/// Used by [`to_pango_markup`] as a fallback; the live preview uses a real grid.
+fn table_to_markup(header: &[String], rows: &[Vec<String>]) -> String {
+    let all: Vec<&[String]> = std::iter::once(header)
+        .chain(rows.iter().map(|r| r.as_slice()))
         .collect();
-    let cols = cell_rows.iter().map(|r| r.len()).max().unwrap_or(0);
+    let cols = all.iter().map(|r| r.len()).max().unwrap_or(0);
     let mut widths = vec![0usize; cols];
-    for r in &cell_rows {
+    for r in &all {
         for (c, cell) in r.iter().enumerate() {
             widths[c] = widths[c].max(cell.chars().count());
         }
     }
     let mut out = String::from("<tt>");
-    for (ri, r) in cell_rows.iter().enumerate() {
+    for (ri, r) in all.iter().enumerate() {
         let mut line = String::new();
         for c in 0..cols {
             let cell = r.get(c).map(String::as_str).unwrap_or("");
@@ -265,8 +283,7 @@ fn render_table(rows: &[&str]) -> String {
             out.push('\n');
         }
     }
-    let trimmed_end = out.trim_end().to_string();
-    format!("{trimmed_end}</tt>")
+    format!("{}</tt>", out.trim_end())
 }
 
 /// Apply inline spans (code, bold, italic, links) to one line of text, escaping
@@ -467,6 +484,23 @@ mod tests {
             Block::Mermaid(body) => assert!(body.contains("A-->B")),
             other => panic!("expected Mermaid, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_emits_table_block_with_raw_cells() {
+        let blocks = parse("| File | Note |\n|---|---|\n| `a.m` | does x |\n| `b.m` | does y |");
+        match &blocks[0] {
+            Block::Table { header, rows } => {
+                assert_eq!(header, &["File", "Note"]);
+                assert_eq!(rows.len(), 2);
+                assert_eq!(rows[0], vec!["`a.m`".to_string(), "does x".to_string()]);
+                // Raw cell text — inline formatting is applied by the renderer.
+                assert!(rows[0][0].contains('`'));
+            }
+            other => panic!("expected Table, got {other:?}"),
+        }
+        // inline_markup turns a cell's `code` into monospace.
+        assert!(inline_markup("`a.m`").contains("<tt>a.m</tt>"));
     }
 
     #[test]

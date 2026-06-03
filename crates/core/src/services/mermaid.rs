@@ -4,7 +4,7 @@
 //! the text and lays it out, returning pixel coordinates a Cairo `DrawingArea`
 //! paints (see `app/src/mermaid_render.rs`).
 //!
-//! Two diagram families are supported via [`parse`] → [`Diagram`]:
+//! Three diagram families are supported via [`parse`] → [`Diagram`]:
 //! - **Flowcharts** (`graph` / `flowchart`): directions `TD`/`TB`/`BT`/`LR`/`RL`;
 //!   node shapes `[rect]`, `(round)`, `([stadium])`, `((circle))`, `{diamond}`,
 //!   `{{hexagon}}`; edges `-->`, `---`, `-.->`, `==>` with `|label|` or
@@ -14,6 +14,10 @@
 //!   `as` aliases), messages `->>`/`-->>`/`->`/`-->`/`-x`/`--x`/`-)`/`--)` with
 //!   `: text`, self-messages, and `Note over/left of/right of`. Laid out into
 //!   lifelines + messages → [`layout_sequence`] returns a [`SeqScene`].
+//! - **Class diagrams** (`classDiagram`): `class Name { members }` blocks and
+//!   `Name : member` shorthands; relations `<|--`, `*--`, `o--`, `-->`, `..>`,
+//!   `<|..`, `--`/`..` (with cardinality strings stripped) and `: label`. Laid
+//!   out by layering → [`layout_class`] returns a [`ClassScene`].
 //!
 //! Unsupported diagram types return `None` so the caller falls back to the raw
 //! source. Pure and unit-tested.
@@ -25,6 +29,8 @@ pub enum Diagram {
     Flow(Graph),
     /// A `sequenceDiagram`; lay out with [`layout_sequence`].
     Sequence(Sequence),
+    /// A `classDiagram`; lay out with [`layout_class`].
+    Class(ClassDiagram),
 }
 
 /// Diagram flow direction.
@@ -132,6 +138,7 @@ pub fn parse(src: &str) -> Option<Diagram> {
     match kw {
         "graph" | "flowchart" => parse_flow(src).map(Diagram::Flow),
         "sequenceDiagram" => parse_sequence(src).map(Diagram::Sequence),
+        "classDiagram" => parse_class(src).map(Diagram::Class),
         _ => None,
     }
 }
@@ -859,6 +866,327 @@ pub fn layout_sequence(seq: &Sequence) -> SeqScene {
     }
 }
 
+// ===== class diagrams ========================================================
+
+/// A relationship endpoint marker (UML arrowheads).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Marker {
+    None,
+    /// Hollow triangle — inheritance / realization.
+    Triangle,
+    /// Filled diamond — composition.
+    Diamond,
+    /// Hollow diamond — aggregation.
+    DiamondHollow,
+    /// Open arrow — association / dependency.
+    Arrow,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Class {
+    name: String,
+    fields: Vec<String>,
+    methods: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Relation {
+    from: usize,
+    to: usize,
+    left: Marker,
+    right: Marker,
+    dashed: bool,
+    label: Option<String>,
+}
+
+/// A parsed class diagram (pre-layout): classes + relationships.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClassDiagram {
+    classes: Vec<Class>,
+    relations: Vec<Relation>,
+}
+
+impl ClassDiagram {
+    pub fn class_count(&self) -> usize {
+        self.classes.len()
+    }
+    pub fn relation_count(&self) -> usize {
+        self.relations.len()
+    }
+}
+
+/// A laid-out UML class box: a title bar over field and method compartments.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClassBox {
+    pub name: String,
+    pub fields: Vec<String>,
+    pub methods: Vec<String>,
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+/// A laid-out class relationship with border-clipped endpoints and end markers.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClassEdge {
+    pub from: (f64, f64),
+    pub to: (f64, f64),
+    pub left: Marker,
+    pub right: Marker,
+    pub dashed: bool,
+    pub label: Option<String>,
+}
+
+/// A fully laid-out class diagram, sized `width` × `height` pixels.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClassScene {
+    pub width: f64,
+    pub height: f64,
+    pub boxes: Vec<ClassBox>,
+    pub edges: Vec<ClassEdge>,
+}
+
+/// Parse a `classDiagram`. Returns `None` if it declares no classes.
+fn parse_class(src: &str) -> Option<ClassDiagram> {
+    let lines: Vec<&str> = src.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let mut names: Vec<String> = Vec::new();
+    let mut classes: Vec<Class> = Vec::new();
+    let mut relations: Vec<Relation> = Vec::new();
+
+    let mut i = 1; // skip the `classDiagram` header
+    while i < lines.len() {
+        let line = lines[i];
+        i += 1;
+        if line.starts_with("%%") || line == "}" {
+            continue;
+        }
+
+        // `class Name { ... }` block (members on following lines) or `class Name`.
+        if let Some(rest) = line.strip_prefix("class ") {
+            let rest = rest.trim().trim_end_matches('{').trim();
+            let name = rest.split_whitespace().next().unwrap_or(rest);
+            let idx = intern_class(&mut names, &mut classes, name);
+            if line.ends_with('{') {
+                while i < lines.len() && lines[i] != "}" {
+                    add_member(&mut classes[idx], lines[i]);
+                    i += 1;
+                }
+                i += 1; // consume the closing brace
+            }
+            continue;
+        }
+
+        // Relationship: `A <|-- B`, `A --> B : label`, etc.
+        if let Some((from, to, left, right, dashed, label)) = parse_relation(line) {
+            let f = intern_class(&mut names, &mut classes, &from);
+            let t = intern_class(&mut names, &mut classes, &to);
+            relations.push(Relation { from: f, to: t, left, right, dashed, label });
+            continue;
+        }
+
+        // Member shorthand: `Name : +member`.
+        if let Some((name, member)) = line.split_once(':') {
+            let name = name.trim();
+            if !name.is_empty() && name.split_whitespace().count() == 1 {
+                let idx = intern_class(&mut names, &mut classes, name);
+                add_member(&mut classes[idx], member.trim());
+            }
+            continue;
+        }
+        // Anything else (notes, stereotypes, direction, styling) is ignored.
+    }
+
+    if classes.is_empty() {
+        return None;
+    }
+    Some(ClassDiagram { classes, relations })
+}
+
+fn intern_class(names: &mut Vec<String>, classes: &mut Vec<Class>, name: &str) -> usize {
+    let name = name.trim();
+    if let Some(i) = names.iter().position(|n| n == name) {
+        i
+    } else {
+        names.push(name.to_string());
+        classes.push(Class { name: name.to_string(), fields: Vec::new(), methods: Vec::new() });
+        names.len() - 1
+    }
+}
+
+/// Add a member line to `class`, splitting into the field or method compartment.
+fn add_member(class: &mut Class, line: &str) {
+    let m = line.trim();
+    if m.is_empty() || m.starts_with("<<") {
+        return; // stereotype / annotation — skip
+    }
+    if m.contains('(') {
+        class.methods.push(m.to_string());
+    } else {
+        class.fields.push(m.to_string());
+    }
+}
+
+/// Operator → `(left marker, right marker, dashed)`, matched longest-first.
+const REL_OPS: &[(&str, Marker, Marker, bool)] = &[
+    ("<|--", Marker::Triangle, Marker::None, false),
+    ("--|>", Marker::None, Marker::Triangle, false),
+    ("<|..", Marker::Triangle, Marker::None, true),
+    ("..|>", Marker::None, Marker::Triangle, true),
+    ("*--", Marker::Diamond, Marker::None, false),
+    ("--*", Marker::None, Marker::Diamond, false),
+    ("o--", Marker::DiamondHollow, Marker::None, false),
+    ("--o", Marker::None, Marker::DiamondHollow, false),
+    ("-->", Marker::None, Marker::Arrow, false),
+    ("<--", Marker::Arrow, Marker::None, false),
+    ("..>", Marker::None, Marker::Arrow, true),
+    ("<..", Marker::Arrow, Marker::None, true),
+    ("--", Marker::None, Marker::None, false),
+    ("..", Marker::None, Marker::None, true),
+];
+
+/// Parse a relationship line, returning `(from, to, left, right, dashed, label)`.
+fn parse_relation(line: &str) -> Option<(String, String, Marker, Marker, bool, Option<String>)> {
+    // Strip quoted cardinality tokens like "1" / "*".
+    let stripped = strip_quoted(line);
+    // Find the operator (longest first).
+    let (pos, op, left, right, dashed) = REL_OPS.iter().find_map(|&(op, l, r, d)| {
+        stripped.find(op).map(|p| (p, op, l, r, d))
+    })?;
+    let from = stripped[..pos].trim().split_whitespace().last()?.to_string();
+    let after = stripped[pos + op.len()..].trim();
+    let (to_part, label) = match after.split_once(':') {
+        Some((t, lbl)) => (t.trim(), Some(lbl.trim().to_string()).filter(|s| !s.is_empty())),
+        None => (after, None),
+    };
+    let to = to_part.split_whitespace().next()?.to_string();
+    if from.is_empty() || to.is_empty() {
+        return None;
+    }
+    Some((from, to, left, right, dashed, label))
+}
+
+/// Remove `"..."`-quoted substrings (UML cardinality labels) from `s`.
+fn strip_quoted(s: &str) -> String {
+    let mut out = String::new();
+    let mut in_quote = false;
+    for c in s.chars() {
+        if c == '"' {
+            in_quote = !in_quote;
+        } else if !in_quote {
+            out.push(c);
+        }
+    }
+    out
+}
+
+const CLASS_LINE_H: f64 = 19.0;
+const CLASS_TITLE_H: f64 = 28.0;
+const CLASS_PAD_X: f64 = 14.0;
+const CLASS_CHAR_W: f64 = 7.2;
+
+fn class_box_size(c: &Class) -> (f64, f64) {
+    let widest = std::iter::once(c.name.chars().count())
+        .chain(c.fields.iter().map(|s| s.chars().count()))
+        .chain(c.methods.iter().map(|s| s.chars().count()))
+        .max()
+        .unwrap_or(0);
+    let w = (widest as f64 * CLASS_CHAR_W + 2.0 * CLASS_PAD_X).max(96.0);
+    let members = (c.fields.len() + c.methods.len()) as f64;
+    let body = if members > 0.0 { members * CLASS_LINE_H + 10.0 } else { 0.0 };
+    (w, CLASS_TITLE_H + body)
+}
+
+/// Lay a class diagram out into pixel space: classes layered top-down by their
+/// relationships, edges clipped to box borders.
+pub fn layout_class(cd: &ClassDiagram) -> ClassScene {
+    let n = cd.classes.len();
+    let sizes: Vec<(f64, f64)> = cd.classes.iter().map(class_box_size).collect();
+
+    // Reuse the flowchart layering over relations treated as plain edges.
+    let edges: Vec<Edge> = cd
+        .relations
+        .iter()
+        .map(|r| Edge { from: r.from, to: r.to, label: None })
+        .collect();
+    let layer = longest_path_layers(n, &edges);
+    let max_layer = layer.iter().copied().max().unwrap_or(0);
+
+    let mut by_layer: Vec<Vec<usize>> = vec![Vec::new(); max_layer + 1];
+    for (idx, &l) in layer.iter().enumerate() {
+        by_layer[l].push(idx);
+    }
+
+    // Cross-axis (x) extents per layer to center each row.
+    let row_w: Vec<f64> = by_layer
+        .iter()
+        .map(|ids| {
+            ids.iter().map(|&id| sizes[id].0).sum::<f64>()
+                + SIBLING_GAP * ids.len().saturating_sub(1) as f64
+        })
+        .collect();
+    let canvas_w = row_w.iter().cloned().fold(0.0, f64::max);
+
+    let mut boxes = vec![
+        ClassBox { name: String::new(), fields: vec![], methods: vec![], x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
+        n
+    ];
+    let mut y = MARGIN;
+    for (l, ids) in by_layer.iter().enumerate() {
+        let row_h = ids.iter().map(|&id| sizes[id].1).fold(0.0, f64::max);
+        let mut x = MARGIN + (canvas_w - row_w[l]) / 2.0;
+        for &id in ids {
+            let (w, h) = sizes[id];
+            boxes[id] = ClassBox {
+                name: cd.classes[id].name.clone(),
+                fields: cd.classes[id].fields.clone(),
+                methods: cd.classes[id].methods.clone(),
+                x,
+                y,
+                w,
+                h,
+            };
+            x += w + SIBLING_GAP;
+        }
+        y += row_h + LAYER_GAP;
+    }
+    let height = y - LAYER_GAP + MARGIN;
+
+    let edges = cd
+        .relations
+        .iter()
+        .map(|r| {
+            let a = &boxes[r.from];
+            let b = &boxes[r.to];
+            let ac = (a.x + a.w / 2.0, a.y + a.h / 2.0);
+            let bc = (b.x + b.w / 2.0, b.y + b.h / 2.0);
+            ClassEdge {
+                from: clip_rect((a.x, a.y, a.w, a.h), bc),
+                to: clip_rect((b.x, b.y, b.w, b.h), ac),
+                left: r.left,
+                right: r.right,
+                dashed: r.dashed,
+                label: r.label.clone(),
+            }
+        })
+        .collect();
+
+    ClassScene { width: (canvas_w + 2.0 * MARGIN).max(MARGIN * 2.0), height, boxes, edges }
+}
+
+/// Intersection of the segment from a rect's center toward `target` with its border.
+fn clip_rect((x, y, w, h): (f64, f64, f64, f64), target: (f64, f64)) -> (f64, f64) {
+    let (cx, cy) = (x + w / 2.0, y + h / 2.0);
+    let (dx, dy) = (target.0 - cx, target.1 - cy);
+    if dx == 0.0 && dy == 0.0 {
+        return (cx, cy);
+    }
+    let tx = if dx != 0.0 { (w / 2.0) / dx.abs() } else { f64::INFINITY };
+    let ty = if dy != 0.0 { (h / 2.0) / dy.abs() } else { f64::INFINITY };
+    let t = tx.min(ty);
+    (cx + dx * t, cy + dy * t)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -876,6 +1204,14 @@ mod tests {
         match parse(src) {
             Some(Diagram::Sequence(s)) => s,
             other => panic!("expected a sequence diagram, got {other:?}"),
+        }
+    }
+
+    /// Parse `src` expecting a class diagram, panicking otherwise.
+    fn cls(src: &str) -> ClassDiagram {
+        match parse(src) {
+            Some(Diagram::Class(c)) => c,
+            other => panic!("expected a class diagram, got {other:?}"),
         }
     }
 
@@ -1015,5 +1351,59 @@ mod tests {
         assert!(s.messages[1].self_loop);
         // A downward flow: message 2 is below message 1.
         assert!(s.messages[1].from.1 > s.messages[0].from.1);
+    }
+
+    // ----- class diagrams -----
+
+    #[test]
+    fn class_block_members_split_fields_and_methods() {
+        let c = cls("classDiagram\nclass Animal {\n+String name\n+int age\n+makeSound() void\n}");
+        assert_eq!(c.class_count(), 1);
+        assert_eq!(c.classes[0].name, "Animal");
+        assert_eq!(c.classes[0].fields, vec!["+String name", "+int age"]);
+        assert_eq!(c.classes[0].methods, vec!["+makeSound() void"]);
+    }
+
+    #[test]
+    fn class_member_shorthand() {
+        let c = cls("classDiagram\nDog : +fetch()\nDog : +String breed");
+        assert_eq!(c.class_count(), 1);
+        assert_eq!(c.classes[0].methods, vec!["+fetch()"]);
+        assert_eq!(c.classes[0].fields, vec!["+String breed"]);
+    }
+
+    #[test]
+    fn class_relations_and_markers() {
+        let c = cls(
+            "classDiagram\nAnimal <|-- Dog\nAnimal *-- Leg\nAnimal o-- Tail\nAnimal --> Owner : owns\nAnimal ..> Helper",
+        );
+        assert_eq!(c.class_count(), 6);
+        assert_eq!(c.relation_count(), 5);
+        assert_eq!(c.relations[0].left, Marker::Triangle); // <|--
+        assert_eq!(c.relations[1].left, Marker::Diamond); // *--
+        assert_eq!(c.relations[2].left, Marker::DiamondHollow); // o--
+        assert_eq!(c.relations[3].right, Marker::Arrow); // -->
+        assert_eq!(c.relations[3].label.as_deref(), Some("owns"));
+        assert!(c.relations[4].dashed); // ..>
+        assert_eq!(c.relations[4].right, Marker::Arrow);
+    }
+
+    #[test]
+    fn class_relation_strips_cardinality() {
+        let c = cls("classDiagram\nAnimal \"1\" --> \"*\" Leg : has");
+        assert_eq!(c.relation_count(), 1);
+        assert_eq!(c.classes[0].name, "Animal");
+        assert_eq!(c.classes[1].name, "Leg");
+        assert_eq!(c.relations[0].label.as_deref(), Some("has"));
+    }
+
+    #[test]
+    fn class_layout_stacks_parent_above_child() {
+        let s = layout_class(&cls("classDiagram\nAnimal <|-- Dog"));
+        assert_eq!(s.boxes.len(), 2);
+        // Animal (parent, layer 0) sits above Dog (child, layer 1).
+        assert!(s.boxes[1].y > s.boxes[0].y, "Dog should be below Animal");
+        assert_eq!(s.edges.len(), 1);
+        assert_eq!(s.edges[0].left, Marker::Triangle);
     }
 }

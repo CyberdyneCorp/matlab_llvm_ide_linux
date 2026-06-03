@@ -388,6 +388,19 @@ notebook > header tab:hover { color: @mf_text_primary; }
     border-radius: 8px;
     padding: 8px;
 }
+.mf-md-table {
+    border: 1px solid @mf_border;
+    border-radius: 6px;
+}
+.mf-md-cell {
+    padding: 5px 10px;
+    border-right: 1px solid @mf_border;
+    border-bottom: 1px solid @mf_border;
+}
+.mf-md-th {
+    background-color: @mf_panel_alt;
+    font-weight: bold;
+}
 
 /* Toast (transient action feedback). */
 .mf-toast {
