@@ -44,6 +44,9 @@ pub struct MainViewModel {
     /// A `(variable, kind)` plot requested via "Plot As" — fulfilled when the
     /// variable's value arrives over the REPL value channel.
     pub pending_plot: Property<Option<(String, PlotKind)>>,
+    /// The most recent video file path seen in program output (e.g. a
+    /// `VideoWriter` "wrote …mp4/.avi" line). The GTK side plays it back.
+    pub last_video: Property<Option<String>>,
     fs: Rc<dyn FileSystem>,
     clipboard: Rc<dyn Clipboard>,
     picker: Rc<dyn FilePicker>,
@@ -74,6 +77,7 @@ impl MainViewModel {
             toast: ToastViewModel::new(),
             settings,
             pending_plot: Property::new(None),
+            last_video: Property::new(None),
             fs,
             clipboard,
             picker,
@@ -180,8 +184,16 @@ impl MainViewModel {
     /// Feed one REPL stdout line: transcript handling happens in the REPL VM;
     /// structured payloads are routed to the workspace / plots VMs here.
     pub fn feed_repl_line(&self, line: &str) {
+        self.detect_video(line);
         if let Some(event) = self.repl.feed_line(line) {
             self.route_repl_event(event);
+        }
+    }
+
+    /// Note any video file path in `line` so the GTK side can offer playback.
+    fn detect_video(&self, line: &str) {
+        if let Some(path) = crate::services::media::video_path_in_line(line) {
+            self.last_video.set(Some(path));
         }
     }
 
@@ -190,6 +202,7 @@ impl MainViewModel {
     /// `plot(...)` while debugging lands in the Plots panel, like Run/REPL),
     /// while plain text is returned for the caller to surface in the console.
     pub fn feed_debug_output(&self, line: &str) -> Option<String> {
+        self.detect_video(line);
         match self.repl.consume_sentinel(line) {
             Some(ReplEvent::Console(text)) => Some(text),
             Some(event) => {

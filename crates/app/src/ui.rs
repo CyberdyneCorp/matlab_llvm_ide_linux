@@ -3112,6 +3112,11 @@ pub fn flow_inspector_focus() {
     });
 }
 
+/// The main application window, for parenting transient dialogs/players.
+pub fn main_window() -> Option<ApplicationWindow> {
+    MAIN_WINDOW.with(|w| w.borrow().clone())
+}
+
 /// Attach a right-click "Plot As…" / Inspect menu to a workspace variable row.
 fn attach_var_menu(btn: &Button, app: &Rc<AppState>, name: &str) {
     use matforge_core::models::PlotKind;
