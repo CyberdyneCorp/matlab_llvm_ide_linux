@@ -2114,6 +2114,17 @@ fn attach_var_menu(btn: &Button, app: &Rc<AppState>, name: &str) {
         });
     }
     btn.add_controller(gesture);
+
+    // Drag the variable onto the Plots panel to chart it.
+    let drag = gtk::DragSource::new();
+    drag.set_actions(gtk::gdk::DragAction::COPY);
+    {
+        let name = name.to_string();
+        drag.connect_prepare(move |_src, _x, _y| {
+            Some(gtk::gdk::ContentProvider::for_value(&name.to_value()))
+        });
+    }
+    btn.add_controller(drag);
 }
 
 fn ws_columns_header() -> GtkBox {
@@ -2406,6 +2417,21 @@ fn build_plots(app: &Rc<AppState>) -> GtkBox {
         let rebuild = rebuild.clone();
         app.vm.plots.selected_id.subscribe(move |_| rebuild());
     }
+
+    // Drop a workspace variable anywhere on the panel to chart it (a line plot).
+    let drop = gtk::DropTarget::new(String::static_type(), gtk::gdk::DragAction::COPY);
+    {
+        let app = app.clone();
+        drop.connect_drop(move |_t, value, _x, _y| {
+            if let Ok(name) = value.get::<String>() {
+                app.plot_variable_as(&name, matforge_core::models::PlotKind::Line2D);
+                true
+            } else {
+                false
+            }
+        });
+    }
+    panel.add_controller(drop);
     panel
 }
 
