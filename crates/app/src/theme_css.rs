@@ -17,6 +17,8 @@ thread_local! {
     /// The active theme, mirrored here so the Cairo renderers (plots, flowchart,
     /// gutter) can read it without threading it through every draw call.
     static CURRENT: Cell<ThemeTokens> = Cell::new(ThemeTokens::midnight());
+    /// The active code/editor font scale, for the Cairo gutter line numbers.
+    static CODE_SCALE: Cell<f64> = const { Cell::new(1.0) };
 }
 
 /// Record the active theme (called whenever appearance changes).
@@ -29,18 +31,30 @@ pub fn current() -> ThemeTokens {
     CURRENT.with(|c| c.get())
 }
 
-/// Build the full CSS for `tokens` at `font_scale` (1.0 = the 12px baseline).
-pub fn render(tokens: &ThemeTokens, font_scale: f64) -> String {
+/// Record the active editor font scale (for the Cairo gutter).
+pub fn set_code_scale(scale: f64) {
+    CODE_SCALE.with(|c| c.set(scale));
+}
+
+/// The active editor font scale.
+pub fn code_scale() -> f64 {
+    CODE_SCALE.with(|c| c.get())
+}
+
+/// Build the full CSS for `tokens` at the given UI + code font scales (1.0 = the
+/// 12px baseline). `code_scale` sizes the editor/console; `ui_scale` the rest.
+pub fn render(tokens: &ThemeTokens, ui_scale: f64, code_scale: f64) -> String {
     let mut css = String::with_capacity(TEMPLATE.len() + 1280);
     css.push_str(&color_block(tokens));
     css.push('\n');
     css.push_str(
         &TEMPLATE
-            .replace("__FS_LG__", &px(13.0, font_scale))
-            .replace("__FS_BASE__", &px(12.0, font_scale))
-            .replace("__FS_SM__", &px(11.0, font_scale))
-            .replace("__FS_XS__", &px(10.0, font_scale))
-            .replace("__FS_XXS__", &px(9.0, font_scale)),
+            .replace("__FS_LG__", &px(13.0, ui_scale))
+            .replace("__FS_BASE__", &px(12.0, ui_scale))
+            .replace("__FS_SM__", &px(11.0, ui_scale))
+            .replace("__FS_XS__", &px(10.0, ui_scale))
+            .replace("__FS_XXS__", &px(9.0, ui_scale))
+            .replace("__FS_CODE__", &px(12.0, code_scale)),
     );
     css
 }
@@ -93,17 +107,17 @@ mod tests {
 
     #[test]
     fn renders_color_block_and_no_sentinels_remain() {
-        let css = render(&ThemeTokens::daylight(), 1.0);
+        let css = render(&ThemeTokens::daylight(), 1.0, 1.0);
         assert!(css.contains("@define-color mf_window_background #f4f6fa;"));
         assert!(css.contains("@define-color mf_accent"));
         assert!(!css.contains("__FS_")); // every sentinel substituted
     }
 
     #[test]
-    fn font_scale_changes_px() {
-        let small = render(&ThemeTokens::midnight(), 1.0);
-        let big = render(&ThemeTokens::midnight(), 1.5);
-        assert!(small.contains("font-size: 12px"));
-        assert!(big.contains("font-size: 18px")); // 12 * 1.5
+    fn ui_and_code_scales_are_independent() {
+        // UI 1.0, editor 1.5 → chrome stays 12px, the editor is 18px.
+        let css = render(&ThemeTokens::midnight(), 1.0, 1.5);
+        assert!(css.contains("font-size: 12px")); // chrome (__FS_BASE__)
+        assert!(css.contains("font-size: 18px")); // editor (__FS_CODE__ = 12 * 1.5)
     }
 }

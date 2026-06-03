@@ -118,7 +118,7 @@ window.mf-root,
     background-color: @mf_editor_bg;
     color: @mf_code_fg;
     font-family: "JetBrains Mono", "Fira Code", "DejaVu Sans Mono", monospace;
-    font-size: __FS_BASE__;
+    font-size: __FS_CODE__;
 }
 .mf-gutter { background-color: @mf_editor_bg; color: @mf_gutter; }
 
@@ -238,7 +238,7 @@ textview.mf-terminal, textview.mf-terminal text {
     background-color: @mf_term_bg;
     color: @mf_term_fg;
     font-family: "JetBrains Mono", "Fira Code", "DejaVu Sans Mono", monospace;
-    font-size: __FS_BASE__;
+    font-size: __FS_CODE__;
 }
 .mf-term-panel { background-color: @mf_term_bg; }
 .mf-prompt { color: @mf_term_fg; font-weight: 700; }
