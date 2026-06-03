@@ -7,6 +7,7 @@ pub mod chart_trace;
 pub mod compiler;
 pub mod dap;
 pub mod filesystem;
+pub mod fuzzy;
 pub mod flowchart_codec;
 pub mod highlighter;
 pub mod parsers;

@@ -22,6 +22,7 @@ mod icons;
 mod flowchart_view;
 mod highlight;
 mod mflowlink_window;
+mod palette;
 mod plot_render;
 mod statechart_window;
 mod process;
@@ -183,6 +184,9 @@ fn build_main_window(app: &Application) {
 
     if std::env::var("MATFORGE_PREFS").is_ok() {
         settings_view::open(&app, Some(&window));
+    }
+    if std::env::var("MATFORGE_PALETTE").is_ok() {
+        palette::open_command_palette(&app, &window);
     }
 }
 

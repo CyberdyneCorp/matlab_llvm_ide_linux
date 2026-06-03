@@ -274,6 +274,16 @@ fn build_menu_bar(window: &ApplicationWindow, app: &Rc<AppState>) -> gtk::Popove
         let a = app.clone();
         register("zoom-reset", Rc::new(move || a.vm.appearance.zoom_reset()));
     }
+    {
+        let a = app.clone();
+        let w2 = w.clone();
+        register("command-palette", Rc::new(move || crate::palette::open_command_palette(&a, &w2)));
+    }
+    {
+        let a = app.clone();
+        let w2 = w.clone();
+        register("quick-open", Rc::new(move || crate::palette::open_quick_open(&a, &w2)));
+    }
 
     // Keyboard accelerators (shown automatically in the menu by GTK).
     if let Some(gapp) = window.application().and_then(|a| a.downcast::<gtk::Application>().ok()) {
@@ -286,8 +296,9 @@ fn build_menu_bar(window: &ApplicationWindow, app: &Rc<AppState>) -> gtk::Popove
             ("win.find", &["<Ctrl>f"]),
             ("win.toggle-sidebar", &["<Ctrl>b"]),
             ("win.toggle-workspace", &["<Ctrl><Shift>w"]),
-            ("win.toggle-plots", &["<Ctrl><Shift>p"]),
-            ("win.toggle-zen", &["<Ctrl><Shift>f"]),
+            ("win.command-palette", &["<Ctrl><Shift>p"]),
+            ("win.quick-open", &["<Ctrl>p"]),
+            ("win.toggle-zen", &["F11"]),
             ("win.compile", &["<Ctrl><Shift>b"]),
             ("win.run", &["<Ctrl>r"]),
             ("win.stop", &["<Shift>F5"]),
@@ -327,6 +338,10 @@ fn build_menu_bar(window: &ApplicationWindow, app: &Rc<AppState>) -> gtk::Popove
     let find_section = Menu::new();
     find_section.append(Some("Search in Files"), Some("win.find"));
     edit.append_section(None, &find_section);
+    let go_section = Menu::new();
+    go_section.append(Some("Command Palette…"), Some("win.command-palette"));
+    go_section.append(Some("Quick Open File…"), Some("win.quick-open"));
+    edit.append_section(None, &go_section);
     let prefs_section = Menu::new();
     prefs_section.append(Some("Preferences…"), Some("win.preferences"));
     edit.append_section(None, &prefs_section);
