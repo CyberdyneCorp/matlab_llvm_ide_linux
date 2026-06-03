@@ -109,6 +109,29 @@ impl FlowchartViewModel {
         self.is_dirty.set(true);
     }
 
+    /// Auto-arrange the diagram into clean layers (one undo step). `horizontal`
+    /// flows left→right (signal-flow / Simulink-style); otherwise top→down
+    /// (control-flow fluxogramas / state charts).
+    pub fn auto_layout(&self, horizontal: bool) {
+        let placed = self.document.with(|d| arrange(d, horizontal));
+        if placed.is_empty() {
+            return;
+        }
+        self.push_undo();
+        self.document.update(|d| {
+            if let Some(flow) = d.flows.first_mut() {
+                let map: std::collections::HashMap<&str, FlowPosition> =
+                    placed.iter().map(|(id, p)| (id.as_str(), *p)).collect();
+                for node in &mut flow.nodes {
+                    if let Some(p) = map.get(node.id.as_str()) {
+                        node.ui.position = *p;
+                    }
+                }
+            }
+        });
+        self.is_dirty.set(true);
+    }
+
     /// Apply an in-place edit to a node's mutable fields (label / data) without
     /// snapshotting undo — for inspector field edits during typing. Marks the
     /// document dirty. Pair with [`begin_edit`](Self::begin_edit) if a single
@@ -295,6 +318,111 @@ impl FlowchartViewModel {
     }
 }
 
+// Node footprint + spacing used by the auto-layout (`arrange`).
+const LAY_NODE_W: f64 = 150.0;
+const LAY_NODE_H: f64 = 60.0;
+const LAY_LAYER_GAP: f64 = 70.0;
+const LAY_SIBLING_GAP: f64 = 36.0;
+const LAY_MARGIN: f64 = 40.0;
+
+/// Compute clean layered positions for the entry flow. Layers come from a
+/// longest-path pass (back edges dropped so loops/cycles don't blow up), then
+/// each layer is centered on the cross axis. `horizontal` flows left→right;
+/// otherwise top→down. Pure — the caller applies the result.
+pub fn arrange(doc: &FlowchartDocument, horizontal: bool) -> Vec<(String, FlowPosition)> {
+    use std::collections::HashMap;
+    let Some(flow) = doc.flows.first() else { return Vec::new() };
+    let n = flow.nodes.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let idx: HashMap<&str, usize> =
+        flow.nodes.iter().enumerate().map(|(i, nd)| (nd.id.as_str(), i)).collect();
+    let edges: Vec<(usize, usize)> = flow
+        .edges
+        .iter()
+        .filter_map(|e| Some((*idx.get(e.from.node.as_str())?, *idx.get(e.to.node.as_str())?)))
+        .collect();
+
+    let forward = arrange_forward_edges(n, &edges);
+    let mut layer = vec![0usize; n];
+    for _ in 0..=n {
+        let mut changed = false;
+        for &(a, b) in &forward {
+            if layer[b] < layer[a] + 1 {
+                layer[b] = layer[a] + 1;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    let max_layer = layer.iter().copied().max().unwrap_or(0);
+    let mut by_layer: Vec<Vec<usize>> = vec![Vec::new(); max_layer + 1];
+    for (i, &l) in layer.iter().enumerate() {
+        by_layer[l].push(i); // preserves node insertion order within a layer
+    }
+
+    let cross_step = if horizontal { LAY_NODE_H } else { LAY_NODE_W } + LAY_SIBLING_GAP;
+    let main_step = if horizontal { LAY_NODE_W } else { LAY_NODE_H } + LAY_LAYER_GAP;
+    let extent = |count: usize| (count as f64) * cross_step - LAY_SIBLING_GAP;
+    let max_extent = by_layer.iter().map(|ids| extent(ids.len())).fold(0.0, f64::max);
+
+    let mut out = vec![FlowPosition { x: 0.0, y: 0.0 }; n];
+    for (l, ids) in by_layer.iter().enumerate() {
+        let main = LAY_MARGIN + l as f64 * main_step;
+        let mut cross = LAY_MARGIN + (max_extent - extent(ids.len())) / 2.0;
+        for &i in ids {
+            out[i] = if horizontal {
+                FlowPosition { x: main, y: cross }
+            } else {
+                FlowPosition { x: cross, y: main }
+            };
+            cross += cross_step;
+        }
+    }
+    flow.nodes.iter().enumerate().map(|(i, nd)| (nd.id.clone(), out[i])).collect()
+}
+
+/// Edges with cycle-forming back edges removed (iterative DFS, gray = on stack).
+fn arrange_forward_edges(n: usize, edges: &[(usize, usize)]) -> Vec<(usize, usize)> {
+    let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for (i, &(a, _)) in edges.iter().enumerate() {
+        if a < n {
+            adj[a].push(i);
+        }
+    }
+    let mut color = vec![0u8; n]; // 0 unvisited, 1 on stack, 2 done
+    let mut keep = vec![true; edges.len()];
+    for root in 0..n {
+        if color[root] != 0 {
+            continue;
+        }
+        color[root] = 1;
+        let mut stack = vec![(root, 0usize)];
+        while let Some(&(u, ai)) = stack.last() {
+            if ai < adj[u].len() {
+                stack.last_mut().unwrap().1 += 1;
+                let ei = adj[u][ai];
+                let v = edges[ei].1;
+                match color[v] {
+                    1 => keep[ei] = false, // points at an ancestor → back edge
+                    0 => {
+                        color[v] = 1;
+                        stack.push((v, 0));
+                    }
+                    _ => {}
+                }
+            } else {
+                color[u] = 2;
+                stack.pop();
+            }
+        }
+    }
+    edges.iter().copied().enumerate().filter(|(i, _)| keep[*i]).map(|(_, e)| e).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -304,6 +432,55 @@ mod tests {
         let vm = FlowchartViewModel::empty("D", SchemaKind::ControlFlow);
         assert_eq!(vm.node_count(), 2);
         assert_eq!(vm.edge_count(), 1);
+    }
+
+    #[test]
+    fn auto_layout_stacks_top_down_and_is_undoable() {
+        let vm = FlowchartViewModel::empty("D", SchemaKind::ControlFlow);
+        let a = vm.add_node(NodeKind::Assignment, 999.0, 999.0);
+        vm.add_edge("main_start", "out", &a, "in");
+        vm.add_edge(&a, "out", "main_end", "in");
+        vm.auto_layout(false); // top-down
+
+        let pos = |id: &str| {
+            vm.document.with(|d| {
+                d.flows[0].nodes.iter().find(|n| n.id == id).unwrap().ui.position
+            })
+        };
+        // start above a above end; all share a column (top-down layering).
+        assert!(pos("main_start").y < pos(&a).y);
+        assert!(pos(&a).y < pos("main_end").y);
+        assert_eq!(pos("main_start").x, pos(&a).x);
+        // One undo restores the pre-layout position.
+        assert!(vm.can_undo());
+        vm.undo();
+        assert_eq!(pos(&a), super::FlowPosition { x: 999.0, y: 999.0 });
+    }
+
+    #[test]
+    fn auto_layout_horizontal_flows_left_to_right() {
+        let vm = FlowchartViewModel::empty("S", SchemaKind::SignalFlow);
+        let src = vm.add_node(NodeKind::SignalConstant, 0.0, 0.0);
+        let gain = vm.add_node(NodeKind::SignalGain, 0.0, 0.0);
+        let sink = vm.add_node(NodeKind::SignalScope, 0.0, 0.0);
+        vm.add_edge(&src, "out", &gain, "in");
+        vm.add_edge(&gain, "out", &sink, "in");
+        vm.auto_layout(true); // left-to-right
+
+        let pos = |id: &str| {
+            vm.document.with(|d| d.flows[0].nodes.iter().find(|n| n.id == id).unwrap().ui.position)
+        };
+        assert!(pos(&src).x < pos(&gain).x && pos(&gain).x < pos(&sink).x);
+    }
+
+    #[test]
+    fn arrange_terminates_on_cycles() {
+        let vm = FlowchartViewModel::empty("D", SchemaKind::ControlFlow);
+        let n = vm.add_node(NodeKind::Assignment, 0.0, 0.0);
+        vm.add_edge("main_start", "out", &n, "in");
+        vm.add_edge(&n, "out", "main_start", "in"); // cycle
+        let placed = vm.document.with(|d| super::arrange(d, false));
+        assert_eq!(placed.len(), vm.node_count()); // every node placed, no hang
     }
 
     #[test]
