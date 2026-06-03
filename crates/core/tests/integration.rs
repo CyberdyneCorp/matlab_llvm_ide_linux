@@ -69,6 +69,43 @@ fn emit_llvm_contains_ir() {
 }
 
 #[test]
+fn repl_plot_emits_figure_sentinel() {
+    // The basis for REPL / JIT animation: a `plot(...)` in `matlabc -repl` with
+    // the IDE figures flag emits a figure-begin sentinel the Plots panel renders.
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+
+    let Some(binary) = matlabc() else {
+        eprintln!("skipping: matlabc not found");
+        return;
+    };
+    let mut child = Command::new(&binary)
+        .arg("-repl")
+        .arg("/dev/stdin")
+        .env("MATLAB_LLVM_IDE_FIGURES", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn matlabc -repl");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"plot(1:10);\ndrawnow;\nexit\n")
+        .unwrap();
+    let mut out = String::new();
+    child.stdout.take().unwrap().read_to_string(&mut out).unwrap();
+    let _ = child.wait();
+
+    assert!(
+        out.contains(matforge_core::services::sentinels::FIG_BEGIN),
+        "REPL did not emit a figure sentinel for plot():\n{}",
+        out.chars().take(400).collect::<String>()
+    );
+}
+
+#[test]
 fn diagnostics_surface_for_bad_source() {
     let Some(binary) = matlabc() else {
         eprintln!("skipping: matlabc not found");

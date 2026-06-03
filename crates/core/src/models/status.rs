@@ -120,21 +120,28 @@ mod tests {
 
     #[test]
     fn layout_labels() {
-        assert_eq!(CenterLayoutMode::Split.label(), "Split");
         assert_eq!(CenterLayoutMode::ALL.len(), 3);
+        assert_eq!(CenterLayoutMode::Split.label(), "Split");
+        assert_eq!(CenterLayoutMode::EditorOnly.label(), "Editor");
+        assert_eq!(CenterLayoutMode::ConsoleOnly.label(), "Console");
     }
 
     #[test]
-    fn search_mode_predicates() {
-        assert!(SearchMode::Both.matches_filenames());
-        assert!(SearchMode::Both.matches_content());
-        assert!(SearchMode::Filename.matches_filenames());
-        assert!(!SearchMode::Filename.matches_content());
+    fn search_mode_labels_and_predicates() {
+        assert_eq!(SearchMode::ALL.len(), 3);
+        assert_eq!(SearchMode::Filename.label(), "File names");
+        assert_eq!(SearchMode::Content.label(), "In files");
+        assert_eq!(SearchMode::Both.label(), "Both");
+        assert!(SearchMode::Both.matches_filenames() && SearchMode::Both.matches_content());
+        assert!(SearchMode::Filename.matches_filenames() && !SearchMode::Filename.matches_content());
+        assert!(SearchMode::Content.matches_content() && !SearchMode::Content.matches_filenames());
     }
 
     #[test]
     fn search_scope_label() {
         assert_eq!(SearchScope::Project.label(), "Entire project");
         assert_eq!(SearchScope::Folder(PathBuf::from("/a/b/proj")).label(), "proj");
+        // A root-ish path with no file name falls back to the full path.
+        assert_eq!(SearchScope::Folder(PathBuf::from("/")).label(), "/");
     }
 }
