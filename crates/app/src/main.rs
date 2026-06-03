@@ -73,10 +73,23 @@ fn build_main_window(app: &Application) {
         prefs.appearance.font_scale,
         prefs.appearance.code_font.clone(),
     );
+    // Restore panel visibility before the panels are built.
+    app.vm.layout.sidebar_visible.set(prefs.layout.sidebar_visible);
+    app.vm.layout.workspace_visible.set(prefs.layout.workspace_visible);
+    app.vm.layout.plots_visible.set(prefs.layout.plots_visible);
 
     ui::build(&window, app.clone());
 
     install_theming(&window, &app);
+
+    // Save the session (layout + open tabs + folder) on a clean window close.
+    {
+        let app = app.clone();
+        window.connect_close_request(move |_| {
+            save_prefs(&app);
+            gtk::glib::Propagation::Proceed
+        });
+    }
 
     // E2E state introspection (test-only; no-op unless the env var is set).
     if let Ok(path) = std::env::var("MATFORGE_E2E_STATE") {
@@ -144,6 +157,17 @@ fn build_main_window(app: &Application) {
         app.vm.appearance.set_accent(matforge_core::theme::Accent::from_key(&accent));
     }
 
+    // Session restore: reopen the last folder + tabs when nothing was opened via
+    // env (so explicit MATFORGE_OPEN/FILE always win).
+    if std::env::var("MATFORGE_OPEN").is_err() && std::env::var("MATFORGE_FILE").is_err() {
+        if let Some(folder) = &prefs.last_folder {
+            let _ = app.vm.open_folder(std::path::Path::new(folder));
+        }
+        for tab in &prefs.open_tabs {
+            ui::open_file_path(&app, std::path::Path::new(tab));
+        }
+    }
+
     if !runner::matlabc_available(&settings) {
         app.vm.status_bar.set_message(format!(
             "matlabc not found at {} — set $MATLABC_PATH",
@@ -183,21 +207,36 @@ fn install_theming(window: &ApplicationWindow, app: &Rc<AppState>) {
             theme_css::set_current(tokens);
             // Re-tint the Cairo widgets (plots/flowchart/gutter) immediately.
             window.queue_draw();
-            persist_appearance(&app);
+            save_prefs(&app);
         }
     };
     render(); // initial paint
     app.vm.appearance.revision.subscribe(move |_| render());
 }
 
-/// Save the current appearance into `config.toml`, preserving other fields.
-fn persist_appearance(app: &Rc<AppState>) {
+/// Persist appearance + layout + session (open tabs / last folder) to
+/// `config.toml`, preserving fields this build does not own.
+fn save_prefs(app: &Rc<AppState>) {
     use matforge_core::services::preferences::Preferences;
-    let a = &app.vm.appearance;
     let mut prefs = Preferences::load();
+
+    let a = &app.vm.appearance;
     prefs.appearance.theme = a.theme_id.get().key().to_string();
     prefs.appearance.accent = a.accent.get().key().to_string();
     prefs.appearance.font_scale = a.font_scale.get();
     prefs.appearance.code_font = a.code_font_family.get();
+
+    let l = &app.vm.layout;
+    prefs.layout.sidebar_visible = l.sidebar_visible.get();
+    prefs.layout.workspace_visible = l.workspace_visible.get();
+    prefs.layout.plots_visible = l.plots_visible.get();
+
+    prefs.open_tabs = app.vm.editor.tabs.with(|ts| {
+        ts.iter().filter_map(|t| t.url.as_ref().map(|u| u.display().to_string())).collect()
+    });
+    prefs.last_folder = app.vm.project.root_url.get().map(|u| u.display().to_string());
+    if let Some(folder) = prefs.last_folder.clone() {
+        prefs.push_recent(folder);
+    }
     let _ = prefs.save();
 }
