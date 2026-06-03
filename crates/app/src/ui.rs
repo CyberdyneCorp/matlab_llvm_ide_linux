@@ -2413,6 +2413,58 @@ fn build_console(app: &Rc<AppState>) -> GtkBox {
             clear_btn.connect_clicked(move |_| clear_current_tab(&nb, &app));
         }
     }
+
+    // Search-in-output box in the tab bar's start corner. It searches the tab in
+    // view (console transcript or a generated-code pane), selecting matches;
+    // Enter / ↓ go to the next match, ↑ to the previous, with a live count.
+    {
+        let search = gtk::SearchEntry::new();
+        search.set_placeholder_text(Some("Search output…"));
+        search.set_width_chars(14);
+        let count = Label::new(None);
+        count.add_css_class("mf-text-muted");
+        count.set_width_chars(11);
+        let sbox = GtkBox::new(Orientation::Horizontal, 4);
+        sbox.add_css_class("mf-tab-search");
+        sbox.append(&search);
+        sbox.append(&count);
+        nb.set_action_widget(&sbox, gtk::PackType::Start);
+
+        let run = {
+            let nb = nb.clone();
+            let count = count.clone();
+            move |query: &str, forward: bool, reset: bool| match current_tab_view(&nb) {
+                Some(view) => count.set_text(&search_count_text(query, output_search(&view, query, forward, reset))),
+                None => count.set_text(""),
+            }
+        };
+        {
+            let run = run.clone();
+            search.connect_search_changed(move |e| run(&e.text(), true, true));
+        }
+        {
+            let run = run.clone();
+            search.connect_activate(move |e| run(&e.text(), true, false));
+        }
+        {
+            let run = run.clone();
+            search.connect_next_match(move |e| run(&e.text(), true, false));
+        }
+        {
+            let run = run.clone();
+            search.connect_previous_match(move |e| run(&e.text(), false, false));
+        }
+        // Follow the active tab: re-run once the switched-to page is current.
+        {
+            let run = run.clone();
+            let search = search.clone();
+            nb.connect_switch_page(move |_nb, _page, _idx| {
+                let q = search.text().to_string();
+                let run = run.clone();
+                gtk::glib::idle_add_local_once(move || run(&q, true, true));
+            });
+        }
+    }
     panel.append(&nb);
 
     // Live REPL input.
@@ -2516,6 +2568,64 @@ fn current_tab_text(nb: &Notebook, app: &Rc<AppState>, console_buf: &gtk::TextBu
             })
             .unwrap_or_default(),
         None => String::new(),
+    }
+}
+
+/// The `TextView` of the bottom panel's current tab (console or a code pane),
+/// or `None` for the non-text PROBLEMS tab.
+fn current_tab_view(nb: &Notebook) -> Option<TextView> {
+    let idx = nb.current_page()?;
+    nb.nth_page(Some(idx))
+        .and_then(|p| p.downcast::<ScrolledWindow>().ok())
+        .and_then(|s| s.child())
+        .and_then(|c| c.downcast::<TextView>().ok())
+}
+
+/// Select the next/previous (or first, when `reset`) case-insensitive match of
+/// `query` in `view` and scroll to it; returns the total number of matches.
+fn output_search(view: &TextView, query: &str, forward: bool, reset: bool) -> usize {
+    let buffer = view.buffer();
+    if query.is_empty() {
+        return 0;
+    }
+    let flags = gtk::TextSearchFlags::CASE_INSENSITIVE | gtk::TextSearchFlags::TEXT_ONLY;
+    let (sel_start, sel_end) = buffer
+        .selection_bounds()
+        .unwrap_or_else(|| (buffer.start_iter(), buffer.start_iter()));
+    let found = if reset {
+        buffer.start_iter().forward_search(query, flags, None)
+    } else if forward {
+        sel_end
+            .forward_search(query, flags, None)
+            .or_else(|| buffer.start_iter().forward_search(query, flags, None))
+    } else {
+        sel_start
+            .backward_search(query, flags, None)
+            .or_else(|| buffer.end_iter().backward_search(query, flags, None))
+    };
+    if let Some((mut s, e)) = found {
+        buffer.select_range(&s, &e);
+        view.scroll_to_iter(&mut s, 0.15, false, 0.0, 0.0);
+    }
+    let mut n = 0;
+    let mut it = buffer.start_iter();
+    while let Some((_, e)) = it.forward_search(query, flags, None) {
+        n += 1;
+        it = e;
+    }
+    n
+}
+
+/// Match-count label text for the output search box.
+fn search_count_text(query: &str, n: usize) -> String {
+    if query.is_empty() {
+        String::new()
+    } else {
+        match n {
+            0 => "no results".to_string(),
+            1 => "1 match".to_string(),
+            _ => format!("{n} matches"),
+        }
     }
 }
 
