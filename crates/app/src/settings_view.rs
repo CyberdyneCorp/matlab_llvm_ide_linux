@@ -93,41 +93,23 @@ fn appearance_tab(app: &Rc<AppState>) -> GtkBox {
     }
     v.append(&field_row("Accent", &accent_dd));
 
-    // UI font size.
-    let scale = Scale::with_range(Orientation::Horizontal, FONT_SCALE_MIN, FONT_SCALE_MAX, 0.05);
-    scale.set_value(app.vm.appearance.font_scale.get());
-    scale.set_hexpand(true);
-    scale.set_draw_value(false);
-    let pct = Label::new(None);
-    pct.add_css_class("mf-mono");
-    pct.set_width_chars(5);
-    let set_pct = {
-        let pct = pct.clone();
-        move |s: f64| pct.set_text(&format!("{}%", (s * 100.0).round() as i64))
-    };
-    set_pct(app.vm.appearance.font_scale.get());
+    // Independent UI + editor font-size sliders.
     {
         let app = app.clone();
-        let set_pct = set_pct.clone();
-        scale.connect_value_changed(move |s| {
-            let applied = app.vm.appearance.set_font_scale(s.value());
-            set_pct(applied);
-        });
+        v.append(&scale_row(
+            "UI font size",
+            app.vm.appearance.font_scale.clone(),
+            move |s| app.vm.appearance.set_font_scale(s),
+        ));
     }
     {
-        let scale = scale.clone();
-        app.vm.appearance.font_scale.bind(move |s| {
-            if (scale.value() - *s).abs() > 1e-6 {
-                scale.set_value(*s);
-            }
-            set_pct(*s);
-        });
+        let app = app.clone();
+        v.append(&scale_row(
+            "Editor font size",
+            app.vm.appearance.code_font_scale.clone(),
+            move |s| app.vm.appearance.set_code_font_scale(s),
+        ));
     }
-    let font_row = GtkBox::new(Orientation::Horizontal, 8);
-    font_row.append(&row_label("UI font size"));
-    font_row.append(&scale);
-    font_row.append(&pct);
-    v.append(&font_row);
 
     // Code font family.
     let entry = Entry::new();
@@ -163,6 +145,44 @@ fn toolchain_tab(app: &Rc<AppState>) -> GtkBox {
     note.set_margin_top(6);
     v.append(&note);
     v
+}
+
+/// A labelled font-scale slider with a live % readout, two-way bound to `prop`.
+fn scale_row(
+    label: &str,
+    prop: matforge_core::observable::Property<f64>,
+    on_change: impl Fn(f64) -> f64 + 'static,
+) -> GtkBox {
+    let scale = Scale::with_range(Orientation::Horizontal, FONT_SCALE_MIN, FONT_SCALE_MAX, 0.05);
+    scale.set_value(prop.get());
+    scale.set_hexpand(true);
+    scale.set_draw_value(false);
+    let pct = Label::new(None);
+    pct.add_css_class("mf-mono");
+    pct.set_width_chars(5);
+    let set_pct = {
+        let pct = pct.clone();
+        move |s: f64| pct.set_text(&format!("{}%", (s * 100.0).round() as i64))
+    };
+    set_pct(prop.get());
+    {
+        let set_pct = set_pct.clone();
+        scale.connect_value_changed(move |s| set_pct(on_change(s.value())));
+    }
+    {
+        let scale = scale.clone();
+        prop.bind(move |s| {
+            if (scale.value() - *s).abs() > 1e-6 {
+                scale.set_value(*s);
+            }
+            set_pct(*s);
+        });
+    }
+    let row = GtkBox::new(Orientation::Horizontal, 8);
+    row.append(&row_label(label));
+    row.append(&scale);
+    row.append(&pct);
+    row
 }
 
 fn field_row(label: &str, control: &impl IsA<gtk::Widget>) -> GtkBox {

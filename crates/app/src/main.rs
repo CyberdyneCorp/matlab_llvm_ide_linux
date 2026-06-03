@@ -71,6 +71,7 @@ fn build_main_window(app: &Application) {
         prefs.appearance.theme_id(),
         prefs.appearance.accent_enum(),
         prefs.appearance.font_scale,
+        prefs.appearance.code_font_scale,
         prefs.appearance.code_font.clone(),
     );
     // Restore panel visibility before the panels are built.
@@ -205,9 +206,11 @@ fn install_theming(window: &ApplicationWindow, app: &Rc<AppState>) {
         let window = window.clone();
         move || {
             let tokens = app.vm.appearance.tokens();
-            let scale = app.vm.appearance.font_scale.get();
-            provider.load_from_string(&theme_css::render(&tokens, scale));
+            let ui_scale = app.vm.appearance.font_scale.get();
+            let code_scale = app.vm.appearance.code_font_scale.get();
+            provider.load_from_string(&theme_css::render(&tokens, ui_scale, code_scale));
             theme_css::set_current(tokens);
+            theme_css::set_code_scale(code_scale);
             // Re-tint the Cairo widgets (plots/flowchart/gutter) immediately.
             window.queue_draw();
             save_prefs(&app);
@@ -236,6 +239,7 @@ fn save_prefs(app: &Rc<AppState>) {
     prefs.appearance.theme = a.theme_id.get().key().to_string();
     prefs.appearance.accent = a.accent.get().key().to_string();
     prefs.appearance.font_scale = a.font_scale.get();
+    prefs.appearance.code_font_scale = a.code_font_scale.get();
     prefs.appearance.code_font = a.code_font_family.get();
 
     let l = &app.vm.layout;

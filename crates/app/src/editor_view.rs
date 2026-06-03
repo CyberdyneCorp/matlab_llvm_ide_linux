@@ -178,7 +178,7 @@ fn draw_gutter(ctx: &cairo::Context, height: i32, view: &TextView, app: &Rc<AppS
     ctx.set_source_rgb(br, bg, bb);
     let _ = ctx.paint();
     ctx.select_font_face("monospace", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
-    ctx.set_font_size(11.0);
+    ctx.set_font_size(11.0 * crate::theme_css::code_scale());
 
     let buffer = view.buffer();
     let tab = app.vm.editor.tabs.with(|tabs| tabs.iter().find(|t| t.id == tab_id).cloned());

@@ -32,6 +32,7 @@ pub struct Appearance {
     /// `Accent` key (`amber` / `blue` / …).
     pub accent: String,
     pub font_scale: f64,
+    pub code_font_scale: f64,
     pub code_font: String,
 }
 
@@ -41,6 +42,7 @@ impl Default for Appearance {
             theme: ThemeId::Midnight.key().to_string(),
             accent: Accent::Amber.key().to_string(),
             font_scale: 1.0,
+            code_font_scale: 1.0,
             code_font: "JetBrains Mono".to_string(),
         }
     }
