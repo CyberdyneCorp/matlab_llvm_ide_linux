@@ -218,13 +218,7 @@ fn build_menu_bar(window: &ApplicationWindow, app: &Rc<AppState>) -> gtk::Popove
     }
     {
         let a = app.clone();
-        register(
-            "run",
-            Rc::new(move || {
-                let settings = a.settings.clone();
-                runner::run(a.vm.clone(), &settings);
-            }),
-        );
+        register("run", Rc::new(move || run_active(&a)));
     }
     {
         let a = app.clone();
@@ -474,10 +468,7 @@ fn build_toolbar(window: &ApplicationWindow, app: &Rc<AppState>) -> GtkBox {
     let run_btn = tool_button(ic::RUN, "Run", Some("mf-run"));
     {
         let app = app.clone();
-        run_btn.connect_clicked(move |_| {
-            let settings = app.settings.clone();
-            runner::run(app.vm.clone(), &settings);
-        });
+        run_btn.connect_clicked(move |_| run_active(&app));
     }
     let debug_btn = tool_button(ic::DEBUG, "Debug", Some("mf-debug"));
     {
@@ -1747,6 +1738,40 @@ thread_local! {
     static FIND_BAR: std::cell::RefCell<Option<(gtk::Revealer, Entry)>> = const { std::cell::RefCell::new(None) };
     /// The right-panel BLOCK INSPECTOR host: `(notebook, page index, body host)`.
     static FLOW_INSPECTOR: std::cell::RefCell<Option<(Notebook, u32, GtkBox)>> = const { std::cell::RefCell::new(None) };
+    /// The flowchart whose tab is currently visible — the Run/Debug target.
+    static ACTIVE_FLOWCHART: std::cell::RefCell<Option<(Rc<FlowchartViewModel>, Option<std::path::PathBuf>)>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Mark `fc` as the visible flowchart (its tab just mapped). Used by Run.
+pub fn set_active_flowchart(fc: &Rc<FlowchartViewModel>, path: Option<std::path::PathBuf>) {
+    ACTIVE_FLOWCHART.with(|a| *a.borrow_mut() = Some((fc.clone(), path)));
+}
+
+/// Clear the active flowchart if it is still `fc` (its tab just unmapped).
+pub fn clear_active_flowchart(fc: &Rc<FlowchartViewModel>) {
+    ACTIVE_FLOWCHART.with(|a| {
+        let mut a = a.borrow_mut();
+        if a.as_ref().is_some_and(|(cur, _)| Rc::ptr_eq(cur, fc)) {
+            *a = None;
+        }
+    });
+}
+
+/// The visible flowchart and its `.mflow` path, if a flowchart tab is showing.
+fn active_flowchart() -> Option<(Rc<FlowchartViewModel>, Option<std::path::PathBuf>)> {
+    ACTIVE_FLOWCHART.with(|a| a.borrow().clone())
+}
+
+/// Run the active editor target: a visible flowchart compiles to MATLAB and runs
+/// the generated `.m`; otherwise the active `.m` tab runs directly.
+fn run_active(app: &Rc<AppState>) {
+    if let Some((fc, path)) = active_flowchart() {
+        if crate::flowchart_view::emit_matlab(app, &fc, path.as_deref()).is_some() {
+            runner::run(app.vm.clone(), &app.settings);
+        }
+    } else {
+        runner::run(app.vm.clone(), &app.settings);
+    }
 }
 
 /// Reveal the in-editor find bar and focus its entry.
