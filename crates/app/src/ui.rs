@@ -167,7 +167,7 @@ fn build_menu_bar(window: &ApplicationWindow, app: &Rc<AppState>) -> gtk::Popove
 
     let a = app.clone();
     let w = window.clone();
-    register("new", Rc::new(move || new_untitled(&a)));
+    register("new", Rc::new(move || new_document_dialog(&a)));
     {
         let a = app.clone();
         let w2 = w.clone();
@@ -452,7 +452,7 @@ fn build_toolbar(window: &ApplicationWindow, app: &Rc<AppState>) -> GtkBox {
     let new_btn = tool_button(ic::NEW, "New", None);
     {
         let app = app.clone();
-        new_btn.connect_clicked(move |_| new_untitled(&app));
+        new_btn.connect_clicked(move |_| new_document_dialog(&app));
     }
     let open_btn = tool_button(ic::OPEN, "Open", None);
     {
@@ -2037,7 +2037,7 @@ fn build_welcome(app: &Rc<AppState>) -> GtkBox {
     new_btn.add_css_class("mf-compile-cta");
     {
         let app = app.clone();
-        new_btn.connect_clicked(move |_| new_untitled(&app));
+        new_btn.connect_clicked(move |_| new_document_dialog(&app));
     }
     let open_btn = Button::with_label("Open Folder…");
     open_btn.add_css_class("mf-compile-cta");
@@ -2174,6 +2174,130 @@ pub fn open_demo_flowchart(app: &Rc<AppState>, signal: bool) {
         }
     });
     app.vm.activity_bar.select(ActivityItem::Flowchart);
+}
+
+/// Open a blank flowchart of `kind` (mFlow / mFlowLink) in a new tab.
+fn new_flowchart(app: &Rc<AppState>, kind: matforge_core::models::flowchart::SchemaKind) {
+    let fc = Rc::new(FlowchartViewModel::empty("untitled", kind));
+    fc.select(None);
+    let view = crate::flowchart_view::build_flowchart_view(app, fc, None);
+    EDITOR_NB.with(|nb| {
+        let nb = nb.borrow();
+        if let Some(nb) = nb.as_ref() {
+            let label = tab_label(&view, "untitled.mflow", app, None);
+            let page = nb.append_page(&view, Some(&label));
+            nb.set_current_page(Some(page));
+        }
+    });
+    app.vm.activity_bar.select(ActivityItem::Flowchart);
+}
+
+/// A document-type chooser shown by the New action: MATLAB script, mFlow
+/// (control-flow), or mFlowLink (signal-flow) — each creates a blank document.
+fn new_document_dialog(app: &Rc<AppState>) {
+    use matforge_core::models::flowchart::SchemaKind;
+
+    let parent = MAIN_WINDOW.with(|w| w.borrow().clone());
+    let mut builder = gtk::Window::builder()
+        .modal(true)
+        .decorated(false)
+        .default_width(340);
+    if let Some(p) = &parent {
+        builder = builder.transient_for(p);
+    }
+    let win = builder.build();
+    win.add_css_class("mf-root");
+
+    let bar = GtkBox::new(Orientation::Vertical, 2);
+    bar.add_css_class("mf-window");
+    bar.add_css_class("mf-palette");
+    bar.set_margin_top(6);
+    bar.set_margin_bottom(8);
+
+    let header = Label::new(Some("New File"));
+    header.add_css_class("mf-panel-header");
+    header.set_xalign(0.0);
+    header.set_margin_start(12);
+    header.set_margin_top(4);
+    header.set_margin_bottom(4);
+    bar.append(&header);
+
+    let script = new_doc_option(ic::FILE, "MATLAB Script", "A blank .m script");
+    let mflow = new_doc_option(ic::FLOWCHART, "mFlow Diagram", "Control-flow flowchart");
+    let mflink = new_doc_option(ic::FLOWCHART, "mFlowLink Model", "Signal-flow model you can simulate");
+    bar.append(&script);
+    bar.append(&mflow);
+    bar.append(&mflink);
+    win.set_child(Some(&bar));
+
+    {
+        let app = app.clone();
+        let win = win.clone();
+        script.connect_clicked(move |_| {
+            win.close();
+            new_untitled(&app);
+        });
+    }
+    {
+        let app = app.clone();
+        let win = win.clone();
+        mflow.connect_clicked(move |_| {
+            win.close();
+            new_flowchart(&app, SchemaKind::ControlFlow);
+        });
+    }
+    {
+        let app = app.clone();
+        let win = win.clone();
+        mflink.connect_clicked(move |_| {
+            win.close();
+            new_flowchart(&app, SchemaKind::SignalFlow);
+        });
+    }
+
+    let keys = gtk::EventControllerKey::new();
+    {
+        let win = win.clone();
+        keys.connect_key_pressed(move |_c, key, _code, _state| {
+            if key == gtk::gdk::Key::Escape {
+                win.close();
+                glib_stop()
+            } else {
+                gtk::glib::Propagation::Proceed
+            }
+        });
+    }
+    win.add_controller(keys);
+    win.present();
+    script.grab_focus();
+}
+
+/// One option row (icon + title + subtitle) for the New File chooser.
+fn new_doc_option(icon: &str, title: &str, subtitle: &str) -> Button {
+    let btn = Button::new();
+    btn.set_has_frame(false);
+    btn.add_css_class("mf-row");
+    btn.add_css_class("mf-newdoc-row");
+
+    let row = GtkBox::new(Orientation::Horizontal, 10);
+    let img = Image::from_icon_name(icon);
+    img.set_pixel_size(22);
+    img.add_css_class("mf-text-secondary");
+    row.append(&img);
+
+    let texts = GtkBox::new(Orientation::Vertical, 0);
+    let t = Label::new(Some(title));
+    t.set_xalign(0.0);
+    t.add_css_class("mf-newdoc-title");
+    let s = Label::new(Some(subtitle));
+    s.set_xalign(0.0);
+    s.add_css_class("mf-text-muted");
+    texts.append(&t);
+    texts.append(&s);
+    row.append(&texts);
+
+    btn.set_child(Some(&row));
+    btn
 }
 
 fn open_flowchart(app: &Rc<AppState>, path: &Path) {
