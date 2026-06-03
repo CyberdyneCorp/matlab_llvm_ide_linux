@@ -21,6 +21,7 @@ mod flow_render;
 mod icons;
 mod flowchart_view;
 mod highlight;
+mod mermaid_render;
 mod mflowlink_window;
 mod palette;
 mod plot_render;

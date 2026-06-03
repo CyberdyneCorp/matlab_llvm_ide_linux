@@ -1,24 +1,38 @@
-//! A small Markdown → Pango-markup renderer for the editor's Markdown preview
-//! pane. It covers the constructs that show up in this project's docs (headings,
-//! emphasis, inline + fenced code, lists, blockquotes, links, rules, and pipe
-//! tables) and produces a Pango markup string a `GtkLabel` can render. It is not
-//! a CommonMark implementation — just enough to make a README read nicely.
+//! A small Markdown renderer for the editor's Markdown preview pane. It parses
+//! the constructs that show up in this project's docs (headings, emphasis,
+//! inline + fenced code, lists, blockquotes, links, rules, pipe tables, and
+//! ```mermaid diagrams) into a block model the GTK side renders widget-by-widget:
+//! prose as Pango-markup labels, code fences as syntax-highlighted cards, and
+//! mermaid fences as Cairo diagrams (see [`crate::services::mermaid`]).
 //!
-//! Pure and tested; the GTK side only feeds it buffer text and shows the result.
+//! It is not a CommonMark implementation — just enough to make a README read
+//! nicely. Pure and tested; the GTK side only feeds it buffer text.
 
-/// Render `src` (Markdown) to a Pango-markup string.
-pub fn to_pango_markup(src: &str) -> String {
-    let mut out = String::new();
+/// One renderable block of a Markdown document.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Block {
+    /// Prose (headings, paragraphs, lists, quotes, rules, tables) already
+    /// rendered to a Pango-markup string for a `GtkLabel`.
+    Markup(String),
+    /// A fenced code block: the info-string language tag (may be empty) and the
+    /// raw, unescaped body — the renderer syntax-highlights it.
+    Code { lang: String, body: String },
+    /// A ```mermaid fenced block: the raw diagram source.
+    Mermaid(String),
+}
+
+/// Parse `src` into a sequence of renderable [`Block`]s.
+pub fn parse(src: &str) -> Vec<Block> {
+    let mut blocks: Vec<Block> = Vec::new();
     let lines: Vec<&str> = src.lines().collect();
     let mut i = 0;
-    let mut first_block = true;
 
     while i < lines.len() {
-        let line = lines[i];
-        let trimmed = line.trim_start();
+        let trimmed = lines[i].trim_start();
 
-        // Fenced code block: ``` ... ``` (language tag, if any, is ignored).
+        // Fenced code block: ``` / ~~~ with an optional info-string language.
         if let Some(fence) = fence_marker(trimmed) {
+            let lang = trimmed[fence.len()..].trim().to_string();
             let mut body = Vec::new();
             i += 1;
             while i < lines.len() && !lines[i].trim_start().starts_with(fence) {
@@ -26,14 +40,16 @@ pub fn to_pango_markup(src: &str) -> String {
                 i += 1;
             }
             i += 1; // consume closing fence (or run off the end)
-            block_gap(&mut out, &mut first_block);
-            out.push_str("<tt>");
-            out.push_str(&escape(&body.join("\n")));
-            out.push_str("</tt>");
+            let body = body.join("\n");
+            if lang.eq_ignore_ascii_case("mermaid") {
+                blocks.push(Block::Mermaid(body));
+            } else {
+                blocks.push(Block::Code { lang, body });
+            }
             continue;
         }
 
-        // Blank line: paragraph separator (handled by block_gap on the next block).
+        // Blank line: nothing to emit (blocks are separated by the renderer).
         if trimmed.is_empty() {
             i += 1;
             continue;
@@ -41,65 +57,59 @@ pub fn to_pango_markup(src: &str) -> String {
 
         // Horizontal rule.
         if is_hr(trimmed) {
-            block_gap(&mut out, &mut first_block);
-            out.push_str("<span foreground=\"#666666\">────────────────────</span>");
+            blocks.push(Block::Markup(
+                "<span foreground=\"#666666\">────────────────────</span>".to_string(),
+            ));
             i += 1;
             continue;
         }
 
         // ATX heading: #..###### .
         if let Some((level, text)) = heading(trimmed) {
-            block_gap(&mut out, &mut first_block);
             let size = match level {
                 1 => "x-large",
                 2 => "large",
-                3 => "medium",
                 _ => "medium",
             };
-            out.push_str(&format!(
+            blocks.push(Block::Markup(format!(
                 "<span size=\"{size}\" weight=\"bold\">{}</span>",
                 inline(text)
-            ));
+            )));
             i += 1;
             continue;
         }
 
         // Blockquote: one or more leading '>' lines.
         if trimmed.starts_with('>') {
-            block_gap(&mut out, &mut first_block);
             let mut quote = Vec::new();
             while i < lines.len() && lines[i].trim_start().starts_with('>') {
                 let q = lines[i].trim_start().trim_start_matches('>').trim_start();
                 quote.push(inline(q));
                 i += 1;
             }
-            out.push_str(&format!(
+            blocks.push(Block::Markup(format!(
                 "<span foreground=\"#888888\"><i>{}</i></span>",
                 quote.join("\n")
-            ));
+            )));
             continue;
         }
 
-        // Pipe table: a run of lines that all contain '|'. The separator row
-        // (---|---) is dropped; the rest are shown monospaced and aligned.
+        // Pipe table: a header row followed by a `---|---` separator.
         if trimmed.contains('|') && next_is_table_sep(&lines, i) {
             let mut rows = Vec::new();
             while i < lines.len() && lines[i].contains('|') && !lines[i].trim().is_empty() {
                 rows.push(lines[i]);
                 i += 1;
             }
-            block_gap(&mut out, &mut first_block);
-            out.push_str(&render_table(&rows));
+            blocks.push(Block::Markup(render_table(&rows)));
             continue;
         }
 
         // List: a run of -, *, +, or "N." items.
         if list_marker(trimmed).is_some() {
-            block_gap(&mut out, &mut first_block);
             let mut items = Vec::new();
             while i < lines.len() {
-                let lt = lines[i].trim_start();
-                match list_marker(lt) {
+                match list_marker(lines[i].trim_start()) {
                     Some((bullet, text)) => {
                         items.push(format!("{bullet}  {}", inline(text)));
                         i += 1;
@@ -107,12 +117,11 @@ pub fn to_pango_markup(src: &str) -> String {
                     None => break,
                 }
             }
-            out.push_str(&items.join("\n"));
+            blocks.push(Block::Markup(items.join("\n")));
             continue;
         }
 
         // Paragraph: gather consecutive non-blank, non-special lines.
-        block_gap(&mut out, &mut first_block);
         let mut para = Vec::new();
         while i < lines.len() {
             let lt = lines[i].trim_start();
@@ -128,19 +137,26 @@ pub fn to_pango_markup(src: &str) -> String {
             para.push(inline(lt));
             i += 1;
         }
-        out.push_str(&para.join(" "));
+        blocks.push(Block::Markup(para.join(" ")));
     }
 
-    out
+    blocks
 }
 
-/// Blank-line block separator (two newlines between blocks; none before the first).
-fn block_gap(out: &mut String, first_block: &mut bool) {
-    if *first_block {
-        *first_block = false;
-    } else {
-        out.push_str("\n\n");
-    }
+/// Render `src` to a single Pango-markup string (blocks joined by blank lines;
+/// code/mermaid fences shown as escaped monospace). Used for tests and as a
+/// simple fallback; the live preview renders [`parse`]'s blocks individually.
+pub fn to_pango_markup(src: &str) -> String {
+    parse(src)
+        .into_iter()
+        .map(|b| match b {
+            Block::Markup(s) => s,
+            Block::Code { body, .. } | Block::Mermaid(body) => {
+                format!("<tt>{}</tt>", escape(&body))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 fn fence_marker(trimmed: &str) -> Option<&'static str> {
@@ -434,5 +450,29 @@ mod tests {
     #[test]
     fn empty_input_is_empty() {
         assert_eq!(to_pango_markup(""), "");
+    }
+
+    #[test]
+    fn parse_splits_code_and_mermaid_fences() {
+        let blocks = parse("# Hi\n\n```rust\nlet x = 1;\n```\n\n```mermaid\ngraph TD\nA-->B\n```\n");
+        assert!(matches!(blocks[0], Block::Markup(_)));
+        match &blocks[1] {
+            Block::Code { lang, body } => {
+                assert_eq!(lang, "rust");
+                assert_eq!(body, "let x = 1;");
+            }
+            other => panic!("expected Code, got {other:?}"),
+        }
+        match &blocks[2] {
+            Block::Mermaid(body) => assert!(body.contains("A-->B")),
+            other => panic!("expected Mermaid, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_keeps_code_body_unescaped() {
+        // The card renderer escapes itself, so the block body stays raw.
+        let blocks = parse("```\na < b\n```");
+        assert_eq!(blocks, vec![Block::Code { lang: String::new(), body: "a < b".to_string() }]);
     }
 }

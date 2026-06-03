@@ -216,12 +216,9 @@ pub fn build_code_view(
 /// Wrap a Markdown editor in a header (Edit · Split · Preview toggle) plus a
 /// `Paned` whose right side is a live Pango-rendered preview of the buffer.
 fn build_markdown_container(buffer: &gtk::TextBuffer, editor: GtkBox) -> GtkBox {
-    let preview = gtk::Label::new(None);
-    preview.set_use_markup(true);
-    preview.set_wrap(true);
-    preview.set_xalign(0.0);
-    preview.set_yalign(0.0);
-    preview.set_selectable(true);
+    // The preview is a column of block widgets (prose labels, code cards,
+    // mermaid diagrams) rebuilt from scratch on every edit.
+    let preview = GtkBox::new(Orientation::Vertical, 10);
     preview.set_margin_top(8);
     preview.set_margin_bottom(8);
     preview.set_margin_start(12);
@@ -238,7 +235,7 @@ fn build_markdown_container(buffer: &gtk::TextBuffer, editor: GtkBox) -> GtkBox 
         move |b: &gtk::TextBuffer| {
             let (s, e) = b.bounds();
             let text = b.text(&s, &e, false);
-            preview.set_markup(&matforge_core::services::markdown::to_pango_markup(&text));
+            render_blocks(&preview, &text);
         }
     };
     render(buffer);
@@ -316,6 +313,136 @@ fn build_markdown_container(buffer: &gtk::TextBuffer, editor: GtkBox) -> GtkBox 
     container.append(&header);
     container.append(&paned);
     container
+}
+
+/// Rebuild `container`'s children from the Markdown blocks in `text`.
+fn render_blocks(container: &GtkBox, text: &str) {
+    while let Some(child) = container.first_child() {
+        container.remove(&child);
+    }
+    use matforge_core::services::markdown::Block;
+    for block in matforge_core::services::markdown::parse(text) {
+        match block {
+            Block::Markup(markup) => {
+                let label = gtk::Label::new(None);
+                label.set_markup(&markup);
+                label.set_use_markup(true);
+                label.set_wrap(true);
+                label.set_xalign(0.0);
+                label.set_selectable(true);
+                container.append(&label);
+            }
+            Block::Code { lang, body } => container.append(&code_card(&lang, &body)),
+            Block::Mermaid(src) => container.append(&mermaid_block(&src)),
+        }
+    }
+}
+
+/// A syntax-highlighted code card with an optional language tag in its header.
+fn code_card(lang: &str, body: &str) -> GtkBox {
+    let card = GtkBox::new(Orientation::Vertical, 0);
+    card.add_css_class("mf-md-code");
+    card.set_hexpand(false);
+    card.set_halign(gtk::Align::Start);
+
+    if !lang.is_empty() {
+        let tag = gtk::Label::new(Some(lang));
+        tag.add_css_class("mf-md-code-lang");
+        tag.set_xalign(0.0);
+        card.append(&tag);
+    }
+
+    let code = gtk::Label::new(None);
+    code.set_markup(&highlight_to_markup(body, lang));
+    code.set_use_markup(true);
+    code.set_xalign(0.0);
+    code.set_selectable(true);
+    code.add_css_class("mf-code");
+    code.set_margin_top(6);
+    code.set_margin_bottom(6);
+    code.set_margin_start(10);
+    code.set_margin_end(10);
+    card.append(&code);
+    card
+}
+
+/// A mermaid `DrawingArea` if the source parses, else a plain code-card fallback.
+fn mermaid_block(src: &str) -> GtkBox {
+    if let Some(graph) = matforge_core::services::mermaid::parse(src) {
+        let scene = matforge_core::services::mermaid::layout(&graph);
+        let area = crate::mermaid_render::drawing_area(scene);
+        let wrap = GtkBox::new(Orientation::Vertical, 0);
+        wrap.add_css_class("mf-md-mermaid-wrap");
+        wrap.set_halign(gtk::Align::Start);
+        wrap.append(&area);
+        wrap
+    } else {
+        // Unsupported diagram type — show the source so nothing is lost.
+        code_card("mermaid", src)
+    }
+}
+
+/// Syntax-highlight `body` (per the fence's `lang`) into a Pango-markup string.
+fn highlight_to_markup(body: &str, lang: &str) -> String {
+    let language = Language::from_label(lang);
+    let chars: Vec<char> = body.chars().collect();
+    if language == Language::Plain {
+        return pango_escape(body);
+    }
+    let tokens = matforge_core::services::highlighter::highlight(body, language);
+    let mut out = String::new();
+    let mut cursor = 0usize;
+    let push_slice = |out: &mut String, slice: &[char]| {
+        out.push_str(&pango_escape(&slice.iter().collect::<String>()));
+    };
+    for span in tokens {
+        let (s, e) = (span.start.min(chars.len()), span.end.min(chars.len()));
+        if s < cursor || s > e {
+            continue;
+        }
+        push_slice(&mut out, &chars[cursor..s]);
+        let color = token_color(span.color);
+        out.push_str(&format!("<span foreground=\"{color}\">"));
+        push_slice(&mut out, &chars[s..e]);
+        out.push_str("</span>");
+        cursor = e;
+    }
+    push_slice(&mut out, &chars[cursor..]);
+    out
+}
+
+/// Map a highlighter `TokenColor` to a theme-aware hex color.
+fn token_color(color: matforge_core::services::highlighter::TokenColor) -> String {
+    use matforge_core::services::highlighter::TokenColor as T;
+    let t = crate::theme_css::current();
+    let rgb = match color {
+        T::Keyword => t.syn_keyword,
+        T::Control => t.syn_control,
+        T::Number => t.syn_number,
+        T::Str => t.syn_string,
+        T::Comment => t.syn_comment,
+        T::Function => t.syn_function,
+        T::Identifier => t.syn_identifier,
+        T::Operator => t.syn_operator,
+        T::SsaGlobal => t.orange,
+        T::SsaLocal => t.blue,
+        T::Plain => t.syn_plain,
+    };
+    rgb.to_css()
+}
+
+/// Escape the Pango/XML-special characters in `s`.
+fn pango_escape(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            '&' => "&amp;".to_string(),
+            '<' => "&lt;".to_string(),
+            '>' => "&gt;".to_string(),
+            '"' => "&quot;".to_string(),
+            '\'' => "&#39;".to_string(),
+            other => other.to_string(),
+        })
+        .collect()
 }
 
 /// Refresh the caret decorations on cursor moves: a subtle current-line
