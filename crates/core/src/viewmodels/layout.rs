@@ -17,6 +17,9 @@ pub struct LayoutViewModel {
     pub workspace_visible: Property<bool>,
     pub plots_visible: Property<bool>,
     pub center_mode: Property<CenterLayoutMode>,
+    /// Distraction-free mode: hide the activity bar, sidebar, and right panels,
+    /// leaving just the editor + console. Overlays the per-panel visibility.
+    pub zen: Property<bool>,
 }
 
 impl Default for LayoutViewModel {
@@ -35,11 +38,31 @@ impl LayoutViewModel {
             workspace_visible: Property::new(true),
             plots_visible: Property::new(true),
             center_mode: Property::new(CenterLayoutMode::Split),
+            zen: Property::new(false),
         }
     }
 
     pub fn toggle_sidebar(&self) {
         self.sidebar_visible.update(|v| *v = !*v);
+    }
+
+    pub fn toggle_zen(&self) {
+        self.zen.update(|v| *v = !*v);
+    }
+
+    /// Whether the activity bar should show (hidden in zen mode).
+    pub fn chrome_visible(&self) -> bool {
+        !self.zen.get()
+    }
+
+    /// Effective sidebar visibility (its flag, suppressed by zen).
+    pub fn sidebar_effective(&self) -> bool {
+        !self.zen.get() && self.sidebar_visible.get()
+    }
+
+    /// Effective right-column visibility (workspace or plots, suppressed by zen).
+    pub fn right_effective(&self) -> bool {
+        !self.zen.get() && (self.workspace_visible.get() || self.plots_visible.get())
     }
 
     pub fn toggle_workspace(&self) {
@@ -89,6 +112,22 @@ mod tests {
         assert!(vm.plots_visible.get());
         assert!(vm.sidebar_visible.get());
         assert_eq!(vm.center_mode.get(), CenterLayoutMode::Split);
+        assert!(!vm.zen.get());
+    }
+
+    #[test]
+    fn zen_overrides_panel_visibility() {
+        let vm = LayoutViewModel::new();
+        assert!(vm.sidebar_effective() && vm.right_effective() && vm.chrome_visible());
+        vm.toggle_zen();
+        assert!(vm.zen.get());
+        // panels suppressed even though their own flags are still true
+        assert!(!vm.sidebar_effective());
+        assert!(!vm.right_effective());
+        assert!(!vm.chrome_visible());
+        assert!(vm.sidebar_visible.get()); // flag untouched
+        vm.toggle_zen();
+        assert!(vm.sidebar_effective() && vm.right_effective());
     }
 
     #[test]

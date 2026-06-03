@@ -34,7 +34,8 @@ pub fn build(window: &ApplicationWindow, app: Rc<AppState>) {
 
     let middle = GtkBox::new(Orientation::Horizontal, 0);
     middle.set_vexpand(true);
-    middle.append(&build_activity_bar(&app));
+    let activity = build_activity_bar(&app);
+    middle.append(&activity);
 
     let sidebar = build_sidebar(&app);
     let center = build_center(&app);
@@ -64,21 +65,32 @@ pub fn build(window: &ApplicationWindow, app: Rc<AppState>) {
     outer.set_position(220);
     middle.append(&outer);
 
-    // The whole right region is visible if either panel is; closing both hands
-    // the space to the editor.
-    {
-        let right = right.clone();
-        let plots_vis = app.vm.layout.plots_visible.clone();
-        app.vm.layout.workspace_visible.bind(move |v| right.set_visible(*v || plots_vis.get()));
-    }
-    {
-        let right = right.clone();
-        let ws_vis = app.vm.layout.workspace_visible.clone();
-        app.vm.layout.plots_visible.bind(move |v| right.set_visible(*v || ws_vis.get()));
-    }
-    {
+    // Panel visibility, zen-aware: the activity bar / sidebar / right region all
+    // follow their own flags unless Focus (zen) mode suppresses them.
+    let update_chrome = {
+        let app = app.clone();
+        let activity = activity.clone();
         let sidebar = sidebar.clone();
-        app.vm.layout.sidebar_visible.bind(move |v| sidebar.set_visible(*v));
+        let right = right.clone();
+        move || {
+            let l = &app.vm.layout;
+            activity.set_visible(l.chrome_visible());
+            sidebar.set_visible(l.sidebar_effective());
+            right.set_visible(l.right_effective());
+        }
+    };
+    update_chrome();
+    for prop in [
+        app.vm.layout.sidebar_visible.clone(),
+        app.vm.layout.workspace_visible.clone(),
+        app.vm.layout.plots_visible.clone(),
+    ] {
+        let f = update_chrome.clone();
+        prop.subscribe(move |_| f());
+    }
+    {
+        let f = update_chrome.clone();
+        app.vm.layout.zen.subscribe(move |_| f());
     }
 
     root.append(&middle);
@@ -166,6 +178,10 @@ fn build_menu_bar(window: &ApplicationWindow, app: &Rc<AppState>) -> gtk::Popove
     }
     {
         let a = app.clone();
+        register("toggle-zen", Rc::new(move || a.vm.layout.toggle_zen()));
+    }
+    {
+        let a = app.clone();
         register("compile", Rc::new(move || runner::compile(&a.vm)));
     }
     {
@@ -239,6 +255,7 @@ fn build_menu_bar(window: &ApplicationWindow, app: &Rc<AppState>) -> gtk::Popove
             ("win.toggle-sidebar", &["<Ctrl>b"]),
             ("win.toggle-workspace", &["<Ctrl><Shift>w"]),
             ("win.toggle-plots", &["<Ctrl><Shift>p"]),
+            ("win.toggle-zen", &["<Ctrl><Shift>f"]),
             ("win.compile", &["<Ctrl><Shift>b"]),
             ("win.run", &["<Ctrl>r"]),
             ("win.stop", &["<Shift>F5"]),
@@ -293,6 +310,7 @@ fn build_menu_bar(window: &ApplicationWindow, app: &Rc<AppState>) -> gtk::Popove
     panels.append(Some("Toggle Sidebar"), Some("win.toggle-sidebar"));
     panels.append(Some("Toggle Workspace"), Some("win.toggle-workspace"));
     panels.append(Some("Toggle Plots"), Some("win.toggle-plots"));
+    panels.append(Some("Focus Mode"), Some("win.toggle-zen"));
     view.append_section(None, &panels);
     menubar.append_submenu(Some("View"), &view);
 

@@ -156,6 +156,9 @@ fn build_main_window(app: &Application) {
     if let Ok(accent) = std::env::var("MATFORGE_ACCENT") {
         app.vm.appearance.set_accent(matforge_core::theme::Accent::from_key(&accent));
     }
+    if std::env::var("MATFORGE_ZEN").is_ok() {
+        app.vm.layout.zen.set(true);
+    }
 
     // Session restore: reopen the last folder + tabs when nothing was opened via
     // env (so explicit MATFORGE_OPEN/FILE always win).
