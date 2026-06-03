@@ -106,6 +106,20 @@ impl EditorViewModel {
         self.mutate(id, |t| t.is_dirty = false);
     }
 
+    /// Point `id` at `path` (Save As): updates url + name + language and marks
+    /// the tab saved. The caller writes the file to disk.
+    pub fn save_as(&self, id: u64, path: &Path) {
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        let language = language_label(ext).to_string();
+        self.mutate(id, |t| {
+            t.url = Some(path.to_path_buf());
+            t.name = name.clone();
+            t.language = language.clone();
+            t.is_dirty = false;
+        });
+    }
+
     pub fn toggle_breakpoint(&self, id: u64, line: usize) {
         self.mutate(id, |t| {
             t.toggle_breakpoint(line);
@@ -203,6 +217,20 @@ mod tests {
         vm.update_contents(id, "x = 1;");
         assert!(vm.has_dirty());
         vm.mark_saved(id);
+        assert!(!vm.has_dirty());
+    }
+
+    #[test]
+    fn save_as_repoints_url_name_and_language() {
+        let vm = EditorViewModel::new();
+        let id = vm.open_text("untitled.m", "Matlab", "x = 1;");
+        vm.update_contents(id, "x = 2;");
+        assert!(vm.has_dirty());
+        vm.save_as(id, Path::new("/proj/model.py"));
+        let tab = vm.active_tab().unwrap();
+        assert_eq!(tab.url.as_deref(), Some(Path::new("/proj/model.py")));
+        assert_eq!(tab.name, "model.py");
+        assert_eq!(tab.language, "Python");
         assert!(!vm.has_dirty());
     }
 

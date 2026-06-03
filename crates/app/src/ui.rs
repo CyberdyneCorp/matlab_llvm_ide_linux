@@ -25,6 +25,7 @@ use crate::runner;
 
 /// Build the full window content and attach it to `window`.
 pub fn build(window: &ApplicationWindow, app: Rc<AppState>) {
+    MAIN_WINDOW.with(|w| *w.borrow_mut() = Some(window.clone()));
     let root = GtkBox::new(Orientation::Vertical, 0);
     root.add_css_class("mf-window");
 
@@ -1283,6 +1284,7 @@ fn panel_entry(placeholder: &str) -> Entry {
 thread_local! {
     static EDITOR_NB: std::cell::RefCell<Option<Notebook>> = const { std::cell::RefCell::new(None) };
     static SEARCH_ENTRY: std::cell::RefCell<Option<Entry>> = const { std::cell::RefCell::new(None) };
+    static MAIN_WINDOW: std::cell::RefCell<Option<ApplicationWindow>> = const { std::cell::RefCell::new(None) };
 }
 
 /// Focus the find-in-files entry (used by the `Ctrl+F` action).
@@ -1432,17 +1434,68 @@ fn open_flowchart(app: &Rc<AppState>, path: &Path) {
 
 fn save_active(app: &Rc<AppState>) {
     let Some(tab) = app.vm.editor.active_tab() else { return };
-    let Some(url) = tab.url else {
-        app.vm.status_bar.set_message("Save As is not wired yet");
-        return;
-    };
-    match std::fs::write(&url, &tab.contents) {
+    match tab.url {
+        Some(url) => write_tab(app, tab.id, &url, &tab.contents),
+        None => save_as_dialog(app, tab.id, &tab.name, &tab.contents),
+    }
+}
+
+/// Prompt for a destination, then write + repoint the tab (Save As).
+fn save_as_dialog(app: &Rc<AppState>, id: u64, suggested: &str, contents: &str) {
+    let dialog = gtk::FileDialog::builder()
+        .title("Save As")
+        .initial_name(suggested)
+        .build();
+    let parent = MAIN_WINDOW.with(|w| w.borrow().clone());
+    let app = app.clone();
+    let contents = contents.to_string();
+    dialog.save(parent.as_ref(), gio::Cancellable::NONE, move |result| {
+        if let Ok(file) = result {
+            if let Some(path) = file.path() {
+                if std::fs::write(&path, &contents).is_ok() {
+                    app.vm.editor.save_as(id, &path);
+                    rename_tab_label(id, &path);
+                    app.vm.status_bar.set_message(format!("Saved {}", path.display()));
+                } else {
+                    app.vm.console.log(ConsoleLevel::Error, format!("save failed: {}", path.display()));
+                }
+            }
+        }
+    });
+}
+
+fn write_tab(app: &Rc<AppState>, id: u64, url: &Path, contents: &str) {
+    match std::fs::write(url, contents) {
         Ok(()) => {
-            app.vm.editor.mark_saved(tab.id);
+            app.vm.editor.mark_saved(id);
             app.vm.status_bar.set_message(format!("Saved {}", url.display()));
         }
         Err(e) => app.vm.console.log(ConsoleLevel::Error, format!("save failed: {e}")),
     }
+}
+
+/// Update the visible notebook tab label after a Save As (icon + name).
+fn rename_tab_label(id: u64, path: &Path) {
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    EDITOR_NB.with(|nb| {
+        let nb = nb.borrow();
+        let Some(nb) = nb.as_ref() else { return };
+        let Some(p) = nb.current_page() else { return };
+        let Some(page) = nb.nth_page(Some(p)) else { return };
+        let Some(label_box) = nb.tab_label(&page).and_then(|w| w.downcast::<GtkBox>().ok()) else {
+            return;
+        };
+        let mut child = label_box.first_child();
+        while let Some(w) = child {
+            if let Some(img) = w.downcast_ref::<Image>() {
+                img.set_icon_name(Some(tab_icon(&name)));
+            } else if let Some(lbl) = w.downcast_ref::<Label>() {
+                lbl.set_text(&name);
+            }
+            child = w.next_sibling();
+        }
+    });
+    let _ = id;
 }
 
 // ---- Console + live REPL ---------------------------------------------------
