@@ -49,8 +49,10 @@ pub fn run(vm: Rc<MainViewModel>, settings: &Settings) {
         return fail(&vm, "could not write LLVM IR");
     }
 
-    // 2. clang++ … -o stem
-    let (clang, args) = plan.link_command(&settings.runtime_archive);
+    // 2. clang++ … -o stem. The runtime's VideoWriter pulls in FFmpeg, so add
+    //    its link flags (matching how the runtime was built) — otherwise any
+    //    program using VideoWriter fails with undefined av*/sws* references.
+    let (clang, args) = plan.link_command(&settings.runtime_archive, &ffmpeg_link_flags());
     match Command::new(&clang).args(&args).output() {
         Ok(o) if o.status.success() => {}
         Ok(o) => return fail(&vm, &String::from_utf8_lossy(&o.stderr)),
@@ -83,6 +85,31 @@ fn fail(vm: &MainViewModel, message: &str) {
         vm.console.log(ConsoleLevel::Error, line.to_string());
     }
     vm.status_bar.set_message("Run failed");
+}
+
+/// FFmpeg link flags for the runtime's `VideoWriter`, discovered the same way the
+/// runtime's CMake does (`pkg-config --libs libav{format,codec,util}+swscale`).
+/// Wrapped in `--as-needed` so programs that don't use VideoWriter don't pick up
+/// the dependency. Returns empty if FFmpeg dev libs aren't found, so non-video
+/// programs still link (video ones then report the missing libs at link time).
+fn ffmpeg_link_flags() -> Vec<String> {
+    let out = Command::new("pkg-config")
+        .args(["--libs", "libavformat", "libavcodec", "libavutil", "libswscale"])
+        .output();
+    match out {
+        Ok(o) if o.status.success() => {
+            let libs = String::from_utf8_lossy(&o.stdout);
+            let tokens: Vec<String> = libs.split_whitespace().map(String::from).collect();
+            if tokens.is_empty() {
+                return Vec::new();
+            }
+            let mut flags = vec!["-Wl,--as-needed".to_string()];
+            flags.extend(tokens);
+            flags.push("-Wl,--no-as-needed".to_string());
+            flags
+        }
+        _ => Vec::new(),
+    }
 }
 
 /// True if the configured `matlabc` binary exists.
