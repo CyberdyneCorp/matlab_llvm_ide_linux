@@ -1867,6 +1867,7 @@ fn build_workspace(app: &Rc<AppState>) -> GtkBox {
     insp.set_size_request(-1, 180);
     insp.append_page(&build_variable_inspector(app), Some(&Label::new(Some("VARIABLE INSPECTOR"))));
     insp.append_page(&build_matrix_viewer(app), Some(&Label::new(Some("MATRIX VIEWER"))));
+    insp.append_page(&build_table_viewer(app), Some(&Label::new(Some("TABLE VIEWER"))));
     panel.append(&insp);
 
     // When a value is captured, jump to the Matrix Viewer so it's visible.
@@ -2024,6 +2025,85 @@ fn build_matrix_viewer(app: &Rc<AppState>) -> GtkBox {
     }
     v.append(&canvas);
     v
+}
+
+/// Spreadsheet view of the inspected matrix: row/column headers + numeric cells
+/// in a scrollable grid. Rebuilds when a new value is captured.
+fn build_table_viewer(app: &Rc<AppState>) -> GtkBox {
+    let v = GtkBox::new(Orientation::Vertical, 0);
+    let scroll = ScrolledWindow::new();
+    scroll.set_vexpand(true);
+    scroll.set_hexpand(true);
+    let grid = gtk::Grid::new();
+    grid.add_css_class("mf-table");
+    grid.set_row_spacing(0);
+    grid.set_column_spacing(0);
+    scroll.set_child(Some(&grid));
+    v.append(&scroll);
+
+    let rebuild = {
+        let app = app.clone();
+        let grid = grid.clone();
+        move |_: &Option<matforge_core::models::MatrixView>| {
+            while let Some(child) = grid.first_child() {
+                grid.remove(&child);
+            }
+            let Some(m) = app.vm.workspace.inspected_matrix.get() else {
+                let empty = Label::new(Some("Select a variable to view its cells"));
+                empty.add_css_class("mf-text-muted");
+                empty.set_margin_top(12);
+                empty.set_margin_start(10);
+                grid.attach(&empty, 0, 0, 1, 1);
+                return;
+            };
+            // Cap the rendered grid so huge matrices stay responsive.
+            let max_r = m.rows.min(200);
+            let max_c = m.cols.min(60);
+            let corner = table_cell("", true);
+            grid.attach(&corner, 0, 0, 1, 1);
+            for c in 0..max_c {
+                grid.attach(&table_cell(&format!("{}", c + 1), true), c as i32 + 1, 0, 1, 1);
+            }
+            for r in 0..max_r {
+                grid.attach(&table_cell(&format!("{}", r + 1), true), 0, r as i32 + 1, 1, 1);
+                for c in 0..max_c {
+                    let val = m.cells.get(r).and_then(|row| row.get(c)).copied().unwrap_or(0.0);
+                    grid.attach(&table_cell(&fmt_cell(val), false), c as i32 + 1, r as i32 + 1, 1, 1);
+                }
+            }
+            if m.rows > max_r || m.cols > max_c {
+                let note = Label::new(Some(&format!(
+                    "showing {max_r}×{max_c} of {}×{}",
+                    m.rows, m.cols
+                )));
+                note.add_css_class("mf-text-muted");
+                grid.attach(&note, 0, max_r as i32 + 1, (max_c + 1) as i32, 1);
+            }
+        }
+    };
+    rebuild(&None);
+    app.vm.workspace.inspected_matrix.subscribe(rebuild);
+    v
+}
+
+fn table_cell(text: &str, header: bool) -> Label {
+    let l = Label::new(Some(text));
+    l.add_css_class(if header { "mf-table-head" } else { "mf-table-cell" });
+    l.set_xalign(if header { 0.5 } else { 1.0 });
+    l.set_width_chars(if header { 4 } else { 9 });
+    l
+}
+
+/// Compact numeric formatting: integers without a decimal, else 4 sig digits.
+fn fmt_cell(v: f64) -> String {
+    if !v.is_finite() {
+        return "NaN".into();
+    }
+    if v == v.trunc() && v.abs() < 1e9 {
+        format!("{}", v as i64)
+    } else {
+        format!("{v:.4}")
+    }
 }
 
 fn build_plots(app: &Rc<AppState>) -> GtkBox {
