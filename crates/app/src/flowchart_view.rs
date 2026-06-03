@@ -336,14 +336,35 @@ pub fn build_flowchart_view(
     overlay.set_hexpand(true);
     overlay.set_vexpand(true);
     overlay.set_child(Some(&canvas));
+
+    // Floating canvas controls: Organize (auto-layout) + Fit, top-right corner.
+    let corner = GtkBox::new(Orientation::Horizontal, 6);
+    corner.set_halign(gtk::Align::End);
+    corner.set_valign(gtk::Align::Start);
+    corner.set_margin_top(8);
+    corner.set_margin_end(8);
+
+    // Signal-flow lays out left→right (Simulink-style); the rest top→down.
+    let horizontal =
+        fc.document.with(|d| d.schema_kind()) == matforge_core::models::flowchart::SchemaKind::SignalFlow;
+    let organize = Button::with_label("Organize");
+    organize.add_css_class("mf-tool");
+    organize.add_css_class("mf-flow-fit");
+    organize.set_tooltip_text(Some("Auto-arrange the diagram into clean layers"));
+    {
+        let fc = fc.clone();
+        let canvas = canvas.clone();
+        organize.connect_clicked(move |_| {
+            fc.auto_layout(horizontal);
+            fit_view(&fc, canvas.width() as f64, canvas.height() as f64);
+        });
+    }
+    corner.append(&organize);
+
     let fit = Button::with_label("Fit");
     fit.add_css_class("mf-tool");
     fit.add_css_class("mf-flow-fit");
     fit.set_tooltip_text(Some("Zoom to fit the whole chart"));
-    fit.set_halign(gtk::Align::End);
-    fit.set_valign(gtk::Align::Start);
-    fit.set_margin_top(8);
-    fit.set_margin_end(8);
     {
         let fc = fc.clone();
         let canvas = canvas.clone();
@@ -351,7 +372,8 @@ pub fn build_flowchart_view(
             fit_view(&fc, canvas.width() as f64, canvas.height() as f64);
         });
     }
-    overlay.add_overlay(&fit);
+    corner.append(&fit);
+    overlay.add_overlay(&corner);
 
     // A slim toolbar (Save / Compile / Simulate / undo·redo·delete + a Blocks
     // toggle) sits above the palette+canvas row, so the palette is just the
