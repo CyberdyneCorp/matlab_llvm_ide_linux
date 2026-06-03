@@ -334,8 +334,53 @@ fn render_blocks(container: &GtkBox, text: &str) {
             }
             Block::Code { lang, body } => container.append(&code_card(&lang, &body)),
             Block::Mermaid(src) => container.append(&mermaid_block(&src)),
+            Block::Table { header, rows } => container.append(&table_grid(&header, &rows)),
         }
     }
+}
+
+/// Render a Markdown table as a real `GtkGrid` — proper columns, per-cell inline
+/// formatting, and wrapping cells (so long prose columns no longer break a
+/// monospace block's alignment).
+fn table_grid(header: &[String], rows: &[Vec<String>]) -> GtkBox {
+    let grid = gtk::Grid::new();
+    grid.add_css_class("mf-md-table");
+    grid.set_column_homogeneous(false);
+
+    let cols = header.len().max(rows.iter().map(Vec::len).max().unwrap_or(0));
+    let cell = |text: &str, is_header: bool| -> gtk::Label {
+        let label = gtk::Label::new(None);
+        label.set_markup(&matforge_core::services::markdown::inline_markup(text));
+        label.set_use_markup(true);
+        label.set_wrap(true);
+        label.set_max_width_chars(48);
+        label.set_xalign(0.0);
+        label.set_yalign(0.0);
+        label.set_selectable(true);
+        label.set_hexpand(true);
+        label.add_css_class("mf-md-cell");
+        if is_header {
+            label.add_css_class("mf-md-th");
+        }
+        label
+    };
+
+    for c in 0..cols {
+        let text = header.get(c).map(String::as_str).unwrap_or("");
+        grid.attach(&cell(text, true), c as i32, 0, 1, 1);
+    }
+    for (r, row) in rows.iter().enumerate() {
+        for c in 0..cols {
+            let text = row.get(c).map(String::as_str).unwrap_or("");
+            grid.attach(&cell(text, false), c as i32, r as i32 + 1, 1, 1);
+        }
+    }
+
+    // Wrap so the grid hugs its content rather than stretching full width.
+    let wrap = GtkBox::new(Orientation::Vertical, 0);
+    wrap.set_halign(gtk::Align::Start);
+    wrap.append(&grid);
+    wrap
 }
 
 /// A syntax-highlighted code card with an optional language tag in its header.
@@ -375,6 +420,9 @@ fn mermaid_block(src: &str) -> GtkBox {
         }
         Some(Diagram::Sequence(seq)) => {
             Some(crate::mermaid_render::drawing_area_seq(mermaid::layout_sequence(&seq)))
+        }
+        Some(Diagram::Class(cd)) => {
+            Some(crate::mermaid_render::drawing_area_class(mermaid::layout_class(&cd)))
         }
         None => None,
     };
