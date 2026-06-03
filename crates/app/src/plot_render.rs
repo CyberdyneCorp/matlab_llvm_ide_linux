@@ -122,21 +122,38 @@ pub fn draw_thumbnail(ctx: &cairo::Context, w: f64, h: f64, figure: &PlotFigure)
 }
 
 fn draw_axes(ctx: &cairo::Context, w: f64, h: f64, x_min: f64, x_max: f64, y_min: f64, y_max: f64) {
-    set_color(ctx, crate::theme_css::current().border);
+    let t = crate::theme_css::current();
+    let plot_h = h - 2.0 * MARGIN;
+    const DIV: usize = 4;
+
+    // Faint horizontal gridlines + y tick labels at each division.
+    let (gr, gg, gb) = t.border.to_unit();
+    ctx.select_font_face("monospace", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+    ctx.set_font_size(9.0);
+    for i in 0..=DIV {
+        let frac = i as f64 / DIV as f64;
+        let py = MARGIN + (1.0 - frac) * plot_h;
+        ctx.set_source_rgba(gr, gg, gb, 0.4);
+        ctx.set_line_width(0.5);
+        ctx.move_to(MARGIN, py);
+        ctx.line_to(w - MARGIN, py);
+        ctx.stroke().ok();
+        let val = y_min + (y_max - y_min) * frac;
+        set_color(ctx, t.text_muted);
+        ctx.move_to(3.0, py + 3.0);
+        ctx.show_text(&format!("{val:.2}")).ok();
+    }
+
+    // Axis frame (solid L).
+    set_color(ctx, t.border);
     ctx.set_line_width(1.0);
     ctx.move_to(MARGIN, MARGIN);
     ctx.line_to(MARGIN, h - MARGIN);
     ctx.line_to(w - MARGIN, h - MARGIN);
     ctx.stroke().ok();
-    set_color(ctx, crate::theme_css::current().text_muted);
-    ctx.select_font_face("monospace", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
-    ctx.set_font_size(10.0);
-    // y range (left edge).
-    ctx.move_to(4.0, MARGIN + 4.0);
-    ctx.show_text(&format!("{y_max:.2}")).ok();
-    ctx.move_to(4.0, h - MARGIN);
-    ctx.show_text(&format!("{y_min:.2}")).ok();
+
     // x range (bottom corners).
+    set_color(ctx, t.text_muted);
     ctx.move_to(MARGIN, h - MARGIN + 12.0);
     ctx.show_text(&format!("{x_min:.2}")).ok();
     let x_hi = format!("{x_max:.2}");
