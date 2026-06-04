@@ -52,6 +52,8 @@ pub struct PlotFigure {
     pub xs: Vec<f64>,
     pub ys: Vec<f64>,
     pub ys2: Vec<f64>,
+    /// Height grid for `Surface3D` figures (`zs[row][col]`); empty otherwise.
+    pub zs: Vec<Vec<f64>>,
     pub source_variable: Option<String>,
     pub png_data: Option<Vec<u8>>,
     /// Runtime-side figure id (`id=N` on the BEGIN sentinel) for dedupe.
@@ -68,10 +70,18 @@ impl PlotFigure {
             xs,
             ys,
             ys2: Vec::new(),
+            zs: Vec::new(),
             source_variable: None,
             png_data: None,
             runtime_id: None,
         }
+    }
+
+    /// Build a 3-D surface figure from a height grid (`grid[row][col]`).
+    pub fn surface(index: i32, title: impl Into<String>, grid: Vec<Vec<f64>>) -> PlotFigure {
+        let mut f = PlotFigure::series(index, title, PlotKind::Surface3D, Vec::new(), Vec::new());
+        f.zs = grid;
+        f
     }
 
     pub fn with_source(mut self, name: impl Into<String>) -> PlotFigure {
@@ -83,10 +93,21 @@ impl PlotFigure {
         self.png_data.is_some()
     }
 
-    /// True when the figure has series data the viewer can zoom / pan / probe
-    /// (i.e. not a runtime bitmap or an unsupported 3-D surface).
+    /// True when the figure carries data the viewer can manipulate (2-D zoom/pan
+    /// or 3-D orbit) — i.e. not a runtime bitmap.
     pub fn is_interactive(&self) -> bool {
-        !self.ys.is_empty() && self.png_data.is_none() && self.kind != PlotKind::Surface3D
+        if self.png_data.is_some() {
+            return false;
+        }
+        match self.kind {
+            PlotKind::Surface3D => !self.zs.is_empty(),
+            _ => !self.ys.is_empty(),
+        }
+    }
+
+    /// True for an orbitable 3-D surface (height grid present, not a bitmap).
+    pub fn is_surface(&self) -> bool {
+        self.kind == PlotKind::Surface3D && !self.zs.is_empty() && self.png_data.is_none()
     }
 
     /// The x-axis samples (explicit `xs`, or `0,1,2,…` when only `ys` is set).
@@ -98,9 +119,9 @@ impl PlotFigure {
         }
     }
 
-    /// The auto-fit data window, or `None` for non-interactive figures.
+    /// The auto-fit data window, or `None` for non-interactive / 3-D figures.
     pub fn auto_view(&self) -> Option<PlotView> {
-        if !self.is_interactive() {
+        if self.kind == PlotKind::Surface3D || !self.is_interactive() {
             return None;
         }
         let (x_min, x_max) = finite_range(&self.x_samples());
@@ -163,6 +184,55 @@ impl PlotView {
     }
     pub fn y_span(&self) -> f64 {
         self.y_max - self.y_min
+    }
+}
+
+/// Orbit camera for a 3-D surface: `azimuth` spins about the vertical axis,
+/// `elevation` tilts, `zoom` scales. Drag orbits, scroll zooms.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SurfaceCamera {
+    pub azimuth: f64,
+    pub elevation: f64,
+    pub zoom: f64,
+}
+
+impl Default for SurfaceCamera {
+    fn default() -> Self {
+        // A 3/4 view that reads clearly as 3-D.
+        SurfaceCamera { azimuth: 0.7, elevation: 0.5, zoom: 1.0 }
+    }
+}
+
+impl SurfaceCamera {
+    /// Rotate by a screen-drag delta (radians), clamping elevation to keep the
+    /// surface from flipping past top/bottom.
+    pub fn orbit_by(&self, d_az: f64, d_el: f64) -> SurfaceCamera {
+        SurfaceCamera {
+            azimuth: self.azimuth + d_az,
+            elevation: (self.elevation + d_el).clamp(-1.5, 1.5),
+            zoom: self.zoom,
+        }
+    }
+
+    /// Scale the view, clamped to a sane range.
+    pub fn zoom_by(&self, factor: f64) -> SurfaceCamera {
+        SurfaceCamera { zoom: (self.zoom * factor).clamp(0.25, 6.0), ..*self }
+    }
+
+    /// Orthographically project a point in the unit cube (`x`,`y` base plane,
+    /// `z` height, each roughly in `[-0.5, 0.5]`) to screen `(sx, sy)` plus a
+    /// `depth` key (larger = farther) for painter's-order sorting.
+    pub fn project(&self, x: f64, y: f64, z: f64) -> (f64, f64, f64) {
+        let (sa, ca) = self.azimuth.sin_cos();
+        // Spin about the vertical (height) axis.
+        let rx = x * ca - y * sa;
+        let ry = x * sa + y * ca;
+        // Tilt about the screen-horizontal axis: height stays vertical at
+        // elevation 0, becomes depth as elevation → π/2 (top-down).
+        let (se, ce) = self.elevation.sin_cos();
+        let sy = ry * se + z * ce;
+        let depth = ry * ce - z * se;
+        (rx * self.zoom, sy * self.zoom, depth)
     }
 }
 
@@ -239,6 +309,39 @@ mod tests {
     fn bar_view_includes_zero_baseline() {
         let f = PlotFigure::series(1, "B", PlotKind::Bar, vec![0.0, 1.0], vec![4.0, 7.0]);
         assert_eq!(f.auto_view().unwrap().y_min, 0.0);
+    }
+
+    #[test]
+    fn surface_is_interactive_and_orbits() {
+        let grid = vec![vec![0.0, 1.0, 0.0], vec![1.0, 2.0, 1.0], vec![0.0, 1.0, 0.0]];
+        let f = PlotFigure::surface(1, "peak", grid);
+        assert_eq!(f.kind, PlotKind::Surface3D);
+        assert!(f.is_interactive() && f.is_surface());
+        // 3-D figures have no 2-D auto-fit window.
+        assert!(f.auto_view().is_none());
+        // An empty-grid surface is inert.
+        assert!(!PlotFigure::surface(2, "empty", vec![]).is_interactive());
+
+        // Orbit clamps elevation; zoom clamps to its range.
+        let c = SurfaceCamera::default();
+        let o = c.orbit_by(1.0, 5.0);
+        assert!((o.azimuth - 1.7).abs() < 1e-9);
+        assert_eq!(o.elevation, 1.5); // clamped
+        assert_eq!(c.zoom_by(100.0).zoom, 6.0); // clamped
+        assert_eq!(c.zoom_by(0.0001).zoom, 0.25);
+    }
+
+    #[test]
+    fn surface_projection_separates_depth() {
+        // Looking from a 3/4 angle, two points at different base-plane y must
+        // land at different depths, and a taller z must sit higher on screen.
+        let cam = SurfaceCamera::default();
+        let (_, _, dn) = cam.project(0.0, -0.5, 0.0); // near edge
+        let (_, _, df) = cam.project(0.0, 0.5, 0.0); // far edge
+        assert!(df > dn, "far row should have greater depth ({df} vs {dn})");
+        let (_, y_low, _) = cam.project(0.0, 0.0, -0.5);
+        let (_, y_high, _) = cam.project(0.0, 0.0, 0.5);
+        assert!(y_high > y_low, "taller z should be higher on screen");
     }
 
     #[test]

@@ -228,12 +228,21 @@ impl MainViewModel {
             return;
         }
         if let Some(m) = self.workspace.inspected_matrix.get() {
-            let ys: Vec<f64> = m.cells.iter().flatten().copied().collect();
-            if !ys.is_empty() {
-                let xs: Vec<f64> = (0..ys.len()).map(|i| i as f64).collect();
-                let index = self.plots.figures.with(|f| f.len() as i32) + 1;
-                let fig = PlotFigure::series(index, pname.clone(), kind, xs, ys).with_source(pname);
-                self.plots.add(fig);
+            let index = self.plots.figures.with(|f| f.len() as i32) + 1;
+            if kind == PlotKind::Surface3D {
+                // A 2-D matrix is a height field — keep the grid for the 3-D viewer.
+                if m.rows >= 2 && m.cols >= 2 {
+                    let fig = PlotFigure::surface(index, pname.clone(), m.cells.clone())
+                        .with_source(pname);
+                    self.plots.add(fig);
+                }
+            } else {
+                let ys: Vec<f64> = m.cells.iter().flatten().copied().collect();
+                if !ys.is_empty() {
+                    let xs: Vec<f64> = (0..ys.len()).map(|i| i as f64).collect();
+                    let fig = PlotFigure::series(index, pname.clone(), kind, xs, ys).with_source(pname);
+                    self.plots.add(fig);
+                }
             }
         }
         self.pending_plot.set(None);

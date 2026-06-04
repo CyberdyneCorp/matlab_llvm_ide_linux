@@ -3148,6 +3148,7 @@ fn attach_var_menu(btn: &Button, app: &Rc<AppState>, name: &str) {
         ("Plot Scatter", PlotKind::Scatter),
         ("Plot Bar", PlotKind::Bar),
         ("Plot Area", PlotKind::Spectrum),
+        ("Plot Surface (3D)", PlotKind::Surface3D),
     ] {
         let b = Button::with_label(label);
         b.set_has_frame(false);
@@ -3410,6 +3411,8 @@ fn build_plots(app: &Rc<AppState>) -> GtkBox {
     // cursor pixel for the crosshair readout.
     let view: Rc<Cell<Option<(u64, matforge_core::models::PlotView)>>> = Rc::new(Cell::new(None));
     let hover: Rc<Cell<Option<(f64, f64)>>> = Rc::new(Cell::new(None));
+    // Orbit camera for 3-D surface figures, tagged with its figure id.
+    let cam: Rc<Cell<Option<(u64, matforge_core::models::SurfaceCamera)>>> = Rc::new(Cell::new(None));
 
     // The figure currently drawn (selected, else most recent), if any.
     let current_fig = {
@@ -3431,12 +3434,25 @@ fn build_plots(app: &Rc<AppState>) -> GtkBox {
             }
         }
     };
+    // The effective camera for `fig`: the stored one if it's for this figure,
+    // else the default 3/4 view.
+    let eff_cam = {
+        let cam = cam.clone();
+        move |fig: &matforge_core::models::PlotFigure| match cam.get() {
+            Some((id, c)) if id == fig.id => c,
+            _ => matforge_core::models::SurfaceCamera::default(),
+        }
+    };
 
     {
         let current_fig = current_fig.clone();
         let eff_view = eff_view.clone();
+        let eff_cam = eff_cam.clone();
         let hover = hover.clone();
         canvas.set_draw_func(move |_a, ctx, w, h| match current_fig() {
+            Some(figure) if figure.is_surface() => {
+                crate::plot_render::draw_surface(ctx, w as f64, h as f64, &figure, eff_cam(&figure));
+            }
             Some(figure) => {
                 let v = eff_view(&figure);
                 let hov = if figure.is_interactive() { hover.get() } else { None };
@@ -3447,12 +3463,14 @@ fn build_plots(app: &Rc<AppState>) -> GtkBox {
     }
     panel.append(&canvas);
 
-    // Switching figures resets the zoom/pan window.
+    // Switching figures resets the zoom/pan window and the orbit camera.
     {
         let view = view.clone();
+        let cam = cam.clone();
         let canvas = canvas.clone();
         app.vm.plots.selected_id.subscribe(move |_| {
             view.set(None);
+            cam.set(None);
             canvas.queue_draw();
         });
     }
@@ -3480,11 +3498,20 @@ fn build_plots(app: &Rc<AppState>) -> GtkBox {
         let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
         let current_fig = current_fig.clone();
         let eff_view = eff_view.clone();
+        let eff_cam = eff_cam.clone();
         let view = view.clone();
+        let cam = cam.clone();
         let hover = hover.clone();
         let canvas2 = canvas.clone();
         scroll.connect_scroll(move |_c, _dx, dy| {
             let Some(fig) = current_fig() else { return gtk::glib::Propagation::Proceed };
+            // 3-D surface: scroll scales the orbit camera.
+            if fig.is_surface() {
+                let factor = if dy < 0.0 { 1.1 } else { 1.0 / 1.1 };
+                cam.set(Some((fig.id, eff_cam(&fig).zoom_by(factor))));
+                canvas2.queue_draw();
+                return gtk::glib::Propagation::Stop;
+            }
             let Some(v) = eff_view(&fig) else { return gtk::glib::Propagation::Proceed };
             let (w, h) = (canvas2.width() as f64, canvas2.height() as f64);
             let (cx, cy) = hover.get().unwrap_or((w / 2.0, h / 2.0));
@@ -3497,25 +3524,46 @@ fn build_plots(app: &Rc<AppState>) -> GtkBox {
         canvas.add_controller(scroll);
     }
 
-    // Left-drag → pan (the data under the cursor follows it).
+    // Left-drag → pan a 2-D plot, or orbit a 3-D surface.
     {
         let drag = gtk::GestureDrag::new();
         drag.set_button(gtk::gdk::BUTTON_PRIMARY);
-        let start: Rc<Cell<Option<(u64, matforge_core::models::PlotView)>>> = Rc::new(Cell::new(None));
+        let start_view: Rc<Cell<Option<(u64, matforge_core::models::PlotView)>>> = Rc::new(Cell::new(None));
+        let start_cam: Rc<Cell<Option<(u64, matforge_core::models::SurfaceCamera)>>> = Rc::new(Cell::new(None));
         {
             let current_fig = current_fig.clone();
             let eff_view = eff_view.clone();
-            let start = start.clone();
+            let eff_cam = eff_cam.clone();
+            let start_view = start_view.clone();
+            let start_cam = start_cam.clone();
             drag.connect_drag_begin(move |_g, _x, _y| {
-                start.set(current_fig().and_then(|f| eff_view(&f).map(|v| (f.id, v))));
+                let fig = current_fig();
+                match &fig {
+                    Some(f) if f.is_surface() => {
+                        start_cam.set(Some((f.id, eff_cam(f))));
+                        start_view.set(None);
+                    }
+                    _ => {
+                        start_view.set(fig.and_then(|f| eff_view(&f).map(|v| (f.id, v))));
+                        start_cam.set(None);
+                    }
+                }
             });
         }
         {
-            let start = start.clone();
+            let start_view = start_view.clone();
+            let start_cam = start_cam.clone();
             let view = view.clone();
+            let cam = cam.clone();
             let canvas2 = canvas.clone();
             drag.connect_drag_update(move |g, dx, dy| {
-                let Some((id, sv)) = start.get() else { return };
+                // 3-D orbit: drag rotates azimuth (x) and elevation (y).
+                if let Some((id, sc)) = start_cam.get() {
+                    cam.set(Some((id, sc.orbit_by(dx * 0.01, dy * 0.01))));
+                    canvas2.queue_draw();
+                    return;
+                }
+                let Some((id, sv)) = start_view.get() else { return };
                 let Some((sx, sy)) = g.start_point() else { return };
                 let (w, h) = (canvas2.width() as f64, canvas2.height() as f64);
                 let a = crate::plot_render::data_at_pixel(sv, w, h, sx, sy);
@@ -3527,14 +3575,16 @@ fn build_plots(app: &Rc<AppState>) -> GtkBox {
         canvas.add_controller(drag);
     }
 
-    // Double-click → reset to auto-fit.
+    // Double-click → reset zoom/pan and orbit to their defaults.
     {
         let click = gtk::GestureClick::new();
         let view = view.clone();
+        let cam = cam.clone();
         let canvas2 = canvas.clone();
         click.connect_pressed(move |_g, n, _x, _y| {
             if n >= 2 {
                 view.set(None);
+                cam.set(None);
                 canvas2.queue_draw();
             }
         });

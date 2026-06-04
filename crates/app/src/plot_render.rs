@@ -5,7 +5,7 @@
 use gtk::cairo;
 use gtk::prelude::*;
 
-use matforge_core::models::{MatrixView, PlotFigure, PlotKind, PlotView};
+use matforge_core::models::{MatrixView, PlotFigure, PlotKind, PlotView, SurfaceCamera};
 use matforge_core::theme::Rgb;
 
 const MARGIN: f64 = 40.0;
@@ -171,6 +171,114 @@ fn fmt_num(v: f64) -> String {
         format!("{v:.4}")
     };
     s.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// Render a 3-D surface from `figure.zs` as an orbitable, height-shaded mesh.
+/// The grid is projected through `cam` and quads are drawn back-to-front
+/// (painter's algorithm). Large grids are downsampled to keep the mesh light.
+pub fn draw_surface(ctx: &cairo::Context, w: f64, h: f64, figure: &PlotFigure, cam: SurfaceCamera) {
+    let t = crate::theme_css::current();
+    fill(ctx, t.editor_bg, 0.0, 0.0, w, h);
+    let grid = &figure.zs;
+    let rows = grid.len();
+    let cols = grid.iter().map(|r| r.len()).min().unwrap_or(0);
+    if rows < 2 || cols < 2 {
+        set_color(ctx, t.text_secondary);
+        ctx.move_to(MARGIN, h / 2.0);
+        ctx.show_text("[surface needs a 2-D matrix]").ok();
+        return;
+    }
+
+    // Downsample so the mesh stays readable and cheap (~48 cells per axis).
+    const MAX: usize = 48;
+    let rstep = rows.div_ceil(MAX).max(1);
+    let cstep = cols.div_ceil(MAX).max(1);
+    let rs: Vec<usize> = (0..rows).step_by(rstep).chain([rows - 1]).collect();
+    let cs: Vec<usize> = (0..cols).step_by(cstep).chain([cols - 1]).collect();
+    let rs: Vec<usize> = dedup_sorted(rs);
+    let cs: Vec<usize> = dedup_sorted(cs);
+
+    // Height range for normalization + colour.
+    let (mut zmin, mut zmax) = (f64::INFINITY, f64::NEG_INFINITY);
+    for row in grid {
+        for &v in row {
+            if v.is_finite() {
+                zmin = zmin.min(v);
+                zmax = zmax.max(v);
+            }
+        }
+    }
+    if !zmin.is_finite() {
+        return;
+    }
+    let zspan = if (zmax - zmin).abs() < 1e-12 { 1.0 } else { zmax - zmin };
+
+    let (cx, cy) = (w / 2.0, h / 2.0 + 8.0);
+    let radius = (w.min(h) * 0.42).max(1.0);
+    let nr = rs.len();
+    let nc = cs.len();
+    // Project every sampled node to a screen pixel + keep its height.
+    let project = |ri: usize, ci: usize| -> (f64, f64, f64) {
+        let z = grid[rs[ri]][cs[ci]];
+        let nx = ci as f64 / (nc - 1) as f64 - 0.5;
+        let ny = ri as f64 / (nr - 1) as f64 - 0.5;
+        let nz = (z - zmin) / zspan - 0.5;
+        let (sx, sy, depth) = cam.project(nx, ny, nz);
+        (cx + sx * radius, cy - sy * radius, depth)
+    };
+
+    // Build quads with an averaged depth + height, then sort far → near.
+    let (cold, hot) = (t.blue, t.red);
+    let mut quads: Vec<(f64, [(f64, f64); 4], f64)> = Vec::with_capacity((nr - 1) * (nc - 1));
+    for ri in 0..nr - 1 {
+        for ci in 0..nc - 1 {
+            let p = [
+                project(ri, ci),
+                project(ri, ci + 1),
+                project(ri + 1, ci + 1),
+                project(ri + 1, ci),
+            ];
+            let depth = p.iter().map(|q| q.2).sum::<f64>() / 4.0;
+            let zavg = (grid[rs[ri]][cs[ci]] + grid[rs[ri]][cs[ci + 1]]
+                + grid[rs[ri + 1]][cs[ci]] + grid[rs[ri + 1]][cs[ci + 1]])
+                / 4.0;
+            let pts = [(p[0].0, p[0].1), (p[1].0, p[1].1), (p[2].0, p[2].1), (p[3].0, p[3].1)];
+            quads.push((depth, pts, (zavg - zmin) / zspan));
+        }
+    }
+    quads.sort_by(|a, b| b.0.total_cmp(&a.0));
+
+    let (er, eg, eb) = t.border.to_unit();
+    for (_, pts, ht) in &quads {
+        ctx.move_to(pts[0].0, pts[0].1);
+        for q in &pts[1..] {
+            ctx.line_to(q.0, q.1);
+        }
+        ctx.close_path();
+        set_color(ctx, cold.blend(hot, *ht));
+        ctx.fill_preserve().ok();
+        ctx.set_source_rgba(er, eg, eb, 0.6);
+        ctx.set_line_width(0.6);
+        ctx.stroke().ok();
+    }
+
+    // Title + orientation hint.
+    set_color(ctx, t.text_primary);
+    ctx.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Bold);
+    ctx.set_font_size(12.0);
+    ctx.move_to(MARGIN, 20.0);
+    ctx.show_text(&figure.title).ok();
+    set_color(ctx, t.text_muted);
+    ctx.set_font_size(10.0);
+    ctx.move_to(MARGIN, h - 12.0);
+    ctx.show_text("drag to orbit · scroll to zoom · double-click to reset").ok();
+}
+
+/// Drop consecutive duplicates from an ascending index list.
+fn dedup_sorted(mut v: Vec<usize>) -> Vec<usize> {
+    v.sort_unstable();
+    v.dedup();
+    v
 }
 
 /// Compact thumbnail render for the figure list: blits a runtime PNG (scaled to
