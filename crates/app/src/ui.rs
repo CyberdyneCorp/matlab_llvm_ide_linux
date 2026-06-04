@@ -2,6 +2,7 @@
 //! (`MainViewModel` + live REPL/DAP sessions). Widgets subscribe to the view
 //! models' `Property`s and call verb methods / `AppState` commands on input.
 
+use std::cell::Cell;
 use std::path::Path;
 use std::rc::Rc;
 
@@ -2897,7 +2898,7 @@ fn export_selected_figure(app: &Rc<AppState>) {
             gtk::cairo::ImageSurface::create(gtk::cairo::Format::ARgb32, w, h).ok()?;
         {
             let ctx = gtk::cairo::Context::new(&surface).ok()?;
-            crate::plot_render::draw_figure(&ctx, w as f64, h as f64, fig);
+            crate::plot_render::draw_figure(&ctx, w as f64, h as f64, fig, None, None);
         }
         let stride = surface.stride() as usize;
         surface.flush();
@@ -3403,22 +3404,142 @@ fn build_plots(app: &Rc<AppState>) -> GtkBox {
     let canvas = gtk::DrawingArea::new();
     canvas.set_vexpand(true);
     canvas.set_hexpand(true);
-    {
+
+    // Interactive view state. `view` is the zoom/pan window tagged with the
+    // figure id it belongs to (so switching figures auto-resets); `hover` is the
+    // cursor pixel for the crosshair readout.
+    let view: Rc<Cell<Option<(u64, matforge_core::models::PlotView)>>> = Rc::new(Cell::new(None));
+    let hover: Rc<Cell<Option<(f64, f64)>>> = Rc::new(Cell::new(None));
+
+    // The figure currently drawn (selected, else most recent), if any.
+    let current_fig = {
         let app = app.clone();
-        canvas.set_draw_func(move |_a, ctx, w, h| {
+        move || {
             let figs = app.vm.plots.figures.get();
             let sel = app.vm.plots.selected_id.get();
-            let figure = figs
-                .iter()
-                .find(|f| Some(f.id) == sel)
-                .or_else(|| figs.last());
-            match figure {
-                Some(figure) => crate::plot_render::draw_figure(ctx, w as f64, h as f64, figure),
-                None => crate::plot_render::draw_empty(ctx, w as f64, h as f64),
+            figs.iter().find(|f| Some(f.id) == sel).or_else(|| figs.last()).cloned()
+        }
+    };
+    // The effective view for `fig`: the stored window if it's for this figure,
+    // else the auto-fit window.
+    let eff_view = {
+        let view = view.clone();
+        move |fig: &matforge_core::models::PlotFigure| {
+            match view.get() {
+                Some((id, v)) if id == fig.id => Some(v),
+                _ => fig.auto_view(),
             }
+        }
+    };
+
+    {
+        let current_fig = current_fig.clone();
+        let eff_view = eff_view.clone();
+        let hover = hover.clone();
+        canvas.set_draw_func(move |_a, ctx, w, h| match current_fig() {
+            Some(figure) => {
+                let v = eff_view(&figure);
+                let hov = if figure.is_interactive() { hover.get() } else { None };
+                crate::plot_render::draw_figure(ctx, w as f64, h as f64, &figure, v, hov);
+            }
+            None => crate::plot_render::draw_empty(ctx, w as f64, h as f64),
         });
     }
     panel.append(&canvas);
+
+    // Switching figures resets the zoom/pan window.
+    {
+        let view = view.clone();
+        let canvas = canvas.clone();
+        app.vm.plots.selected_id.subscribe(move |_| {
+            view.set(None);
+            canvas.queue_draw();
+        });
+    }
+
+    // Hover → crosshair readout.
+    {
+        let motion = gtk::EventControllerMotion::new();
+        let hover2 = hover.clone();
+        let hover1 = hover.clone();
+        let canvas2 = canvas.clone();
+        motion.connect_motion(move |_, x, y| {
+            hover1.set(Some((x, y)));
+            canvas2.queue_draw();
+        });
+        let canvas3 = canvas.clone();
+        motion.connect_leave(move |_| {
+            hover2.set(None);
+            canvas3.queue_draw();
+        });
+        canvas.add_controller(motion);
+    }
+
+    // Scroll → zoom around the cursor.
+    {
+        let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
+        let current_fig = current_fig.clone();
+        let eff_view = eff_view.clone();
+        let view = view.clone();
+        let hover = hover.clone();
+        let canvas2 = canvas.clone();
+        scroll.connect_scroll(move |_c, _dx, dy| {
+            let Some(fig) = current_fig() else { return gtk::glib::Propagation::Proceed };
+            let Some(v) = eff_view(&fig) else { return gtk::glib::Propagation::Proceed };
+            let (w, h) = (canvas2.width() as f64, canvas2.height() as f64);
+            let (cx, cy) = hover.get().unwrap_or((w / 2.0, h / 2.0));
+            let (zx, zy) = crate::plot_render::data_at_pixel(v, w, h, cx, cy);
+            let factor = if dy < 0.0 { 0.85 } else { 1.0 / 0.85 };
+            view.set(Some((fig.id, v.zoom_at(zx, zy, factor))));
+            canvas2.queue_draw();
+            gtk::glib::Propagation::Stop
+        });
+        canvas.add_controller(scroll);
+    }
+
+    // Left-drag → pan (the data under the cursor follows it).
+    {
+        let drag = gtk::GestureDrag::new();
+        drag.set_button(gtk::gdk::BUTTON_PRIMARY);
+        let start: Rc<Cell<Option<(u64, matforge_core::models::PlotView)>>> = Rc::new(Cell::new(None));
+        {
+            let current_fig = current_fig.clone();
+            let eff_view = eff_view.clone();
+            let start = start.clone();
+            drag.connect_drag_begin(move |_g, _x, _y| {
+                start.set(current_fig().and_then(|f| eff_view(&f).map(|v| (f.id, v))));
+            });
+        }
+        {
+            let start = start.clone();
+            let view = view.clone();
+            let canvas2 = canvas.clone();
+            drag.connect_drag_update(move |g, dx, dy| {
+                let Some((id, sv)) = start.get() else { return };
+                let Some((sx, sy)) = g.start_point() else { return };
+                let (w, h) = (canvas2.width() as f64, canvas2.height() as f64);
+                let a = crate::plot_render::data_at_pixel(sv, w, h, sx, sy);
+                let b = crate::plot_render::data_at_pixel(sv, w, h, sx + dx, sy + dy);
+                view.set(Some((id, sv.pan_by(b.0 - a.0, b.1 - a.1))));
+                canvas2.queue_draw();
+            });
+        }
+        canvas.add_controller(drag);
+    }
+
+    // Double-click → reset to auto-fit.
+    {
+        let click = gtk::GestureClick::new();
+        let view = view.clone();
+        let canvas2 = canvas.clone();
+        click.connect_pressed(move |_g, n, _x, _y| {
+            if n >= 2 {
+                view.set(None);
+                canvas2.queue_draw();
+            }
+        });
+        canvas.add_controller(click);
+    }
 
     // Rebuild the figure list + redraw when figures or selection change.
     let rebuild = {

@@ -82,6 +82,105 @@ impl PlotFigure {
     pub fn is_rendered(&self) -> bool {
         self.png_data.is_some()
     }
+
+    /// True when the figure has series data the viewer can zoom / pan / probe
+    /// (i.e. not a runtime bitmap or an unsupported 3-D surface).
+    pub fn is_interactive(&self) -> bool {
+        !self.ys.is_empty() && self.png_data.is_none() && self.kind != PlotKind::Surface3D
+    }
+
+    /// The x-axis samples (explicit `xs`, or `0,1,2,…` when only `ys` is set).
+    fn x_samples(&self) -> Vec<f64> {
+        if self.xs.len() == self.ys.len() {
+            self.xs.clone()
+        } else {
+            (0..self.ys.len()).map(|i| i as f64).collect()
+        }
+    }
+
+    /// The auto-fit data window, or `None` for non-interactive figures.
+    pub fn auto_view(&self) -> Option<PlotView> {
+        if !self.is_interactive() {
+            return None;
+        }
+        let (x_min, x_max) = finite_range(&self.x_samples());
+        let (mut y_min, mut y_max) = finite_range(&self.ys);
+        if !self.ys2.is_empty() {
+            let (a, b) = finite_range(&self.ys2);
+            y_min = y_min.min(a);
+            y_max = y_max.max(b);
+        }
+        if matches!(self.kind, PlotKind::Bar | PlotKind::Histogram) {
+            y_min = y_min.min(0.0); // bars sit on the zero baseline
+        }
+        Some(PlotView { x_min, x_max, y_min, y_max })
+    }
+
+    /// The data point whose x is closest to `x` (for the hover readout).
+    pub fn nearest(&self, x: f64) -> Option<(f64, f64)> {
+        let xs = self.x_samples();
+        xs.iter()
+            .zip(&self.ys)
+            .min_by(|a, b| (a.0 - x).abs().total_cmp(&(b.0 - x).abs()))
+            .map(|(&xv, &yv)| (xv, yv))
+    }
+}
+
+/// The visible data window of a plot: `[x_min, x_max] × [y_min, y_max]`. The
+/// renderer maps this rectangle onto the canvas; zoom/pan adjust it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PlotView {
+    pub x_min: f64,
+    pub x_max: f64,
+    pub y_min: f64,
+    pub y_max: f64,
+}
+
+impl PlotView {
+    /// Scale the window by `factor` about the fixed data point `(fx, fy)`
+    /// (`factor < 1` zooms in). Keeps that point under the cursor.
+    pub fn zoom_at(&self, fx: f64, fy: f64, factor: f64) -> PlotView {
+        PlotView {
+            x_min: fx + (self.x_min - fx) * factor,
+            x_max: fx + (self.x_max - fx) * factor,
+            y_min: fy + (self.y_min - fy) * factor,
+            y_max: fy + (self.y_max - fy) * factor,
+        }
+    }
+
+    /// Shift the window by a data-space delta (dragging right pans left).
+    pub fn pan_by(&self, dx: f64, dy: f64) -> PlotView {
+        PlotView {
+            x_min: self.x_min - dx,
+            x_max: self.x_max - dx,
+            y_min: self.y_min - dy,
+            y_max: self.y_max - dy,
+        }
+    }
+
+    pub fn x_span(&self) -> f64 {
+        self.x_max - self.x_min
+    }
+    pub fn y_span(&self) -> f64 {
+        self.y_max - self.y_min
+    }
+}
+
+/// Min/max over the finite values of `v`, padded so a flat/empty series still
+/// has a non-zero span.
+fn finite_range(v: &[f64]) -> (f64, f64) {
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for &x in v.iter().filter(|x| x.is_finite()) {
+        lo = lo.min(x);
+        hi = hi.max(x);
+    }
+    if !lo.is_finite() || !hi.is_finite() {
+        return (0.0, 1.0);
+    }
+    if (hi - lo).abs() < f64::EPSILON {
+        return (lo - 1.0, hi + 1.0);
+    }
+    (lo, hi)
 }
 
 #[cfg(test)]
@@ -121,5 +220,39 @@ mod tests {
         assert!(!f.is_rendered());
         f.png_data = Some(vec![0x89, 0x50]);
         assert!(f.is_rendered());
+    }
+
+    #[test]
+    fn auto_view_fits_data_and_interactivity() {
+        let f = PlotFigure::series(1, "L", PlotKind::Line2D, vec![0.0, 1.0, 2.0], vec![3.0, 9.0, 5.0]);
+        assert!(f.is_interactive());
+        let v = f.auto_view().unwrap();
+        assert_eq!((v.x_min, v.x_max), (0.0, 2.0));
+        assert_eq!((v.y_min, v.y_max), (3.0, 9.0));
+        // Bitmap + 3-D figures are not interactive (no view).
+        let mut png = PlotFigure::series(2, "P", PlotKind::Rendered, vec![], vec![1.0]);
+        png.png_data = Some(vec![1, 2]);
+        assert!(!png.is_interactive() && png.auto_view().is_none());
+    }
+
+    #[test]
+    fn bar_view_includes_zero_baseline() {
+        let f = PlotFigure::series(1, "B", PlotKind::Bar, vec![0.0, 1.0], vec![4.0, 7.0]);
+        assert_eq!(f.auto_view().unwrap().y_min, 0.0);
+    }
+
+    #[test]
+    fn zoom_pan_and_nearest() {
+        let v = PlotView { x_min: 0.0, x_max: 10.0, y_min: 0.0, y_max: 10.0 };
+        // Zoom in (factor 0.5) about (5,5) halves the span, keeps the center.
+        let z = v.zoom_at(5.0, 5.0, 0.5);
+        assert_eq!((z.x_min, z.x_max), (2.5, 7.5));
+        // Pan right by 2 data units shifts the window left.
+        let p = v.pan_by(2.0, 0.0);
+        assert_eq!((p.x_min, p.x_max), (-2.0, 8.0));
+
+        let f = PlotFigure::series(1, "L", PlotKind::Line2D, vec![0.0, 1.0, 2.0], vec![10.0, 20.0, 30.0]);
+        assert_eq!(f.nearest(1.4), Some((1.0, 20.0)));
+        assert_eq!(f.nearest(1.6), Some((2.0, 30.0)));
     }
 }

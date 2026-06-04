@@ -407,7 +407,7 @@ fn build_scopes(vm: &Rc<MflowLinkViewModel>) -> GtkBox {
                         xs.truncate(n);
                         ys.truncate(n);
                         let fig = PlotFigure::series(idx as i32 + 1, title.clone(), PlotKind::Line2D, xs, ys);
-                        crate::plot_render::draw_figure(ctx, w as f64, h as f64, &fig);
+                        crate::plot_render::draw_figure(ctx, w as f64, h as f64, &fig, None, None);
                     });
                     tiles.append(&da);
                     draws.borrow_mut().push(da);

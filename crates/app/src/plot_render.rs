@@ -5,13 +5,36 @@
 use gtk::cairo;
 use gtk::prelude::*;
 
-use matforge_core::models::{MatrixView, PlotFigure, PlotKind};
+use matforge_core::models::{MatrixView, PlotFigure, PlotKind, PlotView};
 use matforge_core::theme::Rgb;
 
 const MARGIN: f64 = 40.0;
 
-/// Draw `figure` filling a `w`×`h` Cairo surface.
-pub fn draw_figure(ctx: &cairo::Context, w: f64, h: f64, figure: &PlotFigure) {
+/// True if `(px, py)` is inside the plotting rectangle (within the axes).
+pub fn in_plot_area(w: f64, h: f64, px: f64, py: f64) -> bool {
+    px >= MARGIN && px <= w - MARGIN && py >= MARGIN && py <= h - MARGIN
+}
+
+/// Invert the data→pixel mapping: the data coordinate under a canvas pixel.
+pub fn data_at_pixel(view: PlotView, w: f64, h: f64, px: f64, py: f64) -> (f64, f64) {
+    let plot_w = (w - 2.0 * MARGIN).max(1.0);
+    let plot_h = (h - 2.0 * MARGIN).max(1.0);
+    (
+        view.x_min + ((px - MARGIN) / plot_w) * view.x_span(),
+        view.y_min + (1.0 - (py - MARGIN) / plot_h) * view.y_span(),
+    )
+}
+
+/// Draw `figure` filling a `w`×`h` Cairo surface. `view` overrides the auto-fit
+/// data window (zoom/pan); `hover` is the cursor pixel for the crosshair readout.
+pub fn draw_figure(
+    ctx: &cairo::Context,
+    w: f64,
+    h: f64,
+    figure: &PlotFigure,
+    view: Option<PlotView>,
+    hover: Option<(f64, f64)>,
+) {
     fill(ctx, crate::theme_css::current().editor_bg, 0.0, 0.0, w, h);
 
     // Runtime PNG figure: decode via GDK (no cairo `png` feature needed) and
@@ -26,40 +49,32 @@ pub fn draw_figure(ctx: &cairo::Context, w: f64, h: f64, figure: &PlotFigure) {
         return;
     }
 
-    if figure.ys.is_empty() {
+    let Some(view) = view.or_else(|| figure.auto_view()) else {
         return;
-    }
-
-    // Data ranges.
+    };
     let xs: Vec<f64> = if figure.xs.len() == figure.ys.len() {
         figure.xs.clone()
     } else {
         (0..figure.ys.len()).map(|i| i as f64).collect()
     };
-    let (x_min, x_max) = range(&xs);
-    let (mut y_min, mut y_max) = range(&figure.ys);
-    if !figure.ys2.is_empty() {
-        let (a, b) = range(&figure.ys2);
-        y_min = y_min.min(a);
-        y_max = y_max.max(b);
-    }
-    if figure.kind == PlotKind::Bar || figure.kind == PlotKind::Histogram {
-        y_min = y_min.min(0.0); // bars sit on the zero baseline
-    }
     let plot_w = (w - 2.0 * MARGIN).max(1.0);
     let plot_h = (h - 2.0 * MARGIN).max(1.0);
     let map = |x: f64, y: f64| -> (f64, f64) {
-        let px = MARGIN + norm(x, x_min, x_max) * plot_w;
-        let py = MARGIN + (1.0 - norm(y, y_min, y_max)) * plot_h;
+        let px = MARGIN + norm(x, view.x_min, view.x_max) * plot_w;
+        let py = MARGIN + (1.0 - norm(y, view.y_min, view.y_max)) * plot_h;
         (px, py)
     };
 
-    draw_axes(ctx, w, h, x_min, x_max, y_min, y_max);
+    draw_axes(ctx, w, h, view.x_min, view.x_max, view.y_min, view.y_max);
 
+    // Clip series to the plotting rectangle so zoom/pan never spills past the axes.
+    ctx.save().ok();
+    ctx.rectangle(MARGIN, MARGIN, plot_w, plot_h);
+    ctx.clip();
     match figure.kind {
         PlotKind::Scatter => draw_scatter(ctx, &xs, &figure.ys, &map, crate::theme_css::current().blue),
         PlotKind::Bar | PlotKind::Histogram => {
-            draw_bars(ctx, &figure.ys, x_min, x_max, &map, plot_w)
+            draw_bars(ctx, &figure.ys, view.x_min, view.x_max, &map, plot_w)
         }
         PlotKind::Spectrum => draw_area(ctx, &xs, &figure.ys, &map, h),
         _ => {
@@ -68,6 +83,14 @@ pub fn draw_figure(ctx: &cairo::Context, w: f64, h: f64, figure: &PlotFigure) {
                 let xs2: Vec<f64> = (0..figure.ys2.len()).map(|i| i as f64).collect();
                 draw_line(ctx, &xs2, &figure.ys2, &map, crate::theme_css::current().green);
             }
+        }
+    }
+    ctx.restore().ok();
+
+    // Hover crosshair + nearest-point readout.
+    if let Some((hx, hy)) = hover {
+        if in_plot_area(w, h, hx, hy) {
+            draw_hover(ctx, w, h, figure, view, &map, hx);
         }
     }
 
@@ -82,6 +105,72 @@ pub fn draw_figure(ctx: &cairo::Context, w: f64, h: f64, figure: &PlotFigure) {
     ctx.set_font_size(12.0);
     ctx.move_to(MARGIN, 20.0);
     ctx.show_text(&figure.title).ok();
+}
+
+/// Draw the hover crosshair at the data point nearest the cursor's x, with a
+/// small readout chip showing its `(x, y)` value.
+fn draw_hover(
+    ctx: &cairo::Context,
+    w: f64,
+    h: f64,
+    figure: &PlotFigure,
+    view: PlotView,
+    map: &dyn Fn(f64, f64) -> (f64, f64),
+    hx: f64,
+) {
+    let (data_x, _) = data_at_pixel(view, w, h, hx, MARGIN);
+    let Some((nx, ny)) = figure.nearest(data_x) else { return };
+    let (mx, my) = map(nx, ny);
+    if !in_plot_area(w, h, mx, my) {
+        return;
+    }
+
+    // Crosshair lines across the plot rectangle.
+    set_color(ctx, crate::theme_css::current().text_muted);
+    ctx.set_line_width(0.8);
+    ctx.set_dash(&[3.0, 3.0], 0.0);
+    ctx.move_to(mx, MARGIN);
+    ctx.line_to(mx, h - MARGIN);
+    ctx.move_to(MARGIN, my);
+    ctx.line_to(w - MARGIN, my);
+    ctx.stroke().ok();
+    ctx.set_dash(&[], 0.0);
+
+    // Point marker.
+    set_color(ctx, crate::theme_css::current().amber);
+    ctx.arc(mx, my, 3.5, 0.0, std::f64::consts::TAU);
+    ctx.fill().ok();
+
+    // Readout chip.
+    let label = format!("x {}   y {}", fmt_num(nx), fmt_num(ny));
+    ctx.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+    ctx.set_font_size(11.0);
+    let tw = ctx.text_extents(&label).map(|e| e.width()).unwrap_or(0.0);
+    let (bw, bh) = (tw + 12.0, 18.0);
+    let bx = (mx + 8.0).min(w - MARGIN - bw);
+    let by = (my - bh - 6.0).max(MARGIN + 2.0);
+    fill(ctx, crate::theme_css::current().card, bx, by, bw, bh);
+    set_color(ctx, crate::theme_css::current().border);
+    ctx.set_line_width(1.0);
+    ctx.rectangle(bx, by, bw, bh);
+    ctx.stroke().ok();
+    set_color(ctx, crate::theme_css::current().text_primary);
+    ctx.move_to(bx + 6.0, by + 13.0);
+    ctx.show_text(&label).ok();
+}
+
+/// Compact numeric formatting for the readout (trims trailing zeros).
+fn fmt_num(v: f64) -> String {
+    if v == 0.0 {
+        return "0".into();
+    }
+    let a = v.abs();
+    let s = if a >= 1000.0 || a < 0.001 {
+        format!("{v:.3e}")
+    } else {
+        format!("{v:.4}")
+    };
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
 /// Compact thumbnail render for the figure list: blits a runtime PNG (scaled to
@@ -358,4 +447,42 @@ fn set_color(ctx: &cairo::Context, c: Rgb) {
 
 fn rgb_unit(c: Rgb) -> (f64, f64, f64) {
     c.to_unit()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The forward data→pixel map (mirrors the closure in `draw_figure`).
+    fn forward(view: PlotView, w: f64, h: f64, x: f64, y: f64) -> (f64, f64) {
+        let plot_w = w - 2.0 * MARGIN;
+        let plot_h = h - 2.0 * MARGIN;
+        (
+            MARGIN + norm(x, view.x_min, view.x_max) * plot_w,
+            MARGIN + (1.0 - norm(y, view.y_min, view.y_max)) * plot_h,
+        )
+    }
+
+    #[test]
+    fn data_at_pixel_inverts_forward_map() {
+        let view = PlotView { x_min: -2.0, x_max: 6.0, y_min: 1.0, y_max: 9.0 };
+        let (w, h) = (800.0, 500.0);
+        for &(dx, dy) in &[(-2.0, 1.0), (0.0, 5.0), (3.5, 7.25), (6.0, 9.0)] {
+            let (px, py) = forward(view, w, h, dx, dy);
+            let (rx, ry) = data_at_pixel(view, w, h, px, py);
+            assert!((rx - dx).abs() < 1e-9, "x {dx} -> {px} -> {rx}");
+            assert!((ry - dy).abs() < 1e-9, "y {dy} -> {py} -> {ry}");
+        }
+        // The plot-area test rejects the axis margins.
+        assert!(in_plot_area(w, h, w / 2.0, h / 2.0));
+        assert!(!in_plot_area(w, h, MARGIN / 2.0, h / 2.0));
+    }
+
+    #[test]
+    fn fmt_num_is_compact() {
+        assert_eq!(fmt_num(0.0), "0");
+        assert_eq!(fmt_num(1.5), "1.5");
+        assert_eq!(fmt_num(2.0), "2");
+        assert_eq!(fmt_num(1234.0), "1.234e3");
+    }
 }
