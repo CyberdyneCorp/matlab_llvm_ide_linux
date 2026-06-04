@@ -131,7 +131,7 @@ window.mf-root,
 }
 
 /* Lists / tree rows */
-.mf-row { padding: 2px 6px; }
+.mf-row { padding: 1px 6px; }
 .mf-row:hover { background-color: @mf_hover; }
 .mf-row.selected { background-color: @mf_selection; color: @mf_text_primary; }
 
@@ -258,7 +258,7 @@ popover button:hover { background-color: @mf_hover; }
 .mf-newdoc-title { font-weight: bold; color: @mf_text_primary; }
 
 /* Table column headers */
-.mf-col-header { padding: 3px 8px; border-bottom: 1px solid @mf_border_soft; }
+.mf-col-header { padding: 2px 8px; border-bottom: 1px solid @mf_border_soft; }
 .mf-col-title {
     font-size: __FS_XXS__;
     font-weight: 700;
@@ -267,6 +267,9 @@ popover button:hover { background-color: @mf_hover; }
 }
 /* Brighten list/row text for readability. */
 .mf-row label, list > row label { color: @mf_text_primary; }
+/* Secondary workspace columns (value/type/size): muted + slightly smaller so the
+   NAME column reads as primary and the row stays condensed. */
+.mf-cell-dim { color: @mf_text_secondary; font-size: __FS_XS__; }
 
 /* Matrix-retro console: green on near-black. */
 textview.mf-terminal, textview.mf-terminal text {

@@ -3041,9 +3041,9 @@ fn build_workspace(app: &Rc<AppState>) -> GtkBox {
     // Inspector tabs.
     let insp = Notebook::new();
     insp.set_size_request(-1, 180);
-    insp.append_page(&build_variable_inspector(app), Some(&Label::new(Some("VARIABLE INSPECTOR"))));
-    insp.append_page(&build_matrix_viewer(app), Some(&Label::new(Some("MATRIX VIEWER"))));
-    insp.append_page(&build_table_viewer(app), Some(&Label::new(Some("TABLE VIEWER"))));
+    insp.append_page(&build_variable_inspector(app), Some(&Label::new(Some("VARIABLE"))));
+    insp.append_page(&build_matrix_viewer(app), Some(&Label::new(Some("MATRIX"))));
+    insp.append_page(&build_table_viewer(app), Some(&Label::new(Some("TABLE"))));
 
     // BLOCK INSPECTOR — host for the active flowchart's property editor. The
     // flowchart view installs its inspector here when shown (so the diagram tab
@@ -3054,7 +3054,7 @@ fn build_workspace(app: &Rc<AppState>) -> GtkBox {
     let flow_scroll = ScrolledWindow::new();
     flow_scroll.set_vexpand(true);
     flow_scroll.set_child(Some(&flow_host));
-    let flow_page = insp.append_page(&flow_scroll, Some(&Label::new(Some("BLOCK INSPECTOR"))));
+    let flow_page = insp.append_page(&flow_scroll, Some(&Label::new(Some("BLOCK"))));
     FLOW_INSPECTOR.with(|f| *f.borrow_mut() = Some((insp.clone(), flow_page, flow_host)));
 
     panel.append(&insp);
@@ -3187,23 +3187,36 @@ fn attach_var_menu(btn: &Button, app: &Rc<AppState>, name: &str) {
     btn.add_controller(drag);
 }
 
-/// Workspace column widths (chars). VALUE (width 0) hexpands; the rest are fixed.
-/// Kept compact so the panel fits a narrow right column. Shared by the header
-/// and each variable row so they stay aligned.
-const WS_COLS: [(&str, i32); 4] = [("NAME", 9), ("VALUE", 0), ("TYPE", 7), ("SIZE", 6)];
+/// A workspace table column. `min_chars` is a floor (not a fixed width); only
+/// NAME `expand`s, so the identifier — not the usually-empty value — absorbs the
+/// panel's slack and the table stays reactive as the pane resizes. `dim` renders
+/// the secondary columns in the muted style. Shared by the header and each row so
+/// they stay aligned.
+struct WsCol {
+    title: &'static str,
+    min_chars: i32,
+    expand: bool,
+    xalign: f32,
+    dim: bool,
+}
+
+const WS_COLS: [WsCol; 4] = [
+    WsCol { title: "NAME", min_chars: 4, expand: true, xalign: 0.0, dim: false },
+    WsCol { title: "VALUE", min_chars: 6, expand: false, xalign: 0.0, dim: true },
+    WsCol { title: "TYPE", min_chars: 7, expand: false, xalign: 0.0, dim: true },
+    WsCol { title: "SIZE", min_chars: 7, expand: false, xalign: 1.0, dim: true },
+];
 
 fn ws_columns_header() -> GtkBox {
-    let row = GtkBox::new(Orientation::Horizontal, 0);
+    let row = GtkBox::new(Orientation::Horizontal, 4);
     row.add_css_class("mf-col-header");
-    for (text, chars) in WS_COLS {
-        let l = Label::new(Some(text));
+    for c in &WS_COLS {
+        let l = Label::new(Some(c.title));
         l.add_css_class("mf-col-title");
-        l.set_xalign(0.0);
-        if chars == 0 {
-            l.set_hexpand(true);
-        } else {
-            l.set_width_chars(chars);
-        }
+        l.set_xalign(c.xalign);
+        l.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        l.set_width_chars(c.min_chars);
+        l.set_hexpand(c.expand);
         row.append(&l);
     }
     row
@@ -3213,22 +3226,29 @@ fn ws_variable_row(v: &matforge_core::models::WorkspaceVariable) -> Button {
     let btn = Button::new();
     btn.set_has_frame(false);
     btn.add_css_class("mf-row");
-    let row = GtkBox::new(Orientation::Horizontal, 0);
+    let row = GtkBox::new(Orientation::Horizontal, 4);
     let preview = if v.preview.is_empty() { "—".into() } else { v.preview.clone() };
-    let texts = [v.name.clone(), preview, v.dtype.display_name().to_string(), v.size.clone()];
-    for ((_, chars), text) in WS_COLS.iter().zip(texts) {
+    let texts = [v.name.clone(), preview.clone(), v.dtype.display_name().to_string(), v.size.clone()];
+    for (c, text) in WS_COLS.iter().zip(texts) {
         let l = Label::new(Some(&text));
-        l.set_xalign(0.0);
+        l.set_xalign(c.xalign);
         l.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        if *chars == 0 {
-            l.set_hexpand(true);
-            l.set_width_chars(6); // keep VALUE from forcing the panel wide
-        } else {
-            l.set_width_chars(*chars);
+        l.set_width_chars(c.min_chars);
+        l.set_hexpand(c.expand);
+        if c.dim {
+            l.add_css_class("mf-cell-dim");
         }
         row.append(&l);
     }
     btn.set_child(Some(&row));
+    // Full details on hover, so nothing is lost when a cell ellipsizes.
+    btn.set_tooltip_text(Some(&format!(
+        "{} = {}\n{} · {}",
+        v.name,
+        preview,
+        v.dtype.display_name(),
+        v.size
+    )));
     btn
 }
 
