@@ -2898,7 +2898,7 @@ fn export_selected_figure(app: &Rc<AppState>) {
             gtk::cairo::ImageSurface::create(gtk::cairo::Format::ARgb32, w, h).ok()?;
         {
             let ctx = gtk::cairo::Context::new(&surface).ok()?;
-            crate::plot_render::draw_figure(&ctx, w as f64, h as f64, fig, None, None);
+            crate::plot_render::draw_figure(&ctx, w as f64, h as f64, fig, None, None, None);
         }
         let stride = surface.stride() as usize;
         surface.flush();
@@ -3434,6 +3434,15 @@ fn build_plots(app: &Rc<AppState>) -> GtkBox {
     // Orbit camera for 3-D surface figures, tagged with its figure id.
     let cam: Rc<Cell<Option<(u64, matforge_core::models::SurfaceCamera)>>> = Rc::new(Cell::new(None));
 
+    // Playback state. `play_idx` is the current animation step (runtime frame, or
+    // revealed-point count for a 2-D series); `playing` drives the tick loop;
+    // `play_active` engages series trace-reveal; `follow` keeps a live runtime
+    // figure pinned to its newest frame until the user scrubs.
+    let play_idx: Rc<Cell<usize>> = Rc::new(Cell::new(0));
+    let playing: Rc<Cell<bool>> = Rc::new(Cell::new(false));
+    let play_active: Rc<Cell<bool>> = Rc::new(Cell::new(false));
+    let follow: Rc<Cell<bool>> = Rc::new(Cell::new(true));
+
     // The figure currently drawn (selected, else most recent), if any.
     let current_fig = {
         let app = app.clone();
@@ -3469,28 +3478,206 @@ fn build_plots(app: &Rc<AppState>) -> GtkBox {
         let eff_view = eff_view.clone();
         let eff_cam = eff_cam.clone();
         let hover = hover.clone();
+        let play_idx = play_idx.clone();
+        let play_active = play_active.clone();
         canvas.set_draw_func(move |_a, ctx, w, h| match current_fig() {
             Some(figure) if figure.is_surface() => {
                 crate::plot_render::draw_surface(ctx, w as f64, h as f64, &figure, eff_cam(&figure));
             }
+            // Runtime animation: show the scrubbed frame.
+            Some(figure) if figure.is_animated() => {
+                let i = play_idx.get().min(figure.frames.len() - 1);
+                crate::plot_render::draw_png_frame(ctx, w as f64, h as f64, &figure.frames[i]);
+            }
             Some(figure) => {
                 let v = eff_view(&figure);
                 let hov = if figure.is_interactive() { hover.get() } else { None };
-                crate::plot_render::draw_figure(ctx, w as f64, h as f64, &figure, v, hov);
+                // Trace reveal only while the series animation is engaged.
+                let reveal = if play_active.get() && figure.animation_len() > 1 {
+                    Some(play_idx.get() + 1)
+                } else {
+                    None
+                };
+                crate::plot_render::draw_figure(ctx, w as f64, h as f64, &figure, v, hov, reveal);
             }
             None => crate::plot_render::draw_empty(ctx, w as f64, h as f64),
         });
     }
     panel.append(&canvas);
 
-    // Switching figures resets the zoom/pan window and the orbit camera.
+    // ---- Playback bar: play/pause, scrubber, frame counter ----
+    let playbar = GtkBox::new(Orientation::Horizontal, 6);
+    playbar.add_css_class("mf-playbar");
+    let play_btn = Button::from_icon_name(ic::RUN);
+    play_btn.add_css_class("mf-header-action");
+    play_btn.set_tooltip_text(Some("Play / pause animation"));
+    let scrubber = gtk::Scale::with_range(Orientation::Horizontal, 0.0, 1.0, 1.0);
+    scrubber.set_hexpand(true);
+    scrubber.set_draw_value(false);
+    let counter = Label::new(None);
+    counter.add_css_class("mf-cell-dim");
+    counter.set_width_chars(9);
+    playbar.append(&play_btn);
+    playbar.append(&scrubber);
+    playbar.append(&counter);
+    playbar.set_visible(false);
+    panel.append(&playbar);
+
+    // Guards the scrubber's change handler against the tick loop's own updates.
+    let suppress: Rc<Cell<bool>> = Rc::new(Cell::new(false));
+
+    // Sync the bar's visibility, range, and counter to `fig`.
+    let update_bar = {
+        let playbar = playbar.clone();
+        let scrubber = scrubber.clone();
+        let counter = counter.clone();
+        let play_idx = play_idx.clone();
+        let suppress = suppress.clone();
+        move |fig: &Option<matforge_core::models::PlotFigure>| match fig {
+            Some(f) if f.is_surface() => {
+                playbar.set_visible(true);
+                scrubber.set_visible(false);
+                counter.set_visible(false);
+            }
+            Some(f) if f.animation_len() > 1 => {
+                let len = f.animation_len();
+                let idx = play_idx.get().min(len - 1);
+                playbar.set_visible(true);
+                scrubber.set_visible(true);
+                counter.set_visible(true);
+                suppress.set(true);
+                scrubber.set_range(0.0, (len - 1) as f64);
+                scrubber.set_value(idx as f64);
+                suppress.set(false);
+                counter.set_text(&format!("{} / {}", idx + 1, len));
+            }
+            _ => playbar.set_visible(false),
+        }
+    };
+    update_bar(&current_fig());
+
+    // Play / pause toggles the tick loop. Starting at the end replays from 0.
+    {
+        let playing = playing.clone();
+        let play_active = play_active.clone();
+        let follow = follow.clone();
+        let play_idx = play_idx.clone();
+        let current_fig = current_fig.clone();
+        let play_btn = play_btn.clone();
+        play_btn.connect_clicked(move |b| {
+            let now = !playing.get();
+            playing.set(now);
+            if now {
+                if let Some(f) = current_fig() {
+                    let len = f.animation_len();
+                    if len > 1 && play_idx.get() >= len - 1 {
+                        play_idx.set(0); // restart a finished animation
+                    }
+                }
+                play_active.set(true);
+                follow.set(false);
+                b.set_icon_name(ic::PAUSE);
+            } else {
+                b.set_icon_name(ic::RUN);
+            }
+        });
+    }
+
+    // Scrubbing pauses playback and jumps to the chosen step.
+    {
+        let suppress = suppress.clone();
+        let playing = playing.clone();
+        let play_active = play_active.clone();
+        let follow = follow.clone();
+        let play_idx = play_idx.clone();
+        let play_btn = play_btn.clone();
+        let counter = counter.clone();
+        let current_fig = current_fig.clone();
+        let canvas2 = canvas.clone();
+        scrubber.connect_value_changed(move |s| {
+            if suppress.get() {
+                return;
+            }
+            playing.set(false);
+            play_active.set(true);
+            follow.set(false);
+            play_btn.set_icon_name(ic::RUN);
+            let idx = s.value().round() as usize;
+            play_idx.set(idx);
+            if let Some(f) = current_fig() {
+                let len = f.animation_len().max(1);
+                counter.set_text(&format!("{} / {}", idx.min(len - 1) + 1, len));
+            }
+            canvas2.queue_draw();
+        });
+    }
+
+    // The animation tick: advance frames / auto-orbit while playing.
+    {
+        let playing = playing.clone();
+        let play_idx = play_idx.clone();
+        let play_active = play_active.clone();
+        let suppress = suppress.clone();
+        let current_fig = current_fig.clone();
+        let eff_cam = eff_cam.clone();
+        let cam = cam.clone();
+        let scrubber = scrubber.clone();
+        let counter = counter.clone();
+        let canvas2 = canvas.clone();
+        let last_us: Rc<Cell<i64>> = Rc::new(Cell::new(0));
+        const FPS: i64 = 20;
+        canvas.add_tick_callback(move |_w, clock| {
+            if playing.get() {
+                if let Some(f) = current_fig() {
+                    if f.is_surface() {
+                        // Continuous auto-orbit.
+                        cam.set(Some((f.id, eff_cam(&f).orbit_by(0.02, 0.0))));
+                        canvas2.queue_draw();
+                    } else {
+                        let len = f.animation_len();
+                        let now = clock.frame_time();
+                        if len > 1 && now - last_us.get() >= 1_000_000 / FPS {
+                            last_us.set(now);
+                            let next = (play_idx.get() + 1) % len;
+                            play_idx.set(next);
+                            play_active.set(true);
+                            suppress.set(true);
+                            scrubber.set_value(next as f64);
+                            suppress.set(false);
+                            counter.set_text(&format!("{} / {}", next + 1, len));
+                            canvas2.queue_draw();
+                        }
+                    }
+                }
+            }
+            gtk::glib::ControlFlow::Continue
+        });
+    }
+
+    // Switching figures resets the zoom/pan window, the orbit camera, and the
+    // playback state (re-pinning a live runtime figure to its newest frame).
     {
         let view = view.clone();
         let cam = cam.clone();
         let canvas = canvas.clone();
+        let playing = playing.clone();
+        let play_active = play_active.clone();
+        let follow = follow.clone();
+        let play_idx = play_idx.clone();
+        let play_btn = play_btn.clone();
+        let update_bar = update_bar.clone();
+        let current_fig = current_fig.clone();
         app.vm.plots.selected_id.subscribe(move |_| {
             view.set(None);
             cam.set(None);
+            playing.set(false);
+            play_active.set(false);
+            follow.set(true);
+            play_btn.set_icon_name(ic::RUN);
+            // Pin to the newest frame of the now-current figure.
+            let fig = current_fig();
+            play_idx.set(fig.as_ref().map(|f| f.animation_len().saturating_sub(1)).unwrap_or(0));
+            update_bar(&fig);
             canvas.queue_draw();
         });
     }
@@ -3667,6 +3854,28 @@ fn build_plots(app: &Rc<AppState>) -> GtkBox {
     {
         let rebuild = rebuild.clone();
         app.vm.plots.selected_id.subscribe(move |_| rebuild());
+    }
+
+    // As runtime frames stream in, keep a followed figure pinned to its newest
+    // frame and refresh the playback bar's range/counter.
+    {
+        let follow = follow.clone();
+        let playing = playing.clone();
+        let play_idx = play_idx.clone();
+        let update_bar = update_bar.clone();
+        let current_fig = current_fig.clone();
+        let canvas = canvas.clone();
+        app.vm.plots.figures.subscribe(move |_| {
+            let fig = current_fig();
+            if let Some(f) = &fig {
+                let len = f.animation_len();
+                if follow.get() && !playing.get() && len > 0 {
+                    play_idx.set(len - 1);
+                }
+            }
+            update_bar(&fig);
+            canvas.queue_draw();
+        });
     }
 
     // Drop a workspace variable anywhere on the panel to chart it (a line plot).

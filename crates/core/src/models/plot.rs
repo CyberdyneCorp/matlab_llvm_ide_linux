@@ -56,6 +56,9 @@ pub struct PlotFigure {
     pub zs: Vec<Vec<f64>>,
     pub source_variable: Option<String>,
     pub png_data: Option<Vec<u8>>,
+    /// Accumulated PNG frames from the runtime (one per `drawnow`), oldest first.
+    /// `png_data` mirrors the latest. Lets the viewer replay a streamed animation.
+    pub frames: Vec<Vec<u8>>,
     /// Runtime-side figure id (`id=N` on the BEGIN sentinel) for dedupe.
     pub runtime_id: Option<i64>,
 }
@@ -73,6 +76,7 @@ impl PlotFigure {
             zs: Vec::new(),
             source_variable: None,
             png_data: None,
+            frames: Vec::new(),
             runtime_id: None,
         }
     }
@@ -108,6 +112,24 @@ impl PlotFigure {
     /// True for an orbitable 3-D surface (height grid present, not a bitmap).
     pub fn is_surface(&self) -> bool {
         self.kind == PlotKind::Surface3D && !self.zs.is_empty() && self.png_data.is_none()
+    }
+
+    /// True when the figure holds a multi-frame runtime animation to replay.
+    pub fn is_animated(&self) -> bool {
+        self.frames.len() > 1
+    }
+
+    /// Number of discrete animation steps the viewer can scrub through: streamed
+    /// PNG frames for a runtime figure, or data points for an interactive 2-D
+    /// series (trace reveal). `0` when there is nothing to step through.
+    pub fn animation_len(&self) -> usize {
+        if !self.frames.is_empty() {
+            self.frames.len()
+        } else if self.png_data.is_none() && self.kind != PlotKind::Surface3D && self.ys.len() > 1 {
+            self.ys.len()
+        } else {
+            0
+        }
     }
 
     /// The x-axis samples (explicit `xs`, or `0,1,2,…` when only `ys` is set).
@@ -309,6 +331,27 @@ mod tests {
     fn bar_view_includes_zero_baseline() {
         let f = PlotFigure::series(1, "B", PlotKind::Bar, vec![0.0, 1.0], vec![4.0, 7.0]);
         assert_eq!(f.auto_view().unwrap().y_min, 0.0);
+    }
+
+    #[test]
+    fn animation_len_by_figure_kind() {
+        // Interactive 2-D series: one step per data point.
+        let s = PlotFigure::series(1, "L", PlotKind::Line2D, vec![0.0, 1.0, 2.0], vec![3.0, 9.0, 5.0]);
+        assert_eq!(s.animation_len(), 3);
+        assert!(!s.is_animated());
+
+        // Runtime figure with streamed frames: one step per frame.
+        let mut r = PlotFigure::series(2, "R", PlotKind::Rendered, vec![], vec![]);
+        r.png_data = Some(vec![3]);
+        r.frames = vec![vec![1], vec![2], vec![3]];
+        assert_eq!(r.animation_len(), 3);
+        assert!(r.is_animated());
+
+        // A single-frame bitmap and a surface have nothing to scrub.
+        let mut one = PlotFigure::series(3, "P", PlotKind::Rendered, vec![], vec![1.0]);
+        one.png_data = Some(vec![1]);
+        assert_eq!(one.animation_len(), 0);
+        assert_eq!(PlotFigure::surface(4, "S", vec![vec![0.0, 1.0], vec![1.0, 0.0]]).animation_len(), 0);
     }
 
     #[test]

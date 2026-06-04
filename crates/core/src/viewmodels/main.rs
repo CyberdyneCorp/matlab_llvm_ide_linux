@@ -268,7 +268,8 @@ impl MainViewModel {
                     vec![],
                     vec![],
                 );
-                fig.png_data = Some(png);
+                fig.png_data = Some(png.clone());
+                fig.frames = vec![png];
                 fig.runtime_id = Some(runtime_id);
                 self.plots.upsert_runtime(fig);
             }

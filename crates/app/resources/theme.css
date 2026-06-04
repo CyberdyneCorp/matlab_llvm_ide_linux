@@ -271,6 +271,10 @@ popover button:hover { background-color: @mf_hover; }
    NAME column reads as primary and the row stays condensed. */
 .mf-cell-dim { color: @mf_text_secondary; font-size: __FS_XS__; }
 
+/* Plots animation playback bar. */
+.mf-playbar { padding: 2px 8px; border-top: 1px solid @mf_border_soft; }
+.mf-playbar scale { margin: 0 4px; }
+
 /* Matrix-retro console: green on near-black. */
 textview.mf-terminal, textview.mf-terminal text {
     background-color: @mf_term_bg;

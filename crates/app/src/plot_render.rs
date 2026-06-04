@@ -34,6 +34,7 @@ pub fn draw_figure(
     figure: &PlotFigure,
     view: Option<PlotView>,
     hover: Option<(f64, f64)>,
+    reveal: Option<usize>,
 ) {
     fill(ctx, crate::theme_css::current().editor_bg, 0.0, 0.0, w, h);
 
@@ -57,6 +58,9 @@ pub fn draw_figure(
     } else {
         (0..figure.ys.len()).map(|i| i as f64).collect()
     };
+    // Trace animation: reveal only the first `n` points of each series.
+    let n = reveal.map(|r| r.clamp(1, figure.ys.len())).unwrap_or(figure.ys.len());
+    let (xs_r, ys_r) = (&xs[..n.min(xs.len())], &figure.ys[..n.min(figure.ys.len())]);
     let plot_w = (w - 2.0 * MARGIN).max(1.0);
     let plot_h = (h - 2.0 * MARGIN).max(1.0);
     let map = |x: f64, y: f64| -> (f64, f64) {
@@ -72,16 +76,17 @@ pub fn draw_figure(
     ctx.rectangle(MARGIN, MARGIN, plot_w, plot_h);
     ctx.clip();
     match figure.kind {
-        PlotKind::Scatter => draw_scatter(ctx, &xs, &figure.ys, &map, crate::theme_css::current().blue),
+        PlotKind::Scatter => draw_scatter(ctx, xs_r, ys_r, &map, crate::theme_css::current().blue),
         PlotKind::Bar | PlotKind::Histogram => {
-            draw_bars(ctx, &figure.ys, view.x_min, view.x_max, &map, plot_w)
+            draw_bars(ctx, ys_r, view.x_min, view.x_max, &map, plot_w)
         }
-        PlotKind::Spectrum => draw_area(ctx, &xs, &figure.ys, &map, h),
+        PlotKind::Spectrum => draw_area(ctx, xs_r, ys_r, &map, h),
         _ => {
-            draw_line(ctx, &xs, &figure.ys, &map, crate::theme_css::current().blue);
+            draw_line(ctx, xs_r, ys_r, &map, crate::theme_css::current().blue);
             if !figure.ys2.is_empty() {
-                let xs2: Vec<f64> = (0..figure.ys2.len()).map(|i| i as f64).collect();
-                draw_line(ctx, &xs2, &figure.ys2, &map, crate::theme_css::current().green);
+                let m = n.min(figure.ys2.len());
+                let xs2: Vec<f64> = (0..m).map(|i| i as f64).collect();
+                draw_line(ctx, &xs2, &figure.ys2[..m], &map, crate::theme_css::current().green);
             }
         }
     }
@@ -487,6 +492,18 @@ pub fn draw_heatmap(ctx: &cairo::Context, w: f64, h: f64, m: &MatrixView) {
         set_color(ctx, cold.blend(hot, 1.0 - t));
         ctx.rectangle(w - bar_w, t * h, bar_w, h / steps as f64 + 1.0);
         ctx.fill().ok();
+    }
+}
+
+/// Paint a single animation frame (a runtime PNG) filling a `w`×`h` surface.
+/// Used by the Plots playback scrubber to show a chosen frame rather than the
+/// figure's latest (`png_data`).
+pub fn draw_png_frame(ctx: &cairo::Context, w: f64, h: f64, png: &[u8]) {
+    fill(ctx, crate::theme_css::current().editor_bg, 0.0, 0.0, w, h);
+    if !blit_png(ctx, w, h, png) {
+        set_color(ctx, crate::theme_css::current().text_secondary);
+        ctx.move_to(MARGIN, h / 2.0);
+        ctx.show_text("[frame]").ok();
     }
 }
 
