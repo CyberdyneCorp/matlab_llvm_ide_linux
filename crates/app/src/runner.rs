@@ -65,7 +65,10 @@ pub fn run(vm: Rc<MainViewModel>, settings: &Settings) {
     //    the Plots panel live instead of only showing the final frame.
     vm.toolbar.is_running.set(true);
     let stem = plan.stem.clone();
-    let started = run_streaming(&plan.bin_path, &out_dir, true, move |line| {
+    // The Symbolic Math Toolbox lives in `libmatlab_sym.so` next to matlabc; the
+    // runtime dlopens it by bare soname, so point the loader at that directory.
+    let lib_dir = settings.matlabc_path.parent();
+    let started = run_streaming(&plan.bin_path, &out_dir, true, lib_dir, move |line| {
         if let Some(code) = line.strip_prefix(RUN_EXIT_PREFIX) {
             vm.toolbar.is_running.set(false);
             vm.status_bar.set_message(format!("Finished {stem} (exit {code})"));

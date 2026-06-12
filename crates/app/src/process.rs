@@ -59,16 +59,33 @@ pub const RUN_EXIT_PREFIX: &str = "___MF_RUN_EXIT___";
 /// GTK main loop as it is produced (so animations + long logs appear live), and
 /// finally a `RUN_EXIT_PREFIX<code>` line once the process exits and its output
 /// has fully drained. `figures` gates the figure-emit env var.
+///
+/// `lib_dir`, when set, is prepended to `LD_LIBRARY_PATH` for the child. The
+/// runtime's Symbolic Math Toolbox stub `dlopen`s `libmatlab_sym.so` by bare
+/// soname at the first `sym` call; since the linked program lives in a temp
+/// dir (not next to the `.so`), the loader needs this hint to find it.
 pub fn run_streaming(
     bin: &Path,
     cwd: &Path,
     figures: bool,
+    lib_dir: Option<&Path>,
     on_line: impl FnMut(String) + 'static,
 ) -> std::io::Result<()> {
     let mut cmd = Command::new(bin);
     cmd.current_dir(cwd).stdout(Stdio::piped()).stderr(Stdio::piped());
     if figures {
         cmd.env("MATLAB_LLVM_IDE_FIGURES", "1");
+    }
+    if let Some(dir) = lib_dir {
+        let prepended = match std::env::var_os("LD_LIBRARY_PATH") {
+            Some(existing) if !existing.is_empty() => {
+                let mut paths = vec![dir.to_path_buf()];
+                paths.extend(std::env::split_paths(&existing));
+                std::env::join_paths(paths).unwrap_or_else(|_| dir.as_os_str().to_owned())
+            }
+            _ => dir.as_os_str().to_owned(),
+        };
+        cmd.env("LD_LIBRARY_PATH", prepended);
     }
     let mut child = cmd.spawn()?;
     let stdout = child.stdout.take().expect("piped stdout");
