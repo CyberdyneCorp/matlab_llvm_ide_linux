@@ -412,6 +412,7 @@ name = "matforge"
 version = "0.1.0"
 dependencies = [
  "gtk4",
+ "libc",
  "matforge-core",
  "serde_json",
 ]

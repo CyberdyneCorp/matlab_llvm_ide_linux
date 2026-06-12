@@ -32,3 +32,4 @@ assets = [
 matforge-core = { workspace = true }
 gtk = { package = "gtk4", version = "0.9", features = ["v4_12"] }
 serde_json = { workspace = true }
+libc = "0.2"

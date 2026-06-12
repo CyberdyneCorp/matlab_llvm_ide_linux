@@ -230,6 +230,18 @@ impl ReplSession {
         writeln!(self.stdin, "{command}")?;
         self.stdin.flush()
     }
+
+    /// Interrupt the running command by sending SIGINT to matlabc (Ctrl+C),
+    /// mirroring MATLAB's Command Window. The process keeps running for the next
+    /// command; only the in-flight computation is aborted.
+    pub fn interrupt(&self) {
+        let pid = self.child.id() as libc::pid_t;
+        // Safety: a plain signal send to our own child pid; failure (e.g. the
+        // child already exited) is harmless and ignored.
+        unsafe {
+            libc::kill(pid, libc::SIGINT);
+        }
+    }
 }
 
 impl Drop for ReplSession {

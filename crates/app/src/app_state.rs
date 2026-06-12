@@ -85,6 +85,14 @@ impl AppState {
         }
     }
 
+    /// Interrupt the command currently running in the REPL (Ctrl+C). No-op if no
+    /// REPL is live.
+    pub fn repl_interrupt(self: &Rc<Self>) {
+        if let Some(session) = self.repl.borrow().as_ref() {
+            session.interrupt();
+        }
+    }
+
     /// Select a workspace variable and capture its value into the Matrix Viewer
     /// via a sentinel-wrapped `disp`. The value block is routed to the inspector
     /// by `MainViewModel::feed_repl_line`.

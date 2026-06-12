@@ -2612,9 +2612,26 @@ fn build_console(app: &Rc<AppState>) -> GtkBox {
                 }
             }
             match keyval {
+                // Ctrl+L clears the console (MATLAB's clc); Ctrl+C interrupts a
+                // running command — but only with no selection, so Ctrl+C still
+                // copies selected text (terminal convention).
+                Key::l | Key::L if ctrl => {
+                    clear_console(&app);
+                    glib_stop()
+                }
+                Key::c | Key::C if ctrl && cbuf.selection_bounds().is_none() => {
+                    app.repl_interrupt();
+                    glib_stop()
+                }
                 Key::Return | Key::KP_Enter if !shift => {
                     let start = cbuf.iter_at_mark(&input_start);
                     let cmd = cbuf.text(&start, &cbuf.end_iter(), false).to_string();
+                    // `clc` clears the command window instead of running.
+                    if cmd.trim() == "clc" {
+                        app.vm.repl.input.set(String::new());
+                        clear_console(&app);
+                        return glib_stop();
+                    }
                     // Freeze the typed line and open a fresh prompt beneath it.
                     prog.set(true);
                     let mut e = cbuf.end_iter();
@@ -2930,12 +2947,16 @@ fn search_count_text(query: &str, n: usize) -> String {
 }
 
 /// Clear the bottom panel's currently-visible tab.
+/// Clear the console transcript (general log + REPL transcript). The inline
+/// terminal's renderer re-seeds itself to a single `>>` prompt on this shrink.
+fn clear_console(app: &Rc<AppState>) {
+    app.vm.console.clear();
+    app.vm.repl.transcript.update(|t| t.clear());
+}
+
 fn clear_current_tab(nb: &Notebook, app: &Rc<AppState>) {
     match nb.current_page() {
-        Some(0) => {
-            app.vm.console.clear();
-            app.vm.repl.transcript.update(|t| t.clear());
-        }
+        Some(0) => clear_console(app),
         Some(1) => app.vm.console.problems.update(|p| p.clear()),
         Some(idx) => {
             // Drop the generated artifact backing this page (idx 2.. ↔ map keys).
