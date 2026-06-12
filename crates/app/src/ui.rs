@@ -3308,6 +3308,75 @@ fn attach_var_menu(btn: &Button, app: &Rc<AppState>, name: &str) {
         });
         menu.append(&b);
     }
+
+    // Data actions — Copy name / Rename / Save / Clear, each dispatched to the
+    // REPL (or clipboard). MATLAB has no in-place rename, so it copies then
+    // clears the old binding.
+    menu.append(&gtk::Separator::new(Orientation::Horizontal));
+    let item = |label: &str| {
+        let b = Button::with_label(label);
+        b.set_has_frame(false);
+        b.set_halign(gtk::Align::Start);
+        b
+    };
+
+    let copy = item("Copy name");
+    {
+        let name = name.to_string();
+        let pop = pop.clone();
+        copy.connect_clicked(move |b| {
+            b.clipboard().set_text(&name);
+            pop.popdown();
+        });
+    }
+    menu.append(&copy);
+
+    let rename = item("Rename…");
+    {
+        let app = app.clone();
+        let old = name.to_string();
+        let pop = pop.clone();
+        rename.connect_clicked(move |_| {
+            pop.popdown();
+            let app = app.clone();
+            let old = old.clone();
+            let from = old.clone();
+            text_prompt(&format!("Rename “{old}” to…"), &old, move |new| {
+                let new = new.trim();
+                if !new.is_empty() && new != from {
+                    app.repl_send(&format!("{new} = {from}; clear {from}"));
+                }
+            });
+        });
+    }
+    menu.append(&rename);
+
+    let save = item("Save to .mat");
+    {
+        let app = app.clone();
+        let name = name.to_string();
+        let pop = pop.clone();
+        save.connect_clicked(move |_| {
+            app.repl_send(&format!("save('{name}.mat', '{name}')"));
+            app.vm.toast.show(format!("Saved {name}.mat to the working folder"));
+            pop.popdown();
+        });
+    }
+    menu.append(&save);
+
+    let clear = item("Clear variable");
+    clear.add_css_class("mf-log-error");
+    {
+        let app = app.clone();
+        let name = name.to_string();
+        let pop = pop.clone();
+        clear.connect_clicked(move |_| {
+            app.repl_send(&format!("clear {name}"));
+            pop.popdown();
+        });
+    }
+    menu.append(&clear);
+
     pop.set_child(Some(&menu));
 
     let gesture = gtk::GestureClick::new();
@@ -3331,6 +3400,55 @@ fn attach_var_menu(btn: &Button, app: &Rc<AppState>, name: &str) {
         });
     }
     btn.add_controller(drag);
+}
+
+/// A small modal text-entry dialog (Enter confirms, Esc cancels), parented to the
+/// main window. Used for one-off inputs like renaming a workspace variable.
+fn text_prompt(title: &str, initial: &str, on_ok: impl Fn(String) + 'static) {
+    let win = gtk::Window::builder().modal(true).decorated(false).default_width(280).build();
+    if let Some(p) = main_window() {
+        win.set_transient_for(Some(&p));
+    }
+    win.add_css_class("mf-root");
+    let bar = GtkBox::new(Orientation::Vertical, 0);
+    bar.add_css_class("mf-window");
+    bar.add_css_class("mf-palette");
+    let lbl = Label::new(Some(title));
+    lbl.set_halign(gtk::Align::Start);
+    lbl.set_margin_top(8);
+    lbl.set_margin_start(8);
+    lbl.set_margin_end(8);
+    let entry = Entry::new();
+    entry.set_text(initial);
+    entry.set_margin_top(6);
+    entry.set_margin_bottom(8);
+    entry.set_margin_start(8);
+    entry.set_margin_end(8);
+    bar.append(&lbl);
+    bar.append(&entry);
+    win.set_child(Some(&bar));
+    {
+        let win = win.clone();
+        entry.connect_activate(move |e| {
+            on_ok(e.text().to_string());
+            win.close();
+        });
+    }
+    let keys = gtk::EventControllerKey::new();
+    {
+        let win = win.clone();
+        keys.connect_key_pressed(move |_c, key, _code, _state| {
+            if key == gtk::gdk::Key::Escape {
+                win.close();
+                glib_stop()
+            } else {
+                gtk::glib::Propagation::Proceed
+            }
+        });
+    }
+    entry.add_controller(keys);
+    win.present();
+    entry.grab_focus();
 }
 
 /// A workspace table column. `min_chars` is a floor (not a fixed width); only
