@@ -289,6 +289,45 @@ fn build_menu_bar(window: &ApplicationWindow, app: &Rc<AppState>) -> gtk::Popove
         register("goto-line", Rc::new(move || goto_line_prompt(&a, &w2)));
     }
 
+    // Edit ▸ Undo/Redo/Cut/Copy/Paste/Select All. These target widget-scoped GTK
+    // actions (`text.*`, `clipboard.*`, `selection.*`) that only exist on the
+    // focused editable — so pointing the menu straight at them leaves the items
+    // greyed whenever focus isn't in a text widget (and the menu popover itself
+    // steals focus while open). Instead we track the text widget that last held
+    // focus and forward through always-enabled `win.*` actions, so the items stay
+    // live and act on the editor / console input / search box as expected.
+    let last_text_focus: Rc<std::cell::RefCell<Option<gtk::Widget>>> =
+        Rc::new(std::cell::RefCell::new(None));
+    {
+        let last = last_text_focus.clone();
+        window.connect_focus_widget_notify(move |win| {
+            if let Some(f) = gtk::prelude::GtkWindowExt::focus(win) {
+                if f.is::<gtk::Text>() || f.is::<gtk::TextView>() {
+                    *last.borrow_mut() = Some(f);
+                }
+            }
+        });
+    }
+    for (name, target) in [
+        ("undo", "text.undo"),
+        ("redo", "text.redo"),
+        ("cut", "clipboard.cut"),
+        ("copy", "clipboard.copy"),
+        ("paste", "clipboard.paste"),
+        ("select-all", "selection.select-all"),
+    ] {
+        let last = last_text_focus.clone();
+        let target = target.to_string();
+        register(
+            name,
+            Rc::new(move || {
+                if let Some(widget) = last.borrow().clone() {
+                    let _ = widget.activate_action(&target, None);
+                }
+            }),
+        );
+    }
+
     // Keyboard accelerators (shown automatically in the menu by GTK).
     if let Some(gapp) = window.application().and_then(|a| a.downcast::<gtk::Application>().ok()) {
         for (action, accels) in [
@@ -333,13 +372,13 @@ fn build_menu_bar(window: &ApplicationWindow, app: &Rc<AppState>) -> gtk::Popove
     menubar.append_submenu(Some("File"), &file);
 
     let edit = Menu::new();
-    edit.append(Some("Undo"), Some("text.undo"));
-    edit.append(Some("Redo"), Some("text.redo"));
+    edit.append(Some("Undo"), Some("win.undo"));
+    edit.append(Some("Redo"), Some("win.redo"));
     let clip = Menu::new();
-    clip.append(Some("Cut"), Some("clipboard.cut"));
-    clip.append(Some("Copy"), Some("clipboard.copy"));
-    clip.append(Some("Paste"), Some("clipboard.paste"));
-    clip.append(Some("Select All"), Some("selection.select-all"));
+    clip.append(Some("Cut"), Some("win.cut"));
+    clip.append(Some("Copy"), Some("win.copy"));
+    clip.append(Some("Paste"), Some("win.paste"));
+    clip.append(Some("Select All"), Some("win.select-all"));
     edit.append_section(None, &clip);
     let find_section = Menu::new();
     find_section.append(Some("Find in File"), Some("win.find-in-editor"));
@@ -2441,13 +2480,19 @@ fn build_console(app: &Rc<AppState>) -> GtkBox {
     let nb = Notebook::new();
     nb.set_vexpand(true);
 
-    // CONSOLE — color-coded transcript, matrix-retro green-on-black.
+    // CONSOLE — an inline MATLAB Command Window: one editable TextView that is
+    // both the scrollback transcript and the live `>>` command line. Output
+    // streams in *above* a prompt pinned to the bottom; everything before the
+    // current input is frozen (read-only) scrollback. Matrix-retro green-on-black.
     let console_view = TextView::new();
     console_view.set_monospace(true);
-    console_view.set_editable(false);
+    console_view.set_editable(true);
+    console_view.set_cursor_visible(true);
+    console_view.set_wrap_mode(gtk::WrapMode::WordChar);
     console_view.add_css_class("mf-terminal");
     console_view.set_left_margin(6);
     console_view.set_top_margin(4);
+    console_view.set_bottom_margin(4);
     let cbuf = console_view.buffer();
     for (name, color) in console_tag_colors() {
         if cbuf.tag_table().lookup(name).is_none() {
@@ -2456,43 +2501,155 @@ fn build_console(app: &Rc<AppState>) -> GtkBox {
     }
     let console_scroll = ScrolledWindow::new();
     console_scroll.set_child(Some(&console_view));
-    // An empty-state hint shown over the console until it has any output.
-    let console_empty = empty_state(
-        "utilities-terminal-symbolic",
-        "Console is empty",
-        "Run code or type a MATLAB command below.",
-    );
-    console_empty.set_can_target(false); // clicks pass through to the view
-    let console_overlay = gtk::Overlay::new();
-    console_overlay.set_child(Some(&console_scroll));
-    console_overlay.add_overlay(&console_empty);
-    nb.append_page(&console_overlay, Some(&Label::new(Some("CONSOLE"))));
+    nb.append_page(&console_scroll, Some(&Label::new(Some("CONSOLE"))));
 
-    let render = {
-        let app = app.clone();
-        let buf = console_view.buffer();
-        let console_empty = console_empty.clone();
-        move || {
-            buf.set_text("");
-            let mut any = false;
-            let all = app.vm.console.messages.get().into_iter().chain(app.vm.repl.transcript.get());
-            for m in all {
-                any = true;
-                let mut end = buf.end_iter();
-                buf.insert_with_tags_by_name(&mut end, &format!("{}\n", m.text), &[level_tag(m.level)]);
+    // Terminal state. `programmatic` marks our own edits so the read-only guard
+    // ignores them. `prompt_start` sits at the start of the final prompt line
+    // (output is inserted here, pushing the prompt down); `input_start` sits just
+    // after `>> ` — text from there to the buffer end is the editable command.
+    let programmatic = Rc::new(Cell::new(true));
+    let mut e = cbuf.end_iter();
+    cbuf.insert_with_tags_by_name(&mut e, ">> ", &["lvl-command"]);
+    let prompt_start = cbuf.create_mark(Some("mf_prompt_start"), &cbuf.iter_at_offset(0), false);
+    let input_start = cbuf.create_mark(Some("mf_input_start"), &cbuf.end_iter(), true);
+    programmatic.set(false);
+
+    // Read-only guard: veto user edits that fall before the input boundary.
+    {
+        let prog = programmatic.clone();
+        let input_start = input_start.clone();
+        cbuf.connect_insert_text(move |buf, iter, _text| {
+            if !prog.get() && iter.offset() < buf.iter_at_mark(&input_start).offset() {
+                buf.stop_signal_emission_by_name("insert-text");
             }
-            console_empty.set_visible(!any);
-        }
+        });
+    }
+    {
+        let prog = programmatic.clone();
+        let input_start = input_start.clone();
+        cbuf.connect_delete_range(move |buf, start, _end| {
+            if !prog.get() && start.offset() < buf.iter_at_mark(&input_start).offset() {
+                buf.stop_signal_emission_by_name("delete-range");
+            }
+        });
+    }
+
+    // Append-only renderer: draw just the new console/REPL items above the prompt.
+    // A shrink in either stream (a `clear()`) re-seeds the terminal to one prompt.
+    let msg_count = Rc::new(Cell::new(0usize));
+    let tr_count = Rc::new(Cell::new(0usize));
+    let append = {
+        let app = app.clone();
+        let cbuf = cbuf.clone();
+        let view = console_view.clone();
+        let prog = programmatic.clone();
+        let prompt_start = prompt_start.clone();
+        let input_start = input_start.clone();
+        let msg_count = msg_count.clone();
+        let tr_count = tr_count.clone();
+        Rc::new(move || {
+            let msgs = app.vm.console.messages.get();
+            let tr = app.vm.repl.transcript.get();
+            prog.set(true);
+            if msgs.len() < msg_count.get() || tr.len() < tr_count.get() {
+                cbuf.set_text("");
+                let mut e = cbuf.end_iter();
+                cbuf.insert_with_tags_by_name(&mut e, ">> ", &["lvl-command"]);
+                cbuf.move_mark(&prompt_start, &cbuf.iter_at_offset(0));
+                cbuf.move_mark(&input_start, &cbuf.end_iter());
+                msg_count.set(0);
+                tr_count.set(0);
+            }
+            for m in msgs.iter().skip(msg_count.get()) {
+                let mut it = cbuf.iter_at_mark(&prompt_start);
+                cbuf.insert_with_tags_by_name(&mut it, &format!("{}\n", m.text), &[level_tag(m.level)]);
+            }
+            msg_count.set(msgs.len());
+            for m in tr.iter().skip(tr_count.get()) {
+                // The `>> cmd` echo is already typed into the buffer; don't redraw it.
+                if m.level == ConsoleLevel::Command {
+                    continue;
+                }
+                let mut it = cbuf.iter_at_mark(&prompt_start);
+                cbuf.insert_with_tags_by_name(&mut it, &format!("{}\n", m.text), &[level_tag(m.level)]);
+            }
+            tr_count.set(tr.len());
+            prog.set(false);
+            let mut end = cbuf.end_iter();
+            view.scroll_to_iter(&mut end, 0.0, false, 0.0, 0.0);
+        })
     };
-    render();
+    append();
     {
-        let render = render.clone();
-        app.vm.console.messages.subscribe(move |_| render());
+        let append = append.clone();
+        app.vm.console.messages.subscribe(move |_| append());
     }
     {
-        let render = render.clone();
-        app.vm.repl.transcript.subscribe(move |_| render());
+        let append = append.clone();
+        app.vm.repl.transcript.subscribe(move |_| append());
     }
+
+    // Enter runs the command; ↑/↓ recall history; typing in frozen scrollback
+    // jumps the caret back to the prompt.
+    let key = gtk::EventControllerKey::new();
+    key.set_propagation_phase(gtk::PropagationPhase::Capture);
+    {
+        let app = app.clone();
+        let cbuf = cbuf.clone();
+        let view = console_view.clone();
+        let prog = programmatic.clone();
+        let prompt_start = prompt_start.clone();
+        let input_start = input_start.clone();
+        key.connect_key_pressed(move |_c, keyval, _code, state| {
+            use gtk::gdk::Key;
+            let ctrl = state.contains(gtk::gdk::ModifierType::CONTROL_MASK);
+            let alt = state.contains(gtk::gdk::ModifierType::ALT_MASK);
+            let shift = state.contains(gtk::gdk::ModifierType::SHIFT_MASK);
+            if !ctrl && !alt && keyval.to_unicode().is_some() {
+                let guard = cbuf.iter_at_mark(&input_start).offset();
+                if cbuf.cursor_position() < guard {
+                    cbuf.place_cursor(&cbuf.end_iter());
+                }
+            }
+            match keyval {
+                Key::Return | Key::KP_Enter if !shift => {
+                    let start = cbuf.iter_at_mark(&input_start);
+                    let cmd = cbuf.text(&start, &cbuf.end_iter(), false).to_string();
+                    // Freeze the typed line and open a fresh prompt beneath it.
+                    prog.set(true);
+                    let mut e = cbuf.end_iter();
+                    cbuf.insert(&mut e, "\n");
+                    let line_start = cbuf.end_iter().offset();
+                    let mut e = cbuf.end_iter();
+                    cbuf.insert_with_tags_by_name(&mut e, ">> ", &["lvl-command"]);
+                    cbuf.move_mark(&prompt_start, &cbuf.iter_at_offset(line_start));
+                    cbuf.move_mark(&input_start, &cbuf.end_iter());
+                    cbuf.place_cursor(&cbuf.end_iter());
+                    prog.set(false);
+                    let mut end = cbuf.end_iter();
+                    view.scroll_to_iter(&mut end, 0.0, false, 0.0, 0.0);
+                    app.vm.repl.input.set(cmd);
+                    if let Some(command) = app.vm.repl.submit() {
+                        app.repl_send(&command);
+                    }
+                    glib_stop()
+                }
+                Key::Up => {
+                    app.vm.repl.recall_previous();
+                    replace_input(&cbuf, &prog, &input_start, &app.vm.repl.input.get());
+                    glib_stop()
+                }
+                Key::Down => {
+                    app.vm.repl.recall_next();
+                    replace_input(&cbuf, &prog, &input_start, &app.vm.repl.input.get());
+                    glib_stop()
+                }
+                _ => gtk::glib::Propagation::Proceed,
+            }
+        });
+    }
+    console_view.add_controller(key);
+    crate::e2e::set_repl_entry(&console_view);
 
     // PROBLEMS — clickable diagnostics that jump to the source line.
     let problems = ListBox::new();
@@ -2648,60 +2805,21 @@ fn build_console(app: &Rc<AppState>) -> GtkBox {
         }
     }
     panel.append(&nb);
-
-    // Live REPL input.
-    let input_row = GtkBox::new(Orientation::Horizontal, 4);
-    input_row.add_css_class("mf-term-panel");
-    let prompt = Label::new(Some(">>"));
-    prompt.add_css_class("mf-prompt");
-    let entry = Entry::new();
-    entry.set_hexpand(true);
-    entry.add_css_class("mf-terminal-entry");
-    entry.set_placeholder_text(Some("MATLAB command…"));
-    crate::e2e::set_repl_entry(&entry);
-    {
-        let app = app.clone();
-        let entry2 = entry.clone();
-        entry.connect_activate(move |_| {
-            app.vm.repl.input.set(entry2.text().to_string());
-            if let Some(cmd) = app.vm.repl.submit() {
-                entry2.set_text("");
-                app.repl_send(&cmd);
-            }
-        });
-    }
-    // ↑/↓ history recall.
-    let key = gtk::EventControllerKey::new();
-    {
-        let app = app.clone();
-        let entry2 = entry.clone();
-        key.connect_key_pressed(move |_c, keyval, _code, _state| {
-            match keyval {
-                gtk::gdk::Key::Up => {
-                    app.vm.repl.recall_previous();
-                    entry2.set_text(&app.vm.repl.input.get());
-                    entry2.set_position(-1);
-                    glib_stop()
-                }
-                gtk::gdk::Key::Down => {
-                    app.vm.repl.recall_next();
-                    entry2.set_text(&app.vm.repl.input.get());
-                    entry2.set_position(-1);
-                    glib_stop()
-                }
-                _ => gtk::glib::Propagation::Proceed,
-            }
-        });
-    }
-    entry.add_controller(key);
-    input_row.append(&prompt);
-    input_row.append(&entry);
-    input_row.set_margin_start(8);
-    input_row.set_margin_end(8);
-    input_row.set_margin_top(2);
-    input_row.set_margin_bottom(2);
-    panel.append(&input_row);
     panel
+}
+
+/// Replace the editable command (from `input_start` to the buffer end) with
+/// `text`, used by ↑/↓ history recall. Marked programmatic so the read-only
+/// guard does not veto the edit.
+fn replace_input(cbuf: &gtk::TextBuffer, prog: &Rc<Cell<bool>>, input_start: &gtk::TextMark, text: &str) {
+    prog.set(true);
+    let mut start = cbuf.iter_at_mark(input_start);
+    let mut end = cbuf.end_iter();
+    cbuf.delete(&mut start, &mut end);
+    let mut at = cbuf.iter_at_mark(input_start);
+    cbuf.insert(&mut at, text);
+    cbuf.place_cursor(&cbuf.end_iter());
+    prog.set(false);
 }
 
 fn glib_stop() -> gtk::glib::Propagation {
