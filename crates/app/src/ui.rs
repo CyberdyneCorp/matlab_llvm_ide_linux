@@ -3069,14 +3069,16 @@ fn build_right_column(app: &Rc<AppState>) -> Paned {
 
     let paned = Paned::new(Orientation::Horizontal);
     paned.set_wide_handle(true);
-    // A more compact right column so it doesn't dominate smaller screens.
-    paned.set_size_request(440, -1);
+    // A more compact right column so it doesn't dominate smaller screens. The
+    // workspace needs ~250px to show its NAME/VALUE/TYPE/SIZE columns without
+    // clipping, leaving the rest for the plots preview.
+    paned.set_size_request(470, -1);
     paned.add_css_class("mf-border-left");
     paned.set_start_child(Some(&workspace));
     paned.set_end_child(Some(&plots));
     paned.set_resize_start_child(true);
     paned.set_resize_end_child(true);
-    paned.set_position(230);
+    paned.set_position(250);
 
     {
         let workspace = workspace.clone();
@@ -3159,6 +3161,11 @@ fn build_workspace(app: &Rc<AppState>) -> GtkBox {
     // Inspector tabs.
     let insp = Notebook::new();
     insp.set_size_request(-1, 180);
+    // Without this, the four tab labels (VARIABLE/MATRIX/TABLE/BLOCK) force the
+    // notebook's minimum width to their combined size (~260px), which exceeds the
+    // workspace's column slot and clips the whole panel. Scrolling tabs lets it
+    // shrink to the available width instead.
+    insp.set_scrollable(true);
     insp.append_page(&build_variable_inspector(app), Some(&Label::new(Some("VARIABLE"))));
     insp.append_page(&build_matrix_viewer(app), Some(&Label::new(Some("MATRIX"))));
     insp.append_page(&build_table_viewer(app), Some(&Label::new(Some("TABLE"))));
