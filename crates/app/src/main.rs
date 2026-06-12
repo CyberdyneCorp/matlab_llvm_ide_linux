@@ -41,7 +41,8 @@ use services_impl::{GtkClipboard, NoopFilePicker};
 const APP_ID: &str = "org.matlab_llvm.MatForge";
 
 fn main() -> glib::ExitCode {
-    let app = Application::builder().application_id(APP_ID).build();
+    let app_id = std::env::var("MATFORGE_APP_ID").unwrap_or_else(|_| APP_ID.to_string());
+    let app = Application::builder().application_id(app_id).build();
     app.connect_startup(|_| {
         icons::install();
     });
