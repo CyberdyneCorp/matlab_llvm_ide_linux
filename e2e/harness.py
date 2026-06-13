@@ -35,6 +35,12 @@ class App:
             os.remove(state_path)
         env = dict(os.environ)
         env["MATFORGE_E2E_STATE"] = state_path
+        # Hermetic config: a fresh XDG_CONFIG_HOME so a developer's saved layout
+        # (e.g. a hidden Plots/Workspace panel) can't change which panels are
+        # visible and break panel-rect lookups. Defaults → all panels shown.
+        cfg = state_path + ".config"
+        subprocess.run(["rm", "-rf", cfg], stderr=subprocess.DEVNULL)
+        env["XDG_CONFIG_HOME"] = cfg
         if env_extra:
             env.update(env_extra)
         # Detach so it survives this process; we kill the group on close.
@@ -124,6 +130,16 @@ class App:
         xtest.fake_input(self.disp, X.MotionNotify, x=x, y=y); self.disp.sync(); time.sleep(0.05)
         xtest.fake_input(self.disp, X.ButtonPress, 1); self.disp.sync(); time.sleep(0.05)
         xtest.fake_input(self.disp, X.ButtonRelease, 1); self.disp.sync(); time.sleep(0.15)
+
+    def double_click_window(self, win_x, win_y):
+        self.origin = self._window_origin()
+        x, y = self._screen_xy(win_x, win_y)
+        xtest.fake_input(self.disp, X.MotionNotify, x=x, y=y); self.disp.sync(); time.sleep(0.06)
+        for _ in range(2):
+            xtest.fake_input(self.disp, X.ButtonPress, 1); self.disp.sync()
+            xtest.fake_input(self.disp, X.ButtonRelease, 1); self.disp.sync()
+            time.sleep(0.06)
+        time.sleep(0.15)
 
     def key(self, keysym_name, shift=False, ctrl=False):
         code = self.disp.keysym_to_keycode(XK.string_to_keysym(keysym_name))

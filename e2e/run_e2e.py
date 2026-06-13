@@ -7,6 +7,7 @@ asserts on the app's published state. Run via `just e2e` (builds first).
 
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from harness import App, check, summary_and_exit  # noqa: E402
@@ -164,15 +165,115 @@ def scenario_problems_pane():
         app.close()
 
 
+def scenario_explorer_double_click():
+    print("scenario: Explorer opens a file on double-click, not single-click")
+    proj = "/tmp/mf_e2e_explore"
+    os.makedirs(proj, exist_ok=True)
+    with open(os.path.join(proj, "zzz.m"), "w") as f:
+        f.write("q = 1;\n")
+    app = App(env_extra={"MATFORGE_OPEN": proj})
+    try:
+        lx, ly, lw, lh = app.wait_rect("explorer_list_rect")
+        rx, ry = lx + 30, ly + 12                        # first row near the top
+        app.click_window(rx, ry)                         # single click: select only
+        time.sleep(0.8)
+        st = app.state()
+        check("single click does NOT open the file", "zzz.m" not in st.get("tabs", []),
+              f"tabs={st.get('tabs')}")
+        app.double_click_window(rx, ry)                  # double click: open
+        st = app.wait_for(lambda s: "zzz.m" in s.get("tabs", []), timeout=8,
+                          what="file opened on double-click")
+        check("double click opens the file", "zzz.m" in st.get("tabs", []), f"tabs={st.get('tabs')}")
+    finally:
+        app.close()
+
+
+def scenario_debug_session():
+    print("scenario: debug session pauses at a breakpoint, steps, and evaluates a watch")
+    if not os.path.exists(MATLABC):
+        check("debug session (skipped: matlabc not found)", True, "skipped")
+        return
+    app = App(env_extra={"MATFORGE_OPEN": PROJ, "MATFORGE_FILE": MAIN,
+                         "MATFORGE_BP": "2", "MATFORGE_DEBUG": "1", "MATLABC_PATH": MATLABC})
+    try:
+        st = app.wait_for(lambda s: s.get("debug_state") == "Paused", timeout=25,
+                          what="paused at breakpoint")
+        check("debug session pauses at the breakpoint", st.get("debug_state") == "Paused",
+              f"line={st.get('execution_line')}")
+        line0 = st.get("execution_line")
+
+        # Step over (toolbar button — app accelerators don't fire under XTEST).
+        nx, ny, nw, nh = app.wait_rect("debug_next_rect")
+        app.click_window(nx + nw // 2, ny + nh // 2)
+        st = app.wait_for(lambda s: s.get("execution_line") and s.get("execution_line") != line0,
+                          timeout=15, what="step over advances the line")
+        check("step over advances the execution line", st.get("execution_line") != line0,
+              f"{line0} -> {st.get('execution_line')}")
+
+        # Evaluate a watch expression on the paused frame.
+        wx, wy, ww, wh = app.wait_rect("watch_entry_rect")
+        app.click_window(wx + ww // 2, wy + wh // 2)
+        app.type_text("a")
+        app.key("Return")
+        st = app.wait_for(lambda s: s.get("watch", 0) > 0, timeout=15, what="watch result")
+        check("watch evaluates an expression", st.get("watch", 0) > 0, f"watch={st.get('watch')}")
+
+        # Continue — the session should run to completion.
+        cx, cy, cw, ch = app.wait_rect("debug_continue_rect")
+        app.click_window(cx + cw // 2, cy + ch // 2)
+        st = app.wait_for(lambda s: s.get("debug_state") in ("Terminated", "Idle"),
+                          timeout=20, what="debug session ends")
+        check("continue ends the debug session", st.get("debug_state") in ("Terminated", "Idle"),
+              f"state={st.get('debug_state')}")
+    finally:
+        app.close()
+
+
+def scenario_plot_animation():
+    print("scenario: a plotted vector is a scrub-able animation (trace reveal)")
+    if not os.path.exists(MATLABC):
+        check("plot animation (skipped: matlabc not found)", True, "skipped")
+        return
+    app = App(env_extra={"MATFORGE_OPEN": PROJ, "MATLABC_PATH": MATLABC})
+    try:
+        ex, ey, ew, eh = app.wait_rect("repl_entry_rect")
+        app.click_window(ex + ew // 2, ey + eh // 2)
+        app.type_text("V = [1 2 3 4 5 6]")
+        app.key("Return")
+        app.wait_for(lambda s: "V" in s.get("workspace", []), timeout=20, what="var V")
+
+        tx, ty, tw, th = app.wait_rect("workspace_table_rect")
+        app.click_window(tx + 30, ty + 12)               # inspect V
+        app.wait_for(lambda s: s.get("inspected_matrix"), timeout=15, what="inspected V")
+
+        px, py, pw, ph = app.wait_rect("plots_add_rect")
+        app.click_window(px + pw // 2, py + ph // 2)      # plot V
+        st = app.wait_for(lambda s: s.get("plot_anim", 0) > 1, timeout=15,
+                          what="scrub-able figure (animation_len>1)")
+        check("a plotted vector is scrub-able (animation_len>1)", st.get("plot_anim", 0) > 1,
+              f"plot_anim={st.get('plot_anim')}")
+
+        # The playback bar appears; clicking play must not crash and keeps the figure.
+        bx, by, bw, bh = app.wait_rect("plots_play_rect", timeout=8)
+        app.click_window(bx + bw // 2, by + bh // 2)
+        st = app.wait_for(lambda s: s.get("plots", 0) >= 1, timeout=5, what="figure survives playback")
+        check("the animation play button is live", st.get("plots", 0) >= 1, f"plots={st.get('plots')}")
+    finally:
+        app.close()
+
+
 def main():
     setup_project()
     scenario_search()
     scenario_problems_pane()
     scenario_gutter_breakpoint()
     scenario_f9_breakpoint()
+    scenario_explorer_double_click()
     scenario_repl_workspace()
     scenario_inspect_and_plot()
     scenario_repl_plot()
+    scenario_plot_animation()
+    scenario_debug_session()
     summary_and_exit()
 
 

@@ -546,6 +546,12 @@ fn build_toolbar(window: &ApplicationWindow, app: &Rc<AppState>) -> GtkBox {
         (ic::STEP_BACK, "Step Back", "stepBack"),
     ] {
         let b = tool_button(icon, label, None);
+        // Drive targets for the e2e harness (accelerators don't fire under XTEST).
+        match cmd {
+            "continue" => crate::e2e::set_debug_continue(&b),
+            "next" => crate::e2e::set_debug_next(&b),
+            _ => {}
+        }
         let app = app.clone();
         b.connect_clicked(move |_| app.debug_command(cmd));
         debug_controls.append(&b);
@@ -814,6 +820,7 @@ fn build_explorer(app: &Rc<AppState>) -> GtkBox {
     panel.append(&panel_header("EXPLORER", &[refresh, close]));
 
     let list = ListBox::new();
+    crate::e2e::set_explorer_list(&list);
     let scroll = ScrolledWindow::new();
     scroll.set_vexpand(true);
     scroll.set_child(Some(&list));
@@ -1753,6 +1760,7 @@ fn build_debug_panel(app: &Rc<AppState>) -> ScrolledWindow {
     // Watch.
     panel.append(&sub_header("WATCH"));
     let watch_entry = panel_entry("expression + Enter");
+    crate::e2e::set_watch_entry(&watch_entry);
     {
         let app = app.clone();
         let e = watch_entry.clone();
@@ -4099,6 +4107,7 @@ fn build_plots(app: &Rc<AppState>) -> GtkBox {
     let play_btn = Button::from_icon_name(ic::RUN);
     play_btn.add_css_class("mf-header-action");
     play_btn.set_tooltip_text(Some("Play / pause animation"));
+    crate::e2e::set_plots_play(&play_btn);
     let scrubber = gtk::Scale::with_range(Orientation::Horizontal, 0.0, 1.0, 1.0);
     scrubber.set_hexpand(true);
     scrubber.set_draw_value(false);

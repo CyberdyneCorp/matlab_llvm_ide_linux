@@ -24,6 +24,36 @@ thread_local! {
     static WORKSPACE_TABLE: RefCell<Option<gtk::Widget>> = const { RefCell::new(None) };
     static PLOTS_ADD: RefCell<Option<gtk::Widget>> = const { RefCell::new(None) };
     static SEARCH_ENTRY: RefCell<Option<gtk::Widget>> = const { RefCell::new(None) };
+    static WATCH_ENTRY: RefCell<Option<gtk::Widget>> = const { RefCell::new(None) };
+    static PLOTS_PLAY: RefCell<Option<gtk::Widget>> = const { RefCell::new(None) };
+    static EXPLORER_LIST: RefCell<Option<gtk::Widget>> = const { RefCell::new(None) };
+    static DEBUG_NEXT: RefCell<Option<gtk::Widget>> = const { RefCell::new(None) };
+    static DEBUG_CONTINUE: RefCell<Option<gtk::Widget>> = const { RefCell::new(None) };
+}
+
+/// Record the Explorer file-tree list (drive target).
+pub fn set_explorer_list(w: &impl IsA<gtk::Widget>) {
+    EXPLORER_LIST.with(|c| *c.borrow_mut() = Some(w.clone().upcast()));
+}
+
+/// Record the toolbar "Step Over" debug button (drive target).
+pub fn set_debug_next(w: &impl IsA<gtk::Widget>) {
+    DEBUG_NEXT.with(|c| *c.borrow_mut() = Some(w.clone().upcast()));
+}
+
+/// Record the toolbar "Continue" debug button (drive target).
+pub fn set_debug_continue(w: &impl IsA<gtk::Widget>) {
+    DEBUG_CONTINUE.with(|c| *c.borrow_mut() = Some(w.clone().upcast()));
+}
+
+/// Record the debug Watch expression entry (drive target).
+pub fn set_watch_entry(w: &impl IsA<gtk::Widget>) {
+    WATCH_ENTRY.with(|c| *c.borrow_mut() = Some(w.clone().upcast()));
+}
+
+/// Record the Plots animation play/pause button (drive target).
+pub fn set_plots_play(w: &impl IsA<gtk::Widget>) {
+    PLOTS_PLAY.with(|c| *c.borrow_mut() = Some(w.clone().upcast()));
 }
 
 /// Record the find-in-files entry (drive target).
@@ -73,6 +103,13 @@ pub fn install_state_dump(app: Rc<AppState>, path: PathBuf) {
             .unwrap_or_default();
         breakpoints.sort_unstable();
 
+        // Selected (or latest) figure: animation length + kind, for plot tests.
+        let sel = app.vm.plots.selected_id.get();
+        let (plot_anim, plot_kind) = app.vm.plots.figures.with(|figs| {
+            let f = sel.and_then(|id| figs.iter().find(|f| f.id == id)).or_else(|| figs.last());
+            (f.map(|f| f.animation_len()).unwrap_or(0), f.map(|f| f.kind.label().to_string()))
+        });
+
         let snap = json!({
             "active_tab": active.as_ref().map(|t| t.name.clone()),
             "active_breakpoints": breakpoints,
@@ -88,6 +125,10 @@ pub fn install_state_dump(app: Rc<AppState>, path: PathBuf) {
             "console": app.vm.console.messages.with(|m| m.len()),
             "watch": app.vm.debug.evaluations.with(|e| e.len()),
             "function_breakpoints": app.vm.breakpoints.function_bps.with(|b| b.len()),
+            "debug_state": format!("{:?}", app.vm.debug.state.get()),
+            "debug_line": app.vm.debug.current_line.get(),
+            "plot_anim": plot_anim,
+            "plot_kind": plot_kind,
             "status": app.vm.status_bar.state.with(|s| s.message.clone()),
             "sidebar_visible": app.vm.layout.sidebar_visible.get(),
             "right_visible": app.vm.layout.workspace_visible.get(),
@@ -96,6 +137,11 @@ pub fn install_state_dump(app: Rc<AppState>, path: PathBuf) {
             "workspace_table_rect": WORKSPACE_TABLE.with(|c| c.borrow().as_ref().and_then(rect_in_window)),
             "plots_add_rect": PLOTS_ADD.with(|c| c.borrow().as_ref().and_then(rect_in_window)),
             "search_entry_rect": SEARCH_ENTRY.with(|c| c.borrow().as_ref().and_then(rect_in_window)),
+            "watch_entry_rect": WATCH_ENTRY.with(|c| c.borrow().as_ref().and_then(rect_in_window)),
+            "plots_play_rect": PLOTS_PLAY.with(|c| c.borrow().as_ref().and_then(rect_in_window)),
+            "explorer_list_rect": EXPLORER_LIST.with(|c| c.borrow().as_ref().and_then(rect_in_window)),
+            "debug_next_rect": DEBUG_NEXT.with(|c| c.borrow().as_ref().and_then(rect_in_window)),
+            "debug_continue_rect": DEBUG_CONTINUE.with(|c| c.borrow().as_ref().and_then(rect_in_window)),
         });
 
         let tmp = path.with_extension("json.tmp");
