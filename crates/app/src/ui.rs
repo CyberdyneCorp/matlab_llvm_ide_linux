@@ -3188,8 +3188,50 @@ fn build_workspace(app: &Rc<AppState>) -> GtkBox {
     }
     panel.append(&panel_header("WORKSPACE", &[refresh, close]));
 
-    // Column header.
-    panel.append(&ws_columns_header());
+    // Filter box — narrow the table to variables whose name matches.
+    let filter = gtk::SearchEntry::new();
+    filter.set_placeholder_text(Some("Filter variables…"));
+    filter.add_css_class("mf-ws-filter");
+    filter.set_margin_start(6);
+    filter.set_margin_end(6);
+    filter.set_margin_top(4);
+    filter.set_margin_bottom(2);
+    panel.append(&filter);
+
+    // Sortable column header: click a title to sort by it; click again to reverse.
+    // `sort` is (column index, ascending).
+    let sort = Rc::new(Cell::new((0usize, true)));
+    let header = GtkBox::new(Orientation::Horizontal, 4);
+    header.add_css_class("mf-col-header");
+    let header_lbls: Rc<Vec<Label>> = Rc::new(
+        WS_COLS
+            .iter()
+            .map(|c| {
+                let l = Label::new(Some(c.title));
+                l.add_css_class("mf-col-title");
+                l.set_xalign(c.xalign);
+                l.set_ellipsize(gtk::pango::EllipsizeMode::End);
+                l.set_width_chars(c.min_chars);
+                l.set_hexpand(c.expand);
+                l.set_cursor_from_name(Some("pointer"));
+                l
+            })
+            .collect(),
+    );
+    let update_arrows = {
+        let header_lbls = header_lbls.clone();
+        let sort = sort.clone();
+        Rc::new(move || {
+            let (col, asc) = sort.get();
+            for (i, l) in header_lbls.iter().enumerate() {
+                if i == col {
+                    l.set_text(&format!("{} {}", WS_COLS[i].title, if asc { "▲" } else { "▼" }));
+                } else {
+                    l.set_text(WS_COLS[i].title);
+                }
+            }
+        })
+    };
 
     // Table / empty-state stack.
     let table = ListBox::new();
@@ -3206,27 +3248,73 @@ fn build_workspace(app: &Rc<AppState>) -> GtkBox {
     body.set_vexpand(true);
     body.add_named(&tscroll, Some("table"));
     body.add_named(&empty, Some("empty"));
-    panel.append(&body);
 
-    {
+    // Shared render: filter + sort the variables and rebuild the rows. Driven by
+    // variable changes, the filter box, and header clicks.
+    let render = {
+        let app = app.clone();
+        let table = table.clone();
         let body = body.clone();
-        let app2 = app.clone();
-        app.vm.workspace.variables.bind(move |vars| {
+        let filter = filter.clone();
+        let sort = sort.clone();
+        Rc::new(move || {
+            let q = filter.text().to_lowercase();
+            let (col, asc) = sort.get();
+            let mut vars = app.vm.workspace.variables.get();
+            if !q.is_empty() {
+                vars.retain(|v| v.name.to_lowercase().contains(&q));
+            }
+            vars.sort_by(|a, b| ws_cmp(a, b, col));
+            if !asc {
+                vars.reverse();
+            }
             clear_list(&table);
-            for v in vars {
+            for v in &vars {
                 let btn = ws_variable_row(v);
                 {
-                    let app3 = app2.clone();
+                    let app = app.clone();
                     let name = v.name.clone();
                     // Left-click: select + capture the value into the Matrix Viewer.
-                    btn.connect_clicked(move |_| app3.inspect_variable(&name));
+                    btn.connect_clicked(move |_| app.inspect_variable(&name));
                 }
-                attach_var_menu(&btn, &app2, &v.name); // right-click: Plot As…
+                attach_var_menu(&btn, &app, &v.name); // right-click: Plot/Save/Clear…
                 table.append(&btn);
             }
-            body.set_visible_child_name(if vars.is_empty() { "empty" } else { "table" });
+            // Only the truly-empty workspace shows the hint; a no-match filter just
+            // leaves the table empty.
+            let none = app.vm.workspace.variables.with(|vs| vs.is_empty());
+            body.set_visible_child_name(if none { "empty" } else { "table" });
+        })
+    };
+
+    // Wire header clicks (sort), filter changes, and variable updates to render.
+    for (i, l) in header_lbls.iter().enumerate() {
+        let gesture = gtk::GestureClick::new();
+        let sort = sort.clone();
+        let render = render.clone();
+        let update_arrows = update_arrows.clone();
+        gesture.connect_released(move |_, _, _, _| {
+            let (col, asc) = sort.get();
+            sort.set(if col == i { (i, !asc) } else { (i, true) });
+            update_arrows();
+            render();
         });
+        l.add_controller(gesture);
+        header.append(l);
     }
+    {
+        let render = render.clone();
+        filter.connect_search_changed(move |_| render());
+    }
+    {
+        let render = render.clone();
+        app.vm.workspace.variables.subscribe(move |_| render());
+    }
+    update_arrows();
+    render();
+
+    panel.append(&header);
+    panel.append(&body);
 
     // Inspector tabs.
     let insp = Notebook::new();
@@ -3520,19 +3608,30 @@ const WS_COLS: [WsCol; 4] = [
     WsCol { title: "SIZE", min_chars: 7, expand: false, xalign: 1.0, dim: true },
 ];
 
-fn ws_columns_header() -> GtkBox {
-    let row = GtkBox::new(Orientation::Horizontal, 4);
-    row.add_css_class("mf-col-header");
-    for c in &WS_COLS {
-        let l = Label::new(Some(c.title));
-        l.add_css_class("mf-col-title");
-        l.set_xalign(c.xalign);
-        l.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        l.set_width_chars(c.min_chars);
-        l.set_hexpand(c.expand);
-        row.append(&l);
+/// Order two workspace variables by column: 0=name, 1=value preview, 2=type,
+/// 3=size (by element count). Names/types compare case-insensitively.
+fn ws_cmp(
+    a: &matforge_core::models::WorkspaceVariable,
+    b: &matforge_core::models::WorkspaceVariable,
+    col: usize,
+) -> std::cmp::Ordering {
+    match col {
+        1 => a.preview.cmp(&b.preview),
+        2 => a.dtype.display_name().cmp(&b.dtype.display_name()),
+        3 => ws_size_magnitude(&a.size).cmp(&ws_size_magnitude(&b.size)),
+        _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
     }
-    row
+}
+
+/// The element count implied by a size string like "10x10" or "1×5"; 0 if it has
+/// no parseable dimensions, so non-array entries sort first.
+fn ws_size_magnitude(size: &str) -> u64 {
+    let dims: Vec<u64> = size.split(['x', '×', 'X']).filter_map(|p| p.trim().parse().ok()).collect();
+    if dims.is_empty() {
+        0
+    } else {
+        dims.iter().product()
+    }
 }
 
 fn ws_variable_row(v: &matforge_core::models::WorkspaceVariable) -> Button {
