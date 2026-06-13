@@ -2494,10 +2494,14 @@ fn build_console(app: &Rc<AppState>) -> GtkBox {
     console_view.set_top_margin(4);
     console_view.set_bottom_margin(4);
     let cbuf = console_view.buffer();
-    for (name, color) in console_tag_colors() {
-        if cbuf.tag_table().lookup(name).is_none() {
-            cbuf.create_tag(Some(name), &[("foreground", &color.to_css())]);
-        }
+    refresh_console_tags(&cbuf, &app.vm.appearance.tokens());
+    {
+        // Recolor the level tags when the theme changes (e.g. dark → light).
+        let cbuf = cbuf.clone();
+        let app = app.clone();
+        app.clone().vm.appearance.revision.subscribe(move |_| {
+            refresh_console_tags(&cbuf, &app.vm.appearance.tokens());
+        });
     }
     let console_scroll = ScrolledWindow::new();
     console_scroll.set_child(Some(&console_view));
@@ -2984,19 +2988,49 @@ fn level_tag(level: ConsoleLevel) -> &'static str {
     }
 }
 
-fn console_tag_colors() -> [(&'static str, matforge_core::theme::Rgb); 7] {
+/// Per-level console text colors for the active theme. Dark themes keep the
+/// signature matrix-retro greens (bright inks that pop on near-black); light
+/// themes derive readable dark inks from the theme so the console reads like a
+/// classic white MATLAB Command Window.
+fn console_tag_colors(t: &matforge_core::theme::ThemeTokens) -> [(&'static str, matforge_core::theme::Rgb); 7] {
     use matforge_core::theme::Rgb;
-    // Matrix-retro terminal palette: greens for normal output, red/yellow kept
-    // for errors/warnings so they still pop on the near-black background.
-    [
-        ("lvl-error", Rgb::hex(0xFF5C57)),
-        ("lvl-warning", Rgb::hex(0xF3F99D)),
-        ("lvl-success", Rgb::hex(0x5AF78E)),
-        ("lvl-command", Rgb::hex(0x7CFC8A)),
-        ("lvl-debug", Rgb::hex(0x2F8F3F)),
-        ("lvl-info", Rgb::hex(0x57C7B8)),
-        ("lvl-plain", Rgb::hex(0x43D459)),
-    ]
+    if t.dark {
+        [
+            ("lvl-error", Rgb::hex(0xFF5C57)),
+            ("lvl-warning", Rgb::hex(0xF3F99D)),
+            ("lvl-success", Rgb::hex(0x5AF78E)),
+            ("lvl-command", Rgb::hex(0x7CFC8A)),
+            ("lvl-debug", Rgb::hex(0x2F8F3F)),
+            ("lvl-info", Rgb::hex(0x57C7B8)),
+            ("lvl-plain", Rgb::hex(0x43D459)),
+        ]
+    } else {
+        [
+            ("lvl-error", t.red),
+            ("lvl-warning", t.yellow),
+            ("lvl-success", t.green),
+            ("lvl-command", t.term_fg),
+            ("lvl-debug", t.text_secondary),
+            ("lvl-info", t.cyan),
+            ("lvl-plain", t.term_fg),
+        ]
+    }
+}
+
+/// Create or recolor the console's per-level text tags for `tokens`. Called once
+/// at build and again whenever the appearance (theme) changes. Reads the tokens
+/// straight from the appearance VM rather than the cached render so it doesn't
+/// race the CSS re-render on a theme switch.
+fn refresh_console_tags(buf: &gtk::TextBuffer, tokens: &matforge_core::theme::ThemeTokens) {
+    let table = buf.tag_table();
+    for (name, color) in console_tag_colors(tokens) {
+        match table.lookup(name) {
+            Some(tag) => tag.set_property("foreground", color.to_css()),
+            None => {
+                buf.create_tag(Some(name), &[("foreground", &color.to_css())]);
+            }
+        }
+    }
 }
 
 /// Open the diagnostic's file (if needed) and scroll to its line.

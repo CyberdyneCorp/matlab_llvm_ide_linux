@@ -329,8 +329,9 @@ impl ThemeTokens {
             text_secondary: Rgb::hex(0x4A586B),
             text_muted: Rgb::hex(0x8492A6),
             accent: Rgb::hex(0xC9702C),
-            term_bg: Rgb::hex(0x0E1622),
-            term_fg: Rgb::hex(0x46D267),
+            // Classic MATLAB Command Window: white surface, near-black ink.
+            term_bg: Rgb::hex(0xFFFFFF),
+            term_fg: Rgb::hex(0x1B2430),
             orange: Rgb::hex(0xC9702C),
             amber: Rgb::hex(0xB06A2C),
             green: Rgb::hex(0x2E9E4B),
