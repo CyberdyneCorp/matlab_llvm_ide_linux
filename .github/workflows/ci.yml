@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Format, lint, and unit + integration tests (mirrors `just check` +
+  # `just test-integration`). Integration tests skip when matlabc is absent.
+  check:
+    name: fmt + clippy + tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GTK 4
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev pkg-config
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format check
+        run: cargo fmt --all --check
+      - name: Clippy (warnings as errors)
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Unit tests
+        run: cargo test
+      - name: Integration tests (skip without matlabc)
+        run: cargo test -p matforge-core --test integration
+
+  # End-to-end: drive the real GTK binary headlessly via XTEST. matlabc-gated
+  # scenarios skip; the rest (search, breakpoints, explorer double-click) run.
+  e2e:
+    name: end-to-end (headless)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GTK 4 + headless X
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev pkg-config xvfb dbus-x11 python3-pip
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install e2e harness deps
+        run: pip install --user -r e2e/requirements.txt
+      - name: Build binary
+        run: cargo build -p matforge
+      - name: Run e2e
+        run: dbus-run-session -- xvfb-run -a python3 e2e/run_e2e.py

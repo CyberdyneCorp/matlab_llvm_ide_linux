@@ -103,6 +103,9 @@ lint:
 # fmt-check + lint + tests — the pre-commit gate.
 check: fmt-check lint test
 
+# The full CI gate locally: pre-commit checks + integration tests.
+ci: check test-integration
+
 # ---- Demo / screenshots ----------------------------------------------------
 
 # Create a sample .m project under {{DEMO}}.
