@@ -1541,18 +1541,30 @@ fn append_node_rows(list: &ListBox, node: &ProjectNode, depth: i32, app: &Rc<App
     btn.set_child(Some(&inner));
 
     {
+        // Single click selects (and expands/collapses folders); a file only opens
+        // on double click, so single-clicking to preview/select doesn't churn
+        // editor tabs.
         let app = app.clone();
         let id = node.id;
         let url = node.url.clone();
         let is_folder = node.is_folder();
-        btn.connect_clicked(move |_| {
+        let gesture = gtk::GestureClick::new();
+        gesture.set_button(gtk::gdk::BUTTON_PRIMARY);
+        // Capture phase so press counts are seen before the Button's own gesture.
+        gesture.set_propagation_phase(gtk::PropagationPhase::Capture);
+        gesture.connect_pressed(move |_g, n_press, _x, _y| {
             app.vm.project.select(id);
             if is_folder {
-                app.vm.project.toggle_expand(id);
-            } else if let Some(path) = &url {
-                open_file_in_editor(&app, path);
+                if n_press == 1 {
+                    app.vm.project.toggle_expand(id);
+                }
+            } else if n_press == 2 {
+                if let Some(path) = &url {
+                    open_file_in_editor(&app, path);
+                }
             }
         });
+        btn.add_controller(gesture);
     }
     row.append(&btn);
     list.append(&row);
