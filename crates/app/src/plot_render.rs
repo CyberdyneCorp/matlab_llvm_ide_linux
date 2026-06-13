@@ -610,4 +610,62 @@ mod tests {
         assert_eq!(fmt_num(2.0), "2");
         assert_eq!(fmt_num(1234.0), "1.234e3");
     }
+
+    /// Render `draw` into an in-memory ARGB surface and report whether it painted
+    /// more than a flat background (i.e. produced visible content).
+    fn rendered_has_content(draw: impl Fn(&cairo::Context, f64, f64)) -> bool {
+        let (w, h) = (220usize, 160usize);
+        let mut surface =
+            cairo::ImageSurface::create(cairo::Format::ARgb32, w as i32, h as i32).unwrap();
+        {
+            let ctx = cairo::Context::new(&surface).unwrap();
+            draw(&ctx, w as f64, h as f64);
+        }
+        surface.flush();
+        let stride = surface.stride() as usize;
+        let data = surface.data().unwrap();
+        let mut seen = std::collections::HashSet::new();
+        for row in data.chunks(stride) {
+            for px in row[..w * 4].chunks_exact(4) {
+                seen.insert(u32::from_ne_bytes([px[0], px[1], px[2], px[3]]));
+                if seen.len() > 1 {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    #[test]
+    fn draw_figure_paints_each_2d_kind() {
+        let xs: Vec<f64> = (0..24).map(|i| i as f64).collect();
+        let ys: Vec<f64> = xs.iter().map(|x| (x * 0.3).sin()).collect();
+        for kind in [PlotKind::Line2D, PlotKind::Scatter, PlotKind::Bar, PlotKind::Spectrum] {
+            let fig = PlotFigure::series(1, "t", kind, xs.clone(), ys.clone());
+            assert!(
+                rendered_has_content(|ctx, w, h| draw_figure(ctx, w, h, &fig, None, None, None)),
+                "{kind:?} drew nothing",
+            );
+        }
+    }
+
+    #[test]
+    fn draw_figure_trace_reveal_paints() {
+        let xs: Vec<f64> = (0..24).map(|i| i as f64).collect();
+        let ys: Vec<f64> = xs.iter().map(|x| (x * 0.3).sin()).collect();
+        let fig = PlotFigure::series(1, "t", PlotKind::Line2D, xs, ys);
+        // Reveal only the first 5 points (animation/trace-reveal path).
+        assert!(rendered_has_content(|ctx, w, h| draw_figure(ctx, w, h, &fig, None, None, Some(5))));
+    }
+
+    #[test]
+    fn draw_surface_and_heatmap_paint() {
+        let grid: Vec<Vec<f64>> =
+            (0..8).map(|r| (0..8).map(|c| ((r * c) as f64).sin()).collect()).collect();
+        let fig = PlotFigure::surface(1, "s", grid);
+        assert!(rendered_has_content(|ctx, w, h| draw_surface(ctx, w, h, &fig, SurfaceCamera::default())));
+
+        let m = MatrixView::new("m", vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0]]);
+        assert!(rendered_has_content(|ctx, w, h| draw_heatmap(ctx, w, h, &m)));
+    }
 }
