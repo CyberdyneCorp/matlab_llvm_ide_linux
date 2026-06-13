@@ -2577,8 +2577,7 @@ fn build_console(app: &Rc<AppState>) -> GtkBox {
                 tr_count.set(0);
             }
             for m in msgs.iter().skip(msg_count.get()) {
-                let mut it = cbuf.iter_at_mark(&prompt_start);
-                cbuf.insert_with_tags_by_name(&mut it, &format!("{}\n", m.text), &[level_tag(m.level)]);
+                console_insert_line(&cbuf, &prompt_start, m.level, &m.text);
             }
             msg_count.set(msgs.len());
             for m in tr.iter().skip(tr_count.get()) {
@@ -2586,8 +2585,7 @@ fn build_console(app: &Rc<AppState>) -> GtkBox {
                 if m.level == ConsoleLevel::Command {
                     continue;
                 }
-                let mut it = cbuf.iter_at_mark(&prompt_start);
-                cbuf.insert_with_tags_by_name(&mut it, &format!("{}\n", m.text), &[level_tag(m.level)]);
+                console_insert_line(&cbuf, &prompt_start, m.level, &m.text);
             }
             tr_count.set(tr.len());
             prog.set(false);
@@ -2682,6 +2680,33 @@ fn build_console(app: &Rc<AppState>) -> GtkBox {
         });
     }
     console_view.add_controller(key);
+
+    // Click a underlined file:line reference to jump to that source line.
+    {
+        let click = gtk::GestureClick::new();
+        click.set_button(gtk::gdk::BUTTON_PRIMARY);
+        let view = console_view.clone();
+        let app = app.clone();
+        click.connect_released(move |_g, _n, x, y| {
+            let (bx, by) = view.window_to_buffer_coords(gtk::TextWindowType::Widget, x as i32, y as i32);
+            let Some(iter) = view.iter_at_location(bx, by) else { return };
+            let buf = view.buffer();
+            let Some(tag) = buf.tag_table().lookup("link") else { return };
+            if !iter.has_tag(&tag) {
+                return;
+            }
+            // Re-parse the clicked line for the reference and jump to it.
+            let mut ls = buf.iter_at_line(iter.line()).unwrap_or_else(|| iter.clone());
+            let mut le = ls.clone();
+            le.forward_to_line_end();
+            let line_text = buf.text(&ls, &le, false).to_string();
+            ls.set_line_offset(0);
+            if let Some((_, _, file, line)) = find_source_link(&line_text) {
+                goto_problem(&app, &file, line);
+            }
+        });
+        console_view.add_controller(click);
+    }
     crate::e2e::set_repl_entry(&console_view);
 
     // PROBLEMS — clickable diagnostics that jump to the source line.
@@ -3043,6 +3068,56 @@ fn refresh_console_tags(buf: &gtk::TextBuffer, tokens: &matforge_core::theme::Th
             }
         }
     }
+    // The clickable file:line link tag — underlined, in the theme's link blue.
+    let link = tokens.blue.to_css();
+    match table.lookup("link") {
+        Some(tag) => tag.set_property("foreground", link),
+        None => {
+            buf.create_tag(
+                Some("link"),
+                &[("foreground", &link), ("underline", &gtk::pango::Underline::Single)],
+            );
+        }
+    }
+}
+
+/// Insert one console line above the prompt, tagged by level, and underline any
+/// `path:line[:col]` source reference (compiler/run errors) as a clickable link.
+fn console_insert_line(
+    buf: &gtk::TextBuffer,
+    prompt_start: &gtk::TextMark,
+    level: ConsoleLevel,
+    text: &str,
+) {
+    let start = buf.iter_at_mark(prompt_start).offset();
+    let mut it = buf.iter_at_mark(prompt_start);
+    buf.insert_with_tags_by_name(&mut it, &format!("{text}\n"), &[level_tag(level)]);
+    if let Some((bs, be, _, _)) = find_source_link(text) {
+        let cs = start + text[..bs].chars().count() as i32;
+        let ce = start + text[..be].chars().count() as i32;
+        buf.apply_tag_by_name("link", &buf.iter_at_offset(cs), &buf.iter_at_offset(ce));
+    }
+}
+
+/// Find the first `path:line[:col]` source reference in a console line (the form
+/// clang/matlabc print for compile errors). Returns the byte range of the token
+/// plus the file and 1-based line. The path must look file-like (contain `.` or
+/// `/`) so plain ranges like `3:5` aren't mistaken for links.
+fn find_source_link(line: &str) -> Option<(usize, usize, String, usize)> {
+    let mut idx = 0;
+    for tok in line.split_whitespace() {
+        let start = idx + line[idx..].find(tok)?;
+        idx = start + tok.len();
+        let trimmed = tok.trim_end_matches([':', ',', ')', '(']);
+        let mut parts = trimmed.split(':');
+        let path = parts.next().unwrap_or("");
+        if (path.contains('.') || path.contains('/')) && !path.is_empty() {
+            if let Some(Ok(ln)) = parts.next().map(str::parse::<usize>) {
+                return Some((start, start + trimmed.len(), path.to_string(), ln));
+            }
+        }
+    }
+    None
 }
 
 /// Open the diagnostic's file (if needed) and scroll to its line.
@@ -4421,4 +4496,32 @@ fn pick_folder(window: &ApplicationWindow, app: &Rc<AppState>) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod link_tests {
+    use super::find_source_link;
+
+    #[test]
+    fn parses_clang_style_reference() {
+        let line = "examples/bad.m:12:9: error: expected expression";
+        let (s, e, file, ln) = find_source_link(line).expect("link");
+        assert_eq!(&line[s..e], "examples/bad.m:12:9");
+        assert_eq!(file, "examples/bad.m");
+        assert_eq!(ln, 12);
+    }
+
+    #[test]
+    fn parses_absolute_path_with_line_only() {
+        let (_, _, file, ln) = find_source_link("/home/u/foo.m:7: warning: x").expect("link");
+        assert_eq!(file, "/home/u/foo.m");
+        assert_eq!(ln, 7);
+    }
+
+    #[test]
+    fn ignores_non_file_ranges_and_tool_prefixes() {
+        assert!(find_source_link("ans = 3:5").is_none());
+        assert!(find_source_link("matlabc: No such file or directory").is_none());
+        assert!(find_source_link("plain output with no reference").is_none());
+    }
 }
