@@ -273,6 +273,15 @@ fn save_prefs(app: &Rc<AppState>) {
     prefs.layout.workspace_visible = l.workspace_visible.get();
     prefs.layout.plots_visible = l.plots_visible.get();
     prefs.layout.flow_palette_visible = l.flow_palette_visible.get();
+    // Persist the live divider positions so the layout is restored next launch.
+    if let Some((sidebar_width, workspace_split)) = ui::layout_pane_positions() {
+        if sidebar_width > 0 {
+            prefs.layout.sidebar_width = sidebar_width;
+        }
+        if workspace_split > 0 {
+            prefs.layout.workspace_split = workspace_split;
+        }
+    }
 
     prefs.open_tabs = app.vm.editor.tabs.with(|ts| {
         ts.iter().filter_map(|t| t.url.as_ref().map(|u| u.display().to_string())).collect()

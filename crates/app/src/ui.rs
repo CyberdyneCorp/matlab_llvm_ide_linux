@@ -66,8 +66,12 @@ pub fn build(window: &ApplicationWindow, app: Rc<AppState>) {
     outer.set_resize_start_child(false);
     outer.set_resize_end_child(true);
     outer.set_shrink_start_child(false);
-    outer.set_position(220);
+    // Restore the persisted sidebar width (the workspace|plots split is restored
+    // inside build_right_column); both are saved back on exit.
+    let sidebar_width = matforge_core::services::preferences::Preferences::load().layout.sidebar_width;
+    outer.set_position(sidebar_width.clamp(160, 600));
     middle.append(&outer);
+    LAYOUT_PANES.with(|p| *p.borrow_mut() = Some((outer.clone(), right.clone())));
 
     // Panel visibility, zen-aware: the activity bar / sidebar / right region all
     // follow their own flags unless Focus (zen) mode suppresses them.
@@ -1783,6 +1787,14 @@ thread_local! {
     static FLOW_INSPECTOR: std::cell::RefCell<Option<(Notebook, u32, GtkBox)>> = const { std::cell::RefCell::new(None) };
     /// The flowchart whose tab is currently visible — the Run/Debug target.
     static ACTIVE_FLOWCHART: std::cell::RefCell<Option<(Rc<FlowchartViewModel>, Option<std::path::PathBuf>)>> = const { std::cell::RefCell::new(None) };
+    /// The persisted-position dividers: `(sidebar|content, workspace|plots)`.
+    static LAYOUT_PANES: std::cell::RefCell<Option<(Paned, Paned)>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Current divider positions `(sidebar_width, workspace_split)` for persistence,
+/// or `None` before the window is built.
+pub fn layout_pane_positions() -> Option<(i32, i32)> {
+    LAYOUT_PANES.with(|p| p.borrow().as_ref().map(|(outer, right)| (outer.position(), right.position())))
 }
 
 /// Mark `fc` as the visible flowchart (its tab just mapped). Used by Run.
@@ -3133,7 +3145,10 @@ fn build_right_column(app: &Rc<AppState>) -> Paned {
     paned.set_end_child(Some(&plots));
     paned.set_resize_start_child(true);
     paned.set_resize_end_child(true);
-    paned.set_position(250);
+    // Restore the persisted workspace|plots split (kept within the fixed 470px
+    // right column so it can't starve the workspace and re-clip it).
+    let split = matforge_core::services::preferences::Preferences::load().layout.workspace_split;
+    paned.set_position(split.clamp(200, 360));
 
     {
         let workspace = workspace.clone();

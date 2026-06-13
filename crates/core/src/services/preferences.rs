@@ -72,6 +72,9 @@ pub struct LayoutPrefs {
     pub plots_visible: bool,
     pub sidebar_width: i32,
     pub right_width: i32,
+    /// Divider position between the Workspace and Plots panels (px from the left
+    /// of the right column).
+    pub workspace_split: i32,
     pub flow_palette_visible: bool,
 }
 
@@ -83,6 +86,7 @@ impl Default for LayoutPrefs {
             plots_visible: true,
             sidebar_width: 220,
             right_width: 620,
+            workspace_split: 250,
             flow_palette_visible: true,
         }
     }
