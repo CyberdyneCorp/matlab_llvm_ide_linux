@@ -15,6 +15,9 @@ from harness import App, check, summary_and_exit  # noqa: E402
 PROJ = "/tmp/mf_e2e_proj"
 MAIN = os.path.join(PROJ, "main.m")
 MATLABC = os.environ.get("MATLABC_PATH", "/home/leonardo/work/matlab_llvm/build/matlabc")
+FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
+SIGNAL_MFLOW = os.path.join(FIXTURES, "signal.mflow")
+CHART_MFLOW = os.path.join(FIXTURES, "chart.mflow")
 
 
 def setup_project():
@@ -262,6 +265,74 @@ def scenario_plot_animation():
         app.close()
 
 
+def scenario_flowchart_editor():
+    print("scenario: the flowchart editor opens a chart and the palette adds nodes")
+    # MATFORGE_NEWFLOW opens a demo control-flow chart in a tab (no matlabc needed).
+    app = App(env_extra={"MATFORGE_OPEN": PROJ, "MATFORGE_NEWFLOW": "control"})
+    try:
+        st = app.wait_for(lambda s: (s.get("flowchart") or {}).get("nodes", 0) > 0,
+                          timeout=10, what="flowchart loaded with nodes")
+        fc = st["flowchart"]
+        check("the demo flowchart loads with nodes and edges",
+              fc["nodes"] > 0 and fc["edges"] > 0, f"flowchart={fc}")
+
+        # Click the first BLOCKS palette row -> the view model gains a node.
+        before = fc["nodes"]
+        px, py, pw, ph = app.wait_rect("flowchart_palette_rect")
+        app.click_window(px + pw // 2, py + 12)
+        st = app.wait_for(lambda s: (s.get("flowchart") or {}).get("nodes", 0) > before,
+                          timeout=8, what="palette click adds a node")
+        check("clicking a palette block adds a node",
+              st["flowchart"]["nodes"] > before,
+              f"{before} -> {st['flowchart']['nodes']}")
+    finally:
+        app.close()
+
+
+def scenario_mflowlink_simulate():
+    print("scenario: the mflowLink window runs a signal-flow simulation")
+    if not os.path.exists(MATLABC):
+        check("mflowLink simulate (skipped: matlabc not found)", True, "skipped")
+        return
+    # MATFORGE_SIMULATE opens the standalone window and autostarts the run; we
+    # assert on the published simulation state (no input needed).
+    app = App(env_extra={"MATFORGE_OPEN": PROJ, "MATFORGE_SIMULATE": SIGNAL_MFLOW,
+                         "MATLABC_PATH": MATLABC})
+    try:
+        st = app.wait_for(lambda s: (s.get("mflowlink") or {}).get("samples", 0) > 0,
+                          timeout=30, what="simulation produced samples")
+        ml = st["mflowlink"]
+        check("the signal-flow simulation streams samples", ml["samples"] > 0,
+              f"mflowlink={ml}")
+        st = app.wait_for(lambda s: (s.get("mflowlink") or {}).get("state") == "Finished",
+                          timeout=30, what="simulation finishes")
+        check("the simulation reaches the Finished state",
+              st["mflowlink"]["state"] == "Finished", f"state={st['mflowlink']['state']}")
+    finally:
+        app.close()
+
+
+def scenario_statechart_trace():
+    print("scenario: the mStateflow window traces a state chart")
+    if not os.path.exists(MATLABC):
+        check("mStateflow trace (skipped: matlabc not found)", True, "skipped")
+        return
+    app = App(env_extra={"MATFORGE_OPEN": PROJ, "MATFORGE_STATECHART": CHART_MFLOW,
+                         "MATLABC_PATH": MATLABC})
+    try:
+        st = app.wait_for(lambda s: (s.get("statechart") or {}).get("events", 0) > 0,
+                          timeout=30, what="trace produced events")
+        sc = st["statechart"]
+        check("the state-chart trace streams events", sc["events"] > 0,
+              f"statechart={sc}")
+        st = app.wait_for(lambda s: (s.get("statechart") or {}).get("active", 0) > 0,
+                          timeout=30, what="a state becomes active")
+        check("the trace activates at least one state",
+              st["statechart"]["active"] > 0, f"active={st['statechart']['active']}")
+    finally:
+        app.close()
+
+
 def main():
     setup_project()
     scenario_search()
@@ -269,6 +340,9 @@ def main():
     scenario_gutter_breakpoint()
     scenario_f9_breakpoint()
     scenario_explorer_double_click()
+    scenario_flowchart_editor()
+    scenario_mflowlink_simulate()
+    scenario_statechart_trace()
     scenario_repl_workspace()
     scenario_inspect_and_plot()
     scenario_repl_plot()

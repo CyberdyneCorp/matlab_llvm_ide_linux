@@ -44,6 +44,20 @@ pub fn build_flowchart_view(
     root.set_hexpand(true);
     root.set_vexpand(true);
 
+    // Publish state for end-to-end tests (no-op unless $MATFORGE_E2E_STATE set).
+    {
+        let fc = fc.clone();
+        crate::e2e::set_flowchart_probe(move || {
+            serde_json::json!({
+                "nodes": fc.node_count(),
+                "edges": fc.edge_count(),
+                "selected": fc.selected_id.get().is_some(),
+                "zoom": fc.zoom.get(),
+                "can_undo": fc.can_undo(),
+            })
+        });
+    }
+
     let palette = build_palette(&fc);
 
     let canvas = DrawingArea::new();
@@ -463,6 +477,7 @@ fn build_palette(fc: &Rc<FlowchartViewModel>) -> GtkBox {
         });
         list.append(&btn);
     }
+    crate::e2e::set_flowchart_palette(&list); // drive target for e2e tests
     let scroll = ScrolledWindow::new();
     scroll.set_vexpand(true);
     scroll.set_child(Some(&list));

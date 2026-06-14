@@ -25,6 +25,18 @@ pub fn open(app: &Rc<AppState>, document: FlowchartDocument, path: Option<PathBu
     let vm = Rc::new(StateChartViewModel::new(document));
     let sim: Rc<RefCell<Option<SimHandle>>> = Rc::new(RefCell::new(None));
 
+    // Publish state for end-to-end tests (no-op unless $MATFORGE_E2E_STATE set).
+    {
+        let vm = vm.clone();
+        crate::e2e::set_statechart_probe(move || {
+            serde_json::json!({
+                "state": format!("{:?}", vm.state.get()),
+                "events": vm.event_count(),
+                "active": vm.active_states.with(|s| s.len()),
+            })
+        });
+    }
+
     let window = Window::builder()
         .title(format!(
             "mStateflow — {}",
@@ -55,6 +67,7 @@ pub fn open(app: &Rc<AppState>, document: FlowchartDocument, path: Option<PathBu
         window.connect_close_request(move |_| {
             *sim.borrow_mut() = None;
             vm.reset();
+            crate::e2e::clear_statechart_probe();
             gtk::glib::Propagation::Proceed
         });
     }

@@ -23,6 +23,18 @@ pub fn open(app: &Rc<AppState>, document: FlowchartDocument, path: Option<PathBu
     let vm = Rc::new(MflowLinkViewModel::new(document));
     let sim: Rc<RefCell<Option<SimHandle>>> = Rc::new(RefCell::new(None));
 
+    // Publish state for end-to-end tests (no-op unless $MATFORGE_E2E_STATE set).
+    {
+        let vm = vm.clone();
+        crate::e2e::set_mflowlink_probe(move || {
+            serde_json::json!({
+                "state": format!("{:?}", vm.state.get()),
+                "samples": vm.sample_count.get(),
+                "signals": vm.signal_count(),
+            })
+        });
+    }
+
     let window = Window::builder()
         .title(format!(
             "mflowLink — {}",
@@ -55,6 +67,7 @@ pub fn open(app: &Rc<AppState>, document: FlowchartDocument, path: Option<PathBu
         window.connect_close_request(move |_| {
             *sim.borrow_mut() = None; // drops SimHandle -> kills process
             vm.reset();
+            crate::e2e::clear_mflowlink_probe();
             glib_proceed()
         });
     }

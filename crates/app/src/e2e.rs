@@ -29,6 +29,44 @@ thread_local! {
     static EXPLORER_LIST: RefCell<Option<gtk::Widget>> = const { RefCell::new(None) };
     static DEBUG_NEXT: RefCell<Option<gtk::Widget>> = const { RefCell::new(None) };
     static DEBUG_CONTINUE: RefCell<Option<gtk::Widget>> = const { RefCell::new(None) };
+    static FLOWCHART_PALETTE: RefCell<Option<gtk::Widget>> = const { RefCell::new(None) };
+
+    // State probes for surfaces whose view models are not held on `app.vm`
+    // (flowchart tabs and the standalone mflowLink / mStateflow windows). Each
+    // captures its view model and returns the JSON the harness asserts on.
+    static FLOWCHART_PROBE: RefCell<Option<Box<dyn Fn() -> serde_json::Value>>> = const { RefCell::new(None) };
+    static MFLOWLINK_PROBE: RefCell<Option<Box<dyn Fn() -> serde_json::Value>>> = const { RefCell::new(None) };
+    static STATECHART_PROBE: RefCell<Option<Box<dyn Fn() -> serde_json::Value>>> = const { RefCell::new(None) };
+}
+
+/// Record the BLOCKS palette list of the active flowchart tab (drive target).
+pub fn set_flowchart_palette(w: &impl IsA<gtk::Widget>) {
+    FLOWCHART_PALETTE.with(|c| *c.borrow_mut() = Some(w.clone().upcast()));
+}
+
+/// Publish the active flowchart tab's state (node/edge counts, selection, zoom).
+pub fn set_flowchart_probe(f: impl Fn() -> serde_json::Value + 'static) {
+    FLOWCHART_PROBE.with(|c| *c.borrow_mut() = Some(Box::new(f)));
+}
+
+/// Publish the open mflowLink window's simulation state (sim state, samples).
+pub fn set_mflowlink_probe(f: impl Fn() -> serde_json::Value + 'static) {
+    MFLOWLINK_PROBE.with(|c| *c.borrow_mut() = Some(Box::new(f)));
+}
+
+/// Stop publishing mflowLink state (the window closed).
+pub fn clear_mflowlink_probe() {
+    MFLOWLINK_PROBE.with(|c| *c.borrow_mut() = None);
+}
+
+/// Publish the open mStateflow window's trace state (run state, events, active).
+pub fn set_statechart_probe(f: impl Fn() -> serde_json::Value + 'static) {
+    STATECHART_PROBE.with(|c| *c.borrow_mut() = Some(Box::new(f)));
+}
+
+/// Stop publishing mStateflow state (the window closed).
+pub fn clear_statechart_probe() {
+    STATECHART_PROBE.with(|c| *c.borrow_mut() = None);
 }
 
 /// Record the Explorer file-tree list (drive target).
@@ -142,6 +180,10 @@ pub fn install_state_dump(app: Rc<AppState>, path: PathBuf) {
             "explorer_list_rect": EXPLORER_LIST.with(|c| c.borrow().as_ref().and_then(rect_in_window)),
             "debug_next_rect": DEBUG_NEXT.with(|c| c.borrow().as_ref().and_then(rect_in_window)),
             "debug_continue_rect": DEBUG_CONTINUE.with(|c| c.borrow().as_ref().and_then(rect_in_window)),
+            "flowchart_palette_rect": FLOWCHART_PALETTE.with(|c| c.borrow().as_ref().and_then(rect_in_window)),
+            "flowchart": FLOWCHART_PROBE.with(|c| c.borrow().as_ref().map(|f| f())),
+            "mflowlink": MFLOWLINK_PROBE.with(|c| c.borrow().as_ref().map(|f| f())),
+            "statechart": STATECHART_PROBE.with(|c| c.borrow().as_ref().map(|f| f())),
         });
 
         let tmp = path.with_extension("json.tmp");

@@ -1,0 +1,191 @@
+{
+  "schema": "matforge.flowchart",
+  "version": "0.1.0",
+  "entry": "lowpass",
+  "settings": {
+    "columnMajor": true,
+    "defaultNumericType": "double",
+    "kind": "signal_flow",
+    "solver": {
+      "type": "variable_step",
+      "algorithm": "ode45",
+      "startTime": 0.0,
+      "stopTime": 10.0,
+      "maxStep": "auto",
+      "minStep": "auto",
+      "relTol": 0.001,
+      "absTol": 1e-6,
+      "zeroCrossing": true,
+      "algebraicLoopMethod": "trust_region"
+    },
+    "snapshot": {
+      "enabled": true,
+      "depth": 256,
+      "fields": "states"
+    }
+  },
+  "flows": [
+    {
+      "id": "flow_lowpass",
+      "kind": "program",
+      "name": "lowpass",
+      "signature": {
+        "inputs": [],
+        "outputs": []
+      },
+      "nodes": [
+        {
+          "id": "src",
+          "kind": "signal_sine",
+          "label": "",
+          "ports": {
+            "in": [],
+            "out": [
+              {
+                "id": "out"
+              }
+            ]
+          },
+          "data": {
+            "params": {
+              "amplitude": 1.0,
+              "bias": 0.0,
+              "frequency": 6.2831853,
+              "phase": 0.0
+            },
+            "log_signal": true
+          },
+          "ui": {
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            }
+          }
+        },
+        {
+          "id": "k",
+          "kind": "signal_gain",
+          "label": "",
+          "ports": {
+            "in": [
+              {
+                "id": "in"
+              }
+            ],
+            "out": [
+              {
+                "id": "out"
+              }
+            ]
+          },
+          "data": {
+            "params": {
+              "gain": 2.0
+            }
+          },
+          "ui": {
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            }
+          }
+        },
+        {
+          "id": "lp",
+          "kind": "signal_transfer_fcn",
+          "label": "",
+          "ports": {
+            "in": [
+              {
+                "id": "in"
+              }
+            ],
+            "out": [
+              {
+                "id": "out"
+              }
+            ]
+          },
+          "data": {
+            "params": {
+              "den": "1, 1",
+              "num": "1"
+            }
+          },
+          "ui": {
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            }
+          }
+        },
+        {
+          "id": "scope",
+          "kind": "signal_scope",
+          "label": "",
+          "ports": {
+            "in": [
+              {
+                "id": "in"
+              }
+            ],
+            "out": []
+          },
+          "data": {
+            "params": {
+              "decimation": 1.0,
+              "title": "lowpass out",
+              "yMax": 2.0,
+              "yMin": -2.0
+            },
+            "log_signal": true
+          },
+          "ui": {
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            }
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "e1",
+          "kind": "data",
+          "from": {
+            "node": "src",
+            "port": "out"
+          },
+          "to": {
+            "node": "k",
+            "port": "in"
+          }
+        },
+        {
+          "id": "e2",
+          "kind": "data",
+          "from": {
+            "node": "k",
+            "port": "out"
+          },
+          "to": {
+            "node": "lp",
+            "port": "in"
+          }
+        },
+        {
+          "id": "e3",
+          "kind": "data",
+          "from": {
+            "node": "lp",
+            "port": "out"
+          },
+          "to": {
+            "node": "scope",
+            "port": "in"
+          }
+        }
+      ]
+    }
+  ]
+}

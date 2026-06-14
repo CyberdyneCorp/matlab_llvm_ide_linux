@@ -41,14 +41,32 @@ Headless / CI: wrap with Xvfb — `xvfb-run -a just e2e`.
 
 ## Scenarios
 
-| Scenario | Drives | Asserts |
-|----------|--------|---------|
-| find in files | `Ctrl+F`, types `disp` + Enter | `search_results` becomes non-zero |
-| gutter breakpoint | clicks the gutter at a line | `active_breakpoints` gains/loses that line |
-| F9 breakpoint | focuses the editor, presses F9 | a breakpoint is set at the cursor |
-| live REPL | types `x = [1 2 3]` in the REPL + Enter | the Workspace gains variable `x` (real `matlabc -repl`) |
+| Scenario | Drives | Asserts | Needs `matlabc` |
+|----------|--------|---------|:---:|
+| find in files | `Ctrl+F`, types `disp` + Enter | `search_results` becomes non-zero | |
+| problems pane | launches with a bad file + compile | `problems` (diagnostics) becomes non-zero | ✓ |
+| gutter breakpoint | clicks the gutter at a line | `active_breakpoints` gains/loses that line | |
+| F9 breakpoint | focuses the editor, presses F9 | a breakpoint is set at the cursor | |
+| explorer double-click | single- then double-clicks a tree row | single click selects only; double click opens the tab | |
+| flowchart editor | opens a demo chart, clicks a BLOCKS palette row | the chart loads with nodes/edges; the palette adds a node | |
+| mflowLink simulate | opens the signal-flow window (autostart) | the simulation streams samples and reaches `Finished` | ✓ |
+| mStateflow trace | opens the state-chart window (autostart) | the trace streams events and activates a state | ✓ |
+| live REPL | types `x = [1 2 3]` in the REPL + Enter | the Workspace gains variable `x` | ✓ |
+| inspect + plot | inspects a workspace var, clicks Plots `+` | the value table shows; a figure is added | ✓ |
+| REPL plot | types `plot([...])` + Enter | a figure is added | ✓ |
+| plot animation | inspects + plots a vector, clicks play | the figure is scrub-able (`plot_anim > 1`) and survives playback | ✓ |
+| debug session | pauses at a breakpoint, steps, watches, continues | `debug_state` cycles Paused → stepped line → watch result → Terminated | ✓ |
 
-The REPL scenario is skipped if `matlabc` isn't found.
+Scenarios marked **Needs `matlabc`** skip cleanly when the compiler isn't found.
+The mflowLink / mStateflow scenarios drive standalone windows: their env hooks
+(`MATFORGE_SIMULATE` / `MATFORGE_STATECHART`) open the window and autostart the
+run, so the harness only reads the published state — no input into the separate
+window is required. They use the bundled `e2e/fixtures/{signal,chart}.mflow`.
+
+> **Local display note:** the `Ctrl+F` find-in-files scenario relies on a
+> keyboard *accelerator*, which needs a window manager to route focus; it passes
+> under CI's `xvfb` but can fail under a bare nested X server (e.g. `Xephyr`).
+> Plain keys (F9) and all click-driven scenarios are unaffected.
 
 ## Adding a scenario
 
