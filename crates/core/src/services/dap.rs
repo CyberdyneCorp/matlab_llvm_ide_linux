@@ -28,7 +28,9 @@ impl DapFramer {
         let mut out = Vec::new();
         loop {
             // Find the header/body separator.
-            let Some(sep) = find_subslice(&self.buffer, b"\r\n\r\n") else { break };
+            let Some(sep) = find_subslice(&self.buffer, b"\r\n\r\n") else {
+                break;
+            };
             let header = match std::str::from_utf8(&self.buffer[..sep]) {
                 Ok(h) => h,
                 Err(_) => break,
@@ -103,8 +105,16 @@ impl DapClient {
 /// Classify a decoded DAP message body by its `type` field.
 #[derive(Clone, Debug, PartialEq)]
 pub enum DapMessage {
-    Response { request_seq: i64, command: String, success: bool, body: Value },
-    Event { event: String, body: Value },
+    Response {
+        request_seq: i64,
+        command: String,
+        success: bool,
+        body: Value,
+    },
+    Event {
+        event: String,
+        body: Value,
+    },
     Other(Value),
 }
 
@@ -114,12 +124,20 @@ pub fn parse_message(body: &str) -> Option<DapMessage> {
     match v.get("type").and_then(|t| t.as_str()) {
         Some("response") => Some(DapMessage::Response {
             request_seq: v.get("request_seq").and_then(|x| x.as_i64()).unwrap_or(0),
-            command: v.get("command").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+            command: v
+                .get("command")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string(),
             success: v.get("success").and_then(|x| x.as_bool()).unwrap_or(false),
             body: v.get("body").cloned().unwrap_or(Value::Null),
         }),
         Some("event") => Some(DapMessage::Event {
-            event: v.get("event").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+            event: v
+                .get("event")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string(),
             body: v.get("body").cloned().unwrap_or(Value::Null),
         }),
         _ => Some(DapMessage::Other(v)),
@@ -148,7 +166,10 @@ mod tests {
         let mut f = DapFramer::new();
         let data = format!("{}{}", encode_frame("{\"x\":1}"), encode_frame("{\"y\":2}"));
         let bodies = f.feed(data.as_bytes());
-        assert_eq!(bodies, vec!["{\"x\":1}".to_string(), "{\"y\":2}".to_string()]);
+        assert_eq!(
+            bodies,
+            vec!["{\"x\":1}".to_string(), "{\"y\":2}".to_string()]
+        );
     }
 
     #[test]
@@ -164,7 +185,10 @@ mod tests {
     #[test]
     fn request_increments_seq_and_frames() {
         let mut c = DapClient::new();
-        let frame = c.request("initialize", Some(serde_json::json!({"clientID": "matforge"})));
+        let frame = c.request(
+            "initialize",
+            Some(serde_json::json!({"clientID": "matforge"})),
+        );
         assert_eq!(c.last_seq(), 1);
         assert!(frame.starts_with("Content-Length: "));
         assert!(frame.contains("\"command\":\"initialize\""));
@@ -177,7 +201,12 @@ mod tests {
     fn parses_response_and_event() {
         let resp = r#"{"type":"response","request_seq":3,"command":"stackTrace","success":true,"body":{"x":1}}"#;
         match parse_message(resp).unwrap() {
-            DapMessage::Response { request_seq, command, success, .. } => {
+            DapMessage::Response {
+                request_seq,
+                command,
+                success,
+                ..
+            } => {
                 assert_eq!(request_seq, 3);
                 assert_eq!(command, "stackTrace");
                 assert!(success);

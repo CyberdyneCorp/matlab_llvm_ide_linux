@@ -201,7 +201,10 @@ mod tests {
 
     #[test]
     fn garbage_or_missing_falls_back_to_default() {
-        assert_eq!(Preferences::load_from(std::path::Path::new("/no/such/file")), Preferences::default());
+        assert_eq!(
+            Preferences::load_from(std::path::Path::new("/no/such/file")),
+            Preferences::default()
+        );
     }
 
     #[test]

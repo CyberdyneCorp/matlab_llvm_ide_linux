@@ -144,8 +144,13 @@ pub fn install_state_dump(app: Rc<AppState>, path: PathBuf) {
         // Selected (or latest) figure: animation length + kind, for plot tests.
         let sel = app.vm.plots.selected_id.get();
         let (plot_anim, plot_kind) = app.vm.plots.figures.with(|figs| {
-            let f = sel.and_then(|id| figs.iter().find(|f| f.id == id)).or_else(|| figs.last());
-            (f.map(|f| f.animation_len()).unwrap_or(0), f.map(|f| f.kind.label().to_string()))
+            let f = sel
+                .and_then(|id| figs.iter().find(|f| f.id == id))
+                .or_else(|| figs.last());
+            (
+                f.map(|f| f.animation_len()).unwrap_or(0),
+                f.map(|f| f.kind.label().to_string()),
+            )
         });
 
         let snap = json!({

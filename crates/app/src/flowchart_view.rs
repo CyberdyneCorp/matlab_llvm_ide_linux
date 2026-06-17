@@ -29,7 +29,10 @@ enum DragMode {
     /// Moving the node under the cursor.
     Move { id: String, px: f64, py: f64 },
     /// Drawing an edge out of a port (rubber band to the cursor).
-    Edge { from_node: String, from_port: String },
+    Edge {
+        from_node: String,
+        from_port: String,
+    },
 }
 
 /// Build the palette + canvas + inspector surface for a flowchart tab. `path` is
@@ -72,7 +75,10 @@ pub fn build_flowchart_view(
         let fc = fc.clone();
         let pending = pending_edge.clone();
         canvas.set_draw_func(move |_a, ctx, w, h| {
-            let vp = Viewport { pan: fc.pan.get(), zoom: fc.zoom.get() };
+            let vp = Viewport {
+                pan: fc.pan.get(),
+                zoom: fc.zoom.get(),
+            };
             fc.document.with(|doc| {
                 let sel = fc.selected_id.get();
                 let exec = fc.execution_node.get();
@@ -90,7 +96,8 @@ pub fn build_flowchart_view(
                 });
             });
             if let Some((s, e)) = *pending.borrow() {
-                let to_screen = |p: (f64, f64)| (p.0 * vp.zoom + vp.pan.0, p.1 * vp.zoom + vp.pan.1);
+                let to_screen =
+                    |p: (f64, f64)| (p.0 * vp.zoom + vp.pan.0, p.1 * vp.zoom + vp.pan.1);
                 let (sx, sy) = to_screen(s);
                 let (ex, ey) = to_screen(e);
                 ctx.set_source_rgba(0.31, 0.64, 0.89, 0.9);
@@ -137,7 +144,10 @@ pub fn build_flowchart_view(
         let fc = fc.clone();
         let canvas2 = canvas.clone();
         click.connect_released(move |_g, _n, x, y| {
-            let vp = Viewport { pan: fc.pan.get(), zoom: fc.zoom.get() };
+            let vp = Viewport {
+                pan: fc.pan.get(),
+                zoom: fc.zoom.get(),
+            };
             let world = flow_render::screen_to_world(vp, x, y);
             let hit = fc.document.with(|d| flow_render::hit_test(d, world));
             fc.select(hit);
@@ -199,7 +209,10 @@ pub fn build_flowchart_view(
         let target = menu_target.clone();
         let pop = menu_pop.clone();
         rclick.connect_pressed(move |_g, _n, x, y| {
-            let vp = Viewport { pan: fc.pan.get(), zoom: fc.zoom.get() };
+            let vp = Viewport {
+                pan: fc.pan.get(),
+                zoom: fc.zoom.get(),
+            };
             let world = flow_render::screen_to_world(vp, x, y);
             if let Some(id) = fc.document.with(|d| flow_render::hit_test(d, world)) {
                 fc.select(Some(id.clone()));
@@ -222,17 +235,26 @@ pub fn build_flowchart_view(
         let state = drag_state.clone();
         let pending = pending_edge.clone();
         drag.connect_drag_begin(move |_g, x, y| {
-            let vp = Viewport { pan: fc.pan.get(), zoom: fc.zoom.get() };
+            let vp = Viewport {
+                pan: fc.pan.get(),
+                zoom: fc.zoom.get(),
+            };
             let world = flow_render::screen_to_world(vp, x, y);
             // Port stubs win over the body so you can pull an edge off a node edge.
             let port_radius = 14.0 / fc.zoom.get().max(0.1);
-            if let Some((node, port)) =
-                fc.document.with(|d| flow_render::output_port_hit(d, world, port_radius))
+            if let Some((node, port)) = fc
+                .document
+                .with(|d| flow_render::output_port_hit(d, world, port_radius))
             {
-                let start = fc.document.with(|d| flow_render::port_world(d, &node, &port));
+                let start = fc
+                    .document
+                    .with(|d| flow_render::port_world(d, &node, &port));
                 if let Some(start) = start {
                     *pending.borrow_mut() = Some((start, (world.x, world.y)));
-                    *state.borrow_mut() = Some(DragMode::Edge { from_node: node, from_port: port });
+                    *state.borrow_mut() = Some(DragMode::Edge {
+                        from_node: node,
+                        from_port: port,
+                    });
                     return;
                 }
             }
@@ -251,24 +273,25 @@ pub fn build_flowchart_view(
         let state = drag_state.clone();
         let pending = pending_edge.clone();
         let canvas2 = canvas.clone();
-        drag.connect_drag_update(move |g, dx, dy| {
-            match &*state.borrow() {
-                Some(DragMode::Move { id, px, py }) => {
-                    let zoom = fc.zoom.get();
-                    fc.set_node_position(id, px + dx / zoom, py + dy / zoom);
-                }
-                Some(DragMode::Edge { .. }) => {
-                    if let Some((start_x, start_y)) = g.start_point() {
-                        let vp = Viewport { pan: fc.pan.get(), zoom: fc.zoom.get() };
-                        let world = flow_render::screen_to_world(vp, start_x + dx, start_y + dy);
-                        if let Some(p) = pending.borrow_mut().as_mut() {
-                            p.1 = (world.x, world.y);
-                        }
-                        canvas2.queue_draw();
-                    }
-                }
-                None => {}
+        drag.connect_drag_update(move |g, dx, dy| match &*state.borrow() {
+            Some(DragMode::Move { id, px, py }) => {
+                let zoom = fc.zoom.get();
+                fc.set_node_position(id, px + dx / zoom, py + dy / zoom);
             }
+            Some(DragMode::Edge { .. }) => {
+                if let Some((start_x, start_y)) = g.start_point() {
+                    let vp = Viewport {
+                        pan: fc.pan.get(),
+                        zoom: fc.zoom.get(),
+                    };
+                    let world = flow_render::screen_to_world(vp, start_x + dx, start_y + dy);
+                    if let Some(p) = pending.borrow_mut().as_mut() {
+                        p.1 = (world.x, world.y);
+                    }
+                    canvas2.queue_draw();
+                }
+            }
+            None => {}
         });
     }
     {
@@ -277,15 +300,23 @@ pub fn build_flowchart_view(
         let pending = pending_edge.clone();
         let canvas2 = canvas.clone();
         drag.connect_drag_end(move |g, dx, dy| {
-            if let Some(DragMode::Edge { from_node, from_port }) = state.borrow_mut().take() {
+            if let Some(DragMode::Edge {
+                from_node,
+                from_port,
+            }) = state.borrow_mut().take()
+            {
                 if let Some((start_x, start_y)) = g.start_point() {
-                    let vp = Viewport { pan: fc.pan.get(), zoom: fc.zoom.get() };
+                    let vp = Viewport {
+                        pan: fc.pan.get(),
+                        zoom: fc.zoom.get(),
+                    };
                     let world = flow_render::screen_to_world(vp, start_x + dx, start_y + dy);
                     let target = fc.document.with(|d| flow_render::hit_test(d, world));
                     if let Some(to_node) = target {
                         if to_node != from_node {
-                            if let Some(to_port) =
-                                fc.document.with(|d| flow_render::nearest_input_port(d, &to_node, world))
+                            if let Some(to_port) = fc
+                                .document
+                                .with(|d| flow_render::nearest_input_port(d, &to_node, world))
                             {
                                 fc.add_edge(&from_node, &from_port, &to_node, &to_port);
                             }
@@ -359,8 +390,8 @@ pub fn build_flowchart_view(
     corner.set_margin_end(8);
 
     // Signal-flow lays out left→right (Simulink-style); the rest top→down.
-    let horizontal =
-        fc.document.with(|d| d.schema_kind()) == matforge_core::models::flowchart::SchemaKind::SignalFlow;
+    let horizontal = fc.document.with(|d| d.schema_kind())
+        == matforge_core::models::flowchart::SchemaKind::SignalFlow;
     let organize = Button::with_label("Organize");
     organize.add_css_class("mf-tool");
     organize.add_css_class("mf-flow-fit");
@@ -444,7 +475,14 @@ enum Hook {
 }
 
 fn redraw_hooks() -> Vec<Hook> {
-    vec![Hook::Doc, Hook::Sel, Hook::Zoom, Hook::Pan, Hook::Bp, Hook::Exec]
+    vec![
+        Hook::Doc,
+        Hook::Sel,
+        Hook::Zoom,
+        Hook::Pan,
+        Hook::Bp,
+        Hook::Exec,
+    ]
 }
 
 /// The collapsible BLOCKS palette: a list of dialect-appropriate node kinds that
@@ -668,7 +706,9 @@ fn fit_view(fc: &Rc<FlowchartViewModel>, cw: f64, ch: f64) {
     let bw = (maxx - minx).max(1.0);
     let bh = (maxy - miny).max(1.0);
     let margin = 48.0;
-    let zoom = ((cw - 2.0 * margin) / bw).min((ch - 2.0 * margin) / bh).clamp(ZOOM_MIN, ZOOM_MAX);
+    let zoom = ((cw - 2.0 * margin) / bw)
+        .min((ch - 2.0 * margin) / bh)
+        .clamp(ZOOM_MIN, ZOOM_MAX);
     let cx = (minx + maxx) / 2.0;
     let cy = (miny + maxy) / 2.0;
     fc.set_zoom(zoom);
@@ -848,7 +888,11 @@ fn field_get(node: &FlowNode, key: &FieldKey) -> String {
 
 fn field_set(node: &mut FlowNode, key: &FieldKey, value: &str) {
     fn put(slot: &mut Option<String>, value: &str) {
-        *slot = if value.is_empty() { None } else { Some(value.to_string()) };
+        *slot = if value.is_empty() {
+            None
+        } else {
+            Some(value.to_string())
+        };
     }
     match key {
         FieldKey::Label => node.label = value.to_string(),
@@ -881,15 +925,26 @@ fn field_set(node: &mut FlowNode, key: &FieldKey, value: &str) {
 /// Write the document to its `.mflow` path.
 fn save_flowchart(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>, path: Option<&Path>) {
     let Some(path) = path else {
-        app.vm.status_bar.set_message("Save As is not wired for unsaved charts yet");
+        app.vm
+            .status_bar
+            .set_message("Save As is not wired for unsaved charts yet");
         return;
     };
     match fc.encode() {
         Ok(json) => match std::fs::write(path, json) {
-            Ok(()) => app.vm.status_bar.set_message(format!("Saved {}", path.display())),
-            Err(e) => app.vm.console.log(ConsoleLevel::Error, format!("save failed: {e}")),
+            Ok(()) => app
+                .vm
+                .status_bar
+                .set_message(format!("Saved {}", path.display())),
+            Err(e) => app
+                .vm
+                .console
+                .log(ConsoleLevel::Error, format!("save failed: {e}")),
         },
-        Err(e) => app.vm.console.log(ConsoleLevel::Error, format!("encode failed: {e}")),
+        Err(e) => app
+            .vm
+            .console
+            .log(ConsoleLevel::Error, format!("encode failed: {e}")),
     }
 }
 
@@ -913,18 +968,25 @@ pub(crate) fn emit_matlab(
     match fc.encode() {
         Ok(json) => {
             if let Err(e) = std::fs::write(mflow, json) {
-                app.vm.console.log(ConsoleLevel::Error, format!("save failed: {e}"));
+                app.vm
+                    .console
+                    .log(ConsoleLevel::Error, format!("save failed: {e}"));
                 return None;
             }
         }
         Err(e) => {
-            app.vm.console.log(ConsoleLevel::Error, format!("encode failed: {e}"));
+            app.vm
+                .console
+                .log(ConsoleLevel::Error, format!("encode failed: {e}"));
             return None;
         }
     }
 
     if !app.settings.matlabc_path.exists() {
-        app.vm.console.log(ConsoleLevel::Error, "matlabc not found — cannot compile flowchart");
+        app.vm.console.log(
+            ConsoleLevel::Error,
+            "matlabc not found — cannot compile flowchart",
+        );
         return None;
     }
     app.vm.status_bar.set_message("Compiling flowchart…");
@@ -939,11 +1001,15 @@ pub(crate) fn emit_matlab(
             match std::fs::write(&m_path, code.as_bytes()) {
                 Ok(()) => {
                     crate::ui::open_file_path(app, &m_path);
-                    app.vm.status_bar.set_message(format!("Generated {}", m_path.display()));
+                    app.vm
+                        .status_bar
+                        .set_message(format!("Generated {}", m_path.display()));
                     Some(m_path)
                 }
                 Err(e) => {
-                    app.vm.console.log(ConsoleLevel::Error, format!("write .m failed: {e}"));
+                    app.vm
+                        .console
+                        .log(ConsoleLevel::Error, format!("write .m failed: {e}"));
                     None
                 }
             }
@@ -957,7 +1023,9 @@ pub(crate) fn emit_matlab(
             None
         }
         Err(e) => {
-            app.vm.console.log(ConsoleLevel::Error, format!("matlabc: {e}"));
+            app.vm
+                .console
+                .log(ConsoleLevel::Error, format!("matlabc: {e}"));
             None
         }
     }

@@ -41,7 +41,10 @@ impl FileSystem for RealFileSystem {
         let mut entries = Vec::new();
         for e in std::fs::read_dir(path)? {
             let e = e?;
-            entries.push(DirEntry { path: e.path(), is_dir: e.file_type()?.is_dir() });
+            entries.push(DirEntry {
+                path: e.path(),
+                is_dir: e.file_type()?.is_dir(),
+            });
         }
         sort_entries(&mut entries);
         Ok(entries)
@@ -100,12 +103,18 @@ impl FileSystem for FakeFileSystem {
         let mut entries = Vec::new();
         for d in &self.dirs {
             if d.parent() == Some(path) {
-                entries.push(DirEntry { path: d.clone(), is_dir: true });
+                entries.push(DirEntry {
+                    path: d.clone(),
+                    is_dir: true,
+                });
             }
         }
         for f in self.files.keys() {
             if f.parent() == Some(path) {
-                entries.push(DirEntry { path: f.clone(), is_dir: false });
+                entries.push(DirEntry {
+                    path: f.clone(),
+                    is_dir: false,
+                });
             }
         }
         sort_entries(&mut entries);
@@ -157,7 +166,11 @@ fn scan_children(fs: &dyn FileSystem, dir: &Path, depth: usize) -> io::Result<Ve
             }
             out.push(child);
         } else {
-            let ext = entry.path.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
+            let ext = entry
+                .path
+                .extension()
+                .map(|e| e.to_string_lossy().into_owned())
+                .unwrap_or_default();
             let kind = NodeFileKind::from_extension(&ext);
             let mut child = ProjectNode::new(name, kind).with_url(entry.path.clone());
             if kind == NodeFileKind::Flowchart {
@@ -194,7 +207,10 @@ mod tests {
     #[test]
     fn fake_reads_and_lists() {
         let fs = sample_fs();
-        assert_eq!(fs.read_to_string(Path::new("/proj/main.m")).unwrap(), "x = 1;");
+        assert_eq!(
+            fs.read_to_string(Path::new("/proj/main.m")).unwrap(),
+            "x = 1;"
+        );
         assert!(fs.exists(Path::new("/proj/src")));
         let entries = fs.read_dir(Path::new("/proj")).unwrap();
         // folder "src" sorts before files
@@ -219,7 +235,11 @@ mod tests {
         assert!(names.contains(&"main.m"));
         assert!(!names.contains(&".hidden"));
         let src = tree.children.iter().find(|c| c.name == "src").unwrap();
-        let mflow = src.children.iter().find(|c| c.name == "diagram.mflow").unwrap();
+        let mflow = src
+            .children
+            .iter()
+            .find(|c| c.name == "diagram.mflow")
+            .unwrap();
         assert_eq!(mflow.kind, NodeFileKind::Flowchart);
     }
 
@@ -228,7 +248,10 @@ mod tests {
         let fs = sample_fs();
         let tree = scan_tree(&fs, Path::new("/proj"), 8).unwrap();
         let src = tree.children.iter().find(|c| c.name == "src").unwrap();
-        assert!(!src.is_expanded, "subfolders should be collapsed by default");
+        assert!(
+            !src.is_expanded,
+            "subfolders should be collapsed by default"
+        );
         // children are still scanned so expanding is instant
         assert!(!src.children.is_empty());
     }
@@ -247,8 +270,11 @@ mod tests {
     #[test]
     fn real_filesystem_write_read_list() {
         // Exercise RealFileSystem against a unique temp directory.
-        let base = std::env::temp_dir()
-            .join(format!("matforge_fs_test_{}_{}", std::process::id(), crate::models::next_id()));
+        let base = std::env::temp_dir().join(format!(
+            "matforge_fs_test_{}_{}",
+            std::process::id(),
+            crate::models::next_id()
+        ));
         std::fs::create_dir_all(base.join("sub")).unwrap();
         let fs = RealFileSystem;
         let file = base.join("a.m");
@@ -266,7 +292,9 @@ mod tests {
     #[test]
     fn real_filesystem_read_missing_errors() {
         let fs = RealFileSystem;
-        assert!(fs.read_to_string(Path::new("/nonexistent/matforge/x")).is_err());
+        assert!(fs
+            .read_to_string(Path::new("/nonexistent/matforge/x"))
+            .is_err());
         assert!(!fs.exists(Path::new("/nonexistent/matforge/x")));
     }
 

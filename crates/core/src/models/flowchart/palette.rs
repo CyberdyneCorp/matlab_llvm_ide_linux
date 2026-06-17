@@ -142,18 +142,14 @@ impl NodeCategory {
 /// Every addable block for `schema`, grouped under its category in display order
 /// (empty categories dropped). The structural `Start`/`End` scaffold is excluded
 /// — they already live on the canvas. Drives the Block Library window.
-pub fn library_blocks(
-    schema: super::document::SchemaKind,
-) -> Vec<(NodeCategory, Vec<NodeKind>)> {
+pub fn library_blocks(schema: super::document::SchemaKind) -> Vec<(NodeCategory, Vec<NodeKind>)> {
     NodeCategory::order_for(schema)
         .into_iter()
         .filter_map(|cat| {
             let kinds: Vec<NodeKind> = NodeKind::ALL
                 .iter()
                 .copied()
-                .filter(|k| {
-                    k.category() == cat && !matches!(k, NodeKind::Start | NodeKind::End)
-                })
+                .filter(|k| k.category() == cat && !matches!(k, NodeKind::Start | NodeKind::End))
                 .collect();
             (!kinds.is_empty()).then_some((cat, kinds))
         })
@@ -170,10 +166,18 @@ pub struct SignalFlowParamSpec {
 
 impl SignalFlowParamSpec {
     fn d(key: &'static str, label: &'static str, v: f64) -> SignalFlowParamSpec {
-        SignalFlowParamSpec { key, label, default_value: ParamValue::Double(v) }
+        SignalFlowParamSpec {
+            key,
+            label,
+            default_value: ParamValue::Double(v),
+        }
     }
     fn s(key: &'static str, label: &'static str, v: &str) -> SignalFlowParamSpec {
-        SignalFlowParamSpec { key, label, default_value: ParamValue::Str(v.to_string()) }
+        SignalFlowParamSpec {
+            key,
+            label,
+            default_value: ParamValue::Str(v.to_string()),
+        }
     }
 
     /// Per-kind tunable parameter list (matches roadmap §4.3 / Simulink dialogs).
@@ -316,14 +320,23 @@ mod tests {
         // Signal-flow shows many blocks across its categories, all signal-flow,
         // ordered with Sources first; no structural Start/End leak in.
         let sig = library_blocks(SchemaKind::SignalFlow);
-        assert!(sig.len() >= 4, "expected several signal categories, got {}", sig.len());
+        assert!(
+            sig.len() >= 4,
+            "expected several signal categories, got {}",
+            sig.len()
+        );
         assert_eq!(sig[0].0, NodeCategory::SignalSources);
         let total: usize = sig.iter().map(|(_, ks)| ks.len()).sum();
-        assert!(total > 6, "library should list more than the curated palette ({total})");
+        assert!(
+            total > 6,
+            "library should list more than the curated palette ({total})"
+        );
         for (cat, kinds) in &sig {
             assert!(cat.is_signal_flow());
             assert!(!kinds.is_empty());
-            assert!(kinds.iter().all(|k| !matches!(k, NodeKind::Start | NodeKind::End)));
+            assert!(kinds
+                .iter()
+                .all(|k| !matches!(k, NodeKind::Start | NodeKind::End)));
         }
 
         // Control-flow and state-chart produce their own non-empty groupings.
@@ -361,16 +374,32 @@ mod tests {
     fn every_category_has_label_accent_and_one_dialect() {
         use NodeCategory::*;
         let all = [
-            ControlFlow, Data, Io, Functions, Matrix, Other,
-            SignalSources, SignalSinks, SignalContinuous, SignalDiscrete,
-            SignalMath, SignalRouting, SignalLookup, SignalComposite,
-            ChartStates, ChartJunctions, ChartFunctions,
+            ControlFlow,
+            Data,
+            Io,
+            Functions,
+            Matrix,
+            Other,
+            SignalSources,
+            SignalSinks,
+            SignalContinuous,
+            SignalDiscrete,
+            SignalMath,
+            SignalRouting,
+            SignalLookup,
+            SignalComposite,
+            ChartStates,
+            ChartJunctions,
+            ChartFunctions,
         ];
         for c in all {
             assert!(!c.label().is_empty(), "{c:?} has no label");
             let _ = c.accent(); // every arm returns a color
-            // Signal/state predicates partition the dialect-specific categories.
-            assert!(!(c.is_signal_flow() && c.is_state_chart()), "{c:?} in two dialects");
+                                // Signal/state predicates partition the dialect-specific categories.
+            assert!(
+                !(c.is_signal_flow() && c.is_state_chart()),
+                "{c:?} in two dialects"
+            );
         }
         // The control-flow categories are neither signal nor chart.
         for c in [ControlFlow, Data, Io, Functions, Matrix, Other] {
