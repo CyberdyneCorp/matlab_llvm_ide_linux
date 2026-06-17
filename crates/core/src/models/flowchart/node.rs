@@ -46,6 +46,20 @@ impl FlowNode {
             parent: None,
         }
     }
+
+    /// A `params` value as its display string, if present.
+    pub fn param_str(&self, key: &str) -> Option<String> {
+        self.data.params.as_ref()?.get(key).map(ParamValue::display_string)
+    }
+
+    /// A `params` value parsed as `f64`, if present and numeric.
+    pub fn param_f64(&self, key: &str) -> Option<f64> {
+        match self.data.params.as_ref()?.get(key)? {
+            ParamValue::Double(d) => Some(*d),
+            ParamValue::Str(s) => s.trim().parse().ok(),
+            ParamValue::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
+        }
+    }
 }
 
 /// Block kinds defined by schema §6. Serde raw values match the JSON `kind`

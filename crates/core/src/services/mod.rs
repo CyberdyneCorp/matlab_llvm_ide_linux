@@ -6,6 +6,7 @@
 pub mod brackets;
 pub mod chart_trace;
 pub mod compiler;
+pub mod control_analysis;
 pub mod dap;
 pub mod filesystem;
 pub mod fuzzy;
