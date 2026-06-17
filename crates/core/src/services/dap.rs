@@ -177,8 +177,8 @@ mod tests {
         let mut f = DapFramer::new();
         let frame = encode_frame("{\"hello\":true}");
         let mid = frame.len() / 2;
-        assert!(f.feed(frame[..mid].as_bytes()).is_empty());
-        let bodies = f.feed(frame[mid..].as_bytes());
+        assert!(f.feed(&frame.as_bytes()[..mid]).is_empty());
+        let bodies = f.feed(&frame.as_bytes()[mid..]);
         assert_eq!(bodies, vec!["{\"hello\":true}".to_string()]);
     }
 

@@ -43,6 +43,7 @@ fn port_point(node: &FlowNode, port: &str) -> (f64, f64) {
 }
 
 /// Draw the whole document.
+#[allow(clippy::too_many_arguments)]
 pub fn draw_document(
     ctx: &cairo::Context,
     w: f64,

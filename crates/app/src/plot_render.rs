@@ -188,7 +188,7 @@ fn fmt_num(v: f64) -> String {
         return "0".into();
     }
     let a = v.abs();
-    let s = if a >= 1000.0 || a < 0.001 {
+    let s = if !(0.001..1000.0).contains(&a) {
         format!("{v:.3e}")
     } else {
         format!("{v:.4}")
@@ -256,6 +256,7 @@ pub fn draw_surface(ctx: &cairo::Context, w: f64, h: f64, figure: &PlotFigure, c
 
     // Build quads with an averaged depth + height, then sort far → near.
     let (cold, hot) = (t.blue, t.red);
+    #[allow(clippy::type_complexity)]
     let mut quads: Vec<(f64, [(f64, f64); 4], f64)> = Vec::with_capacity((nr - 1) * (nc - 1));
     for ri in 0..nr - 1 {
         for ci in 0..nc - 1 {

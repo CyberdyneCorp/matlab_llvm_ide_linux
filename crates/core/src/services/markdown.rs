@@ -266,6 +266,9 @@ fn table_to_markup(header: &[String], rows: &[Vec<String>]) -> String {
     let mut out = String::from("<tt>");
     for (ri, r) in all.iter().enumerate() {
         let mut line = String::new();
+        // Indexing by column is clearer here: the body reads `r.get(c)`, the
+        // per-column `widths[c]`, and the `c + 1 < cols` separator guard.
+        #[allow(clippy::needless_range_loop)]
         for c in 0..cols {
             let cell = r.get(c).map(String::as_str).unwrap_or("");
             let pad = widths[c].saturating_sub(cell.chars().count());

@@ -68,6 +68,7 @@ pub fn build_flowchart_view(
     canvas.set_vexpand(true);
 
     // Endpoints (world coords) of the edge being dragged, drawn as a rubber band.
+    #[allow(clippy::type_complexity)]
     let pending_edge: Rc<RefCell<Option<((f64, f64), (f64, f64))>>> = Rc::new(RefCell::new(None));
 
     // Draw.

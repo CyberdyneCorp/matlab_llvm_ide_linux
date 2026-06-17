@@ -2908,10 +2908,8 @@ fn build_console(app: &Rc<AppState>) -> GtkBox {
                 return;
             }
             // Re-parse the clicked line for the reference and jump to it.
-            let mut ls = buf
-                .iter_at_line(iter.line())
-                .unwrap_or_else(|| iter.clone());
-            let mut le = ls.clone();
+            let mut ls = buf.iter_at_line(iter.line()).unwrap_or(iter);
+            let mut le = ls;
             le.forward_to_line_end();
             let line_text = buf.text(&ls, &le, false).to_string();
             ls.set_line_offset(0);
@@ -4268,9 +4266,10 @@ fn build_matrix_viewer(app: &Rc<AppState>) -> GtkBox {
     {
         let app = app.clone();
         canvas.set_draw_func(move |_a, ctx, w, h| {
-            app.vm.workspace.inspected_matrix.with(|m| match m {
-                Some(matrix) => crate::plot_render::draw_heatmap(ctx, w as f64, h as f64, matrix),
-                None => {}
+            app.vm.workspace.inspected_matrix.with(|m| {
+                if let Some(matrix) = m {
+                    crate::plot_render::draw_heatmap(ctx, w as f64, h as f64, matrix)
+                }
             });
         });
     }

@@ -806,10 +806,9 @@ fn parse_note(
         Some((NoteSpan::Over(a, b), label))
     } else if let Some(rest) = spec.strip_prefix("left of ") {
         Some((NoteSpan::LeftOf(intern(ids, parts, rest.trim())), label))
-    } else if let Some(rest) = spec.strip_prefix("right of ") {
-        Some((NoteSpan::RightOf(intern(ids, parts, rest.trim())), label))
     } else {
-        None
+        spec.strip_prefix("right of ")
+            .map(|rest| (NoteSpan::RightOf(intern(ids, parts, rest.trim())), label))
     }
 }
 
@@ -1190,11 +1189,7 @@ fn parse_relation(line: &str) -> Option<(String, String, Marker, Marker, bool, O
     let (pos, op, left, right, dashed) = REL_OPS
         .iter()
         .find_map(|&(op, l, r, d)| stripped.find(op).map(|p| (p, op, l, r, d)))?;
-    let from = stripped[..pos]
-        .trim()
-        .split_whitespace()
-        .last()?
-        .to_string();
+    let from = stripped[..pos].split_whitespace().last()?.to_string();
     let after = stripped[pos + op.len()..].trim();
     let (to_part, label) = match after.split_once(':') {
         Some((t, lbl)) => (

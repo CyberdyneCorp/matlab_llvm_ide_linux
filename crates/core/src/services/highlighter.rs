@@ -270,9 +270,7 @@ pub fn highlight(source: &str, language: Language) -> Vec<TokenSpan> {
                 TokenColor::Keyword
             } else if cw.contains(word.as_str()) {
                 TokenColor::Control
-            } else if bi.contains(word.as_str()) {
-                TokenColor::Function
-            } else if is_followed_by_call(&s, i) {
+            } else if bi.contains(word.as_str()) || is_followed_by_call(&s, i) {
                 TokenColor::Function
             } else {
                 TokenColor::Identifier
@@ -422,7 +420,7 @@ mod tests {
         spans
             .iter()
             .find(|s| {
-                s.start == char_start && &chars[s.start..s.end].iter().collect::<String>() == needle
+                s.start == char_start && chars[s.start..s.end].iter().collect::<String>() == needle
             })
             .map(|s| s.color)
     }
