@@ -222,7 +222,8 @@ pub struct SolverConfig {
 }
 
 impl SolverConfig {
-    fn default_variable_step() -> SolverConfig {
+    /// The Simulink-like default: variable-step `ode45`, 0–10 s, standard tols.
+    pub fn default_variable_step() -> SolverConfig {
         SolverConfig {
             solver_type: Some(SolverType::VariableStep),
             algorithm: Some(SolverAlgorithm::Ode45),

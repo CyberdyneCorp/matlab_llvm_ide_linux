@@ -487,6 +487,122 @@ fn build_palette(fc: &Rc<FlowchartViewModel>) -> GtkBox {
 
 /// The flowchart editor's slim top toolbar: a Blocks-palette toggle, Save /
 /// Compile / dialect run action, and undo·redo·delete.
+/// Popover form for the signal-flow solver settings (`settings.solver`),
+/// anchored on the toolbar's Solver… button. Applying writes one undo step.
+fn open_solver_popover(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>, anchor: &Button) {
+    use matforge_core::models::flowchart::{
+        AlgebraicLoopMethod as Alg, SolverAlgorithm as A, SolverConfig, SolverType as T,
+    };
+    let cfg = fc.solver_config();
+
+    let entry = |text: String| {
+        let e = Entry::new();
+        e.set_text(&text);
+        e.set_width_chars(10);
+        e
+    };
+    let numf = |v: Option<f64>, d: f64| entry(format!("{}", v.unwrap_or(d)));
+
+    let type_dd = gtk::DropDown::from_strings(&["fixed_step", "variable_step"]);
+    type_dd.set_selected(if cfg.solver_type == Some(T::FixedStep) { 0 } else { 1 });
+    let algo_dd = gtk::DropDown::from_strings(&["ode45", "ode23", "ode15s", "euler", "heun"]);
+    algo_dd.set_selected(match cfg.algorithm {
+        Some(A::Ode23) => 1,
+        Some(A::Ode15s) => 2,
+        Some(A::Euler) => 3,
+        Some(A::Heun) => 4,
+        _ => 0,
+    });
+    let loop_dd = gtk::DropDown::from_strings(&["trust_region", "newton", "off"]);
+    loop_dd.set_selected(match cfg.algebraic_loop_method {
+        Some(Alg::Newton) => 1,
+        Some(Alg::Off) => 2,
+        _ => 0,
+    });
+    let start = numf(cfg.start_time, 0.0);
+    let stop = numf(cfg.stop_time, 10.0);
+    let max_step = entry(cfg.max_step.clone().unwrap_or_else(|| "auto".into()));
+    let min_step = entry(cfg.min_step.clone().unwrap_or_else(|| "auto".into()));
+    let rel_tol = numf(cfg.rel_tol, 1e-3);
+    let abs_tol = numf(cfg.abs_tol, 1e-6);
+    let zero_crossing = gtk::CheckButton::with_label("Zero-crossing detection");
+    zero_crossing.set_active(cfg.zero_crossing.unwrap_or(true));
+
+    let grid = gtk::Grid::new();
+    grid.set_row_spacing(6);
+    grid.set_column_spacing(8);
+    grid.set_margin_top(10);
+    grid.set_margin_bottom(10);
+    grid.set_margin_start(10);
+    grid.set_margin_end(10);
+    let rows: [(&str, &gtk::Widget); 9] = [
+        ("Type", type_dd.upcast_ref()),
+        ("Algorithm", algo_dd.upcast_ref()),
+        ("Start time (s)", start.upcast_ref()),
+        ("Stop time (s)", stop.upcast_ref()),
+        ("Max step", max_step.upcast_ref()),
+        ("Min step", min_step.upcast_ref()),
+        ("Relative tol", rel_tol.upcast_ref()),
+        ("Absolute tol", abs_tol.upcast_ref()),
+        ("Algebraic loop", loop_dd.upcast_ref()),
+    ];
+    for (r, (label, widget)) in rows.iter().enumerate() {
+        let l = Label::new(Some(label));
+        l.add_css_class("mf-col-title");
+        l.set_halign(gtk::Align::Start);
+        grid.attach(&l, 0, r as i32, 1, 1);
+        grid.attach(*widget, 1, r as i32, 1, 1);
+    }
+    grid.attach(&zero_crossing, 0, 9, 2, 1);
+
+    let apply = Button::with_label("Apply");
+    apply.add_css_class("mf-compile-cta");
+    grid.attach(&apply, 0, 10, 2, 1);
+
+    let pop = gtk::Popover::new();
+    pop.set_parent(anchor);
+    pop.set_child(Some(&grid));
+
+    {
+        let app = app.clone();
+        let fc = fc.clone();
+        let pop = pop.clone();
+        apply.connect_clicked(move |_| {
+            let f = |e: &Entry, d: f64| e.text().trim().parse::<f64>().unwrap_or(d);
+            let step = |e: &Entry| {
+                let s = e.text().to_string();
+                Some(if s.trim().is_empty() { "auto".to_string() } else { s })
+            };
+            let cfg = SolverConfig {
+                solver_type: Some(if type_dd.selected() == 0 { T::FixedStep } else { T::VariableStep }),
+                algorithm: Some(match algo_dd.selected() {
+                    1 => A::Ode23,
+                    2 => A::Ode15s,
+                    3 => A::Euler,
+                    4 => A::Heun,
+                    _ => A::Ode45,
+                }),
+                start_time: Some(f(&start, 0.0)),
+                stop_time: Some(f(&stop, 10.0)),
+                max_step: step(&max_step),
+                min_step: step(&min_step),
+                rel_tol: Some(f(&rel_tol, 1e-3)),
+                abs_tol: Some(f(&abs_tol, 1e-6)),
+                zero_crossing: Some(zero_crossing.is_active()),
+                algebraic_loop_method: Some(match loop_dd.selected() {
+                    1 => Alg::Newton,
+                    2 => Alg::Off,
+                    _ => Alg::TrustRegion,
+                }),
+            };
+            fc.set_solver_config(cfg);
+            app.vm.toast.show("Solver settings updated");
+            pop.popdown();
+        });
+    }
+    pop.popup();
+}
+
 fn build_flow_toolbar(
     app: &Rc<AppState>,
     fc: &Rc<FlowchartViewModel>,
@@ -563,13 +679,26 @@ fn build_flow_toolbar(
         let sim = Button::with_label("▶ Simulate");
         sim.add_css_class("mf-tool");
         sim.add_css_class("mf-run");
-        let app = app.clone();
-        let fc = fc.clone();
-        let path = path.clone();
-        sim.connect_clicked(move |_| {
-            crate::mflowlink_window::open(&app, fc.document.get(), (*path).clone(), false);
-        });
+        {
+            let app = app.clone();
+            let fc = fc.clone();
+            let path = path.clone();
+            sim.connect_clicked(move |_| {
+                crate::mflowlink_window::open(&app, fc.document.get(), (*path).clone(), false);
+            });
+        }
         bar.append(&sim);
+
+        // Solver settings (settings.solver) — drives `matlabc -simulate`.
+        let solver = Button::with_label("Solver…");
+        solver.add_css_class("mf-tool");
+        solver.set_tooltip_text(Some("Configure the simulation solver"));
+        {
+            let app = app.clone();
+            let fc = fc.clone();
+            solver.connect_clicked(move |b| open_solver_popover(&app, &fc, b));
+        }
+        bar.append(&solver);
     } else if schema == SchemaKind::StateChart {
         let run = Button::with_label("▶ Run Chart");
         run.add_css_class("mf-tool");
