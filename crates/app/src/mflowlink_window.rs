@@ -54,7 +54,7 @@ pub fn open(app: &Rc<AppState>, document: FlowchartDocument, path: Option<PathBu
     split.set_wide_handle(true);
     split.set_vexpand(true);
     split.set_start_child(Some(&build_model_canvas(&vm)));
-    split.set_end_child(Some(&build_scopes(&vm)));
+    split.set_end_child(Some(&build_scopes(app, &vm, path.clone())));
     split.set_position(560);
     root.append(&split);
 
@@ -356,17 +356,32 @@ fn fit_viewport(bounds: Option<(f64, f64, f64, f64)>, w: f64, h: f64) -> Viewpor
 
 /// The scope tiles: one line plot per logged signal, rebuilt when the signal
 /// set changes and redrawn as samples stream in.
-fn build_scopes(vm: &Rc<MflowLinkViewModel>) -> GtkBox {
+fn build_scopes(app: &Rc<AppState>, vm: &Rc<MflowLinkViewModel>, path: Option<PathBuf>) -> GtkBox {
     let panel = GtkBox::new(Orientation::Vertical, 0);
     panel.add_css_class("mf-panel");
     panel.add_css_class("mf-border-left");
     panel.set_size_request(420, -1);
+
+    // Header row: title + an Export-CSV action for the collected trace.
+    let header_row = GtkBox::new(Orientation::Horizontal, 6);
+    header_row.set_margin_start(8);
+    header_row.set_margin_end(8);
+    header_row.set_margin_top(6);
     let header = Label::new(Some("SCOPES"));
     header.add_css_class("mf-panel-header");
     header.set_halign(gtk::Align::Start);
-    header.set_margin_start(8);
-    header.set_margin_top(6);
-    panel.append(&header);
+    header.set_hexpand(true);
+    header_row.append(&header);
+    let export = Button::with_label("Export CSV");
+    export.add_css_class("mf-tool");
+    export.set_tooltip_text(Some("Save the collected trace as CSV"));
+    {
+        let app = app.clone();
+        let vm = vm.clone();
+        export.connect_clicked(move |_| export_trace_csv(&app, &vm, path.as_deref()));
+    }
+    header_row.append(&export);
+    panel.append(&header_row);
 
     let tiles = GtkBox::new(Orientation::Vertical, 6);
     tiles.set_margin_start(6);
@@ -409,9 +424,13 @@ fn build_scopes(vm: &Rc<MflowLinkViewModel>) -> GtkBox {
                     let da = DrawingArea::new();
                     da.set_size_request(-1, 130);
                     da.add_css_class("mf-thumb");
+                    // Cursor pixel for the crosshair value-readout (None = no hover).
+                    let hover: Rc<std::cell::Cell<Option<(f64, f64)>>> =
+                        Rc::new(std::cell::Cell::new(None));
                     let vm2 = vm.clone();
                     let idx = i;
                     let title = name.clone();
+                    let hover_draw = hover.clone();
                     da.set_draw_func(move |_a, ctx, w, h| {
                         let (mut xs, mut ys) = vm2.trace.with(|t| t.series(idx));
                         // Only draw up to the playback cursor (live edge while
@@ -420,8 +439,35 @@ fn build_scopes(vm: &Rc<MflowLinkViewModel>) -> GtkBox {
                         xs.truncate(n);
                         ys.truncate(n);
                         let fig = PlotFigure::series(idx as i32 + 1, title.clone(), PlotKind::Line2D, xs, ys);
-                        crate::plot_render::draw_figure(ctx, w as f64, h as f64, &fig, None, None, None);
+                        crate::plot_render::draw_figure(
+                            ctx,
+                            w as f64,
+                            h as f64,
+                            &fig,
+                            None,
+                            hover_draw.get(),
+                            None,
+                        );
                     });
+                    // Hovering a tile shows a crosshair + nearest-sample readout.
+                    let motion = gtk::EventControllerMotion::new();
+                    {
+                        let hover = hover.clone();
+                        let da2 = da.clone();
+                        motion.connect_motion(move |_m, x, y| {
+                            hover.set(Some((x, y)));
+                            da2.queue_draw();
+                        });
+                    }
+                    {
+                        let hover = hover.clone();
+                        let da2 = da.clone();
+                        motion.connect_leave(move |_m| {
+                            hover.set(None);
+                            da2.queue_draw();
+                        });
+                    }
+                    da.add_controller(motion);
                     tiles.append(&da);
                     draws.borrow_mut().push(da);
                 }
@@ -451,4 +497,22 @@ fn scope_label(name: &str) -> Label {
     l.add_css_class("mf-col-title");
     l.set_halign(gtk::Align::Start);
     l
+}
+
+/// Write the collected trace as CSV beside the model (`<model>.trace.csv`), or
+/// to a temp file for an untitled model, and toast the result.
+fn export_trace_csv(app: &Rc<AppState>, vm: &Rc<MflowLinkViewModel>, path: Option<&Path>) {
+    if vm.total_samples() == 0 {
+        app.vm.toast.show("No trace to export — run the simulation first.");
+        return;
+    }
+    let dest = match path {
+        Some(p) => p.with_extension("trace.csv"),
+        None => std::env::temp_dir().join("mflowlink_trace.csv"),
+    };
+    let csv = vm.trace.with(|t| t.to_csv());
+    match std::fs::write(&dest, csv) {
+        Ok(()) => app.vm.toast.show(format!("Exported trace to {}", dest.display())),
+        Err(e) => app.vm.toast.show(format!("Export failed: {e}")),
+    }
 }

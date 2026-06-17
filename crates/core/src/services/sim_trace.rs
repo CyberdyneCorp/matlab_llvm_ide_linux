@@ -88,6 +88,25 @@ impl SimTrace {
     pub fn last_time(&self) -> Option<f64> {
         self.rows.last().and_then(|r| r.first().copied())
     }
+
+    /// The collected trace as CSV — the header row then one row per sample.
+    /// Mirrors the simulator's column layout, so the export re-imports cleanly
+    /// through [`feed_line`](Self::feed_line).
+    pub fn to_csv(&self) -> String {
+        let mut out = String::new();
+        out.push_str(&self.columns.join(","));
+        out.push('\n');
+        for row in &self.rows {
+            for (i, v) in row.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                out.push_str(&format!("{v}"));
+            }
+            out.push('\n');
+        }
+        out
+    }
 }
 
 #[cfg(test)]
@@ -140,6 +159,30 @@ mod tests {
         assert!(t.feed_line("0.0,1.0,2.0"));
         assert_eq!(t.columns, ["t", "y1", "y2"]);
         assert_eq!(t.rows.len(), 1);
+    }
+
+    #[test]
+    fn to_csv_roundtrips_header_and_rows() {
+        let mut t = SimTrace::new();
+        t.feed_line("t,a,b");
+        t.feed_line("0,1,2");
+        t.feed_line("0.5,1.5,2.5");
+        let csv = t.to_csv();
+        assert_eq!(csv, "t,a,b\n0,1,2\n0.5,1.5,2.5\n");
+        // Re-importing the export reproduces the same trace.
+        let mut t2 = SimTrace::new();
+        for line in csv.lines() {
+            t2.feed_line(line);
+        }
+        assert_eq!(t2.columns, t.columns);
+        assert_eq!(t2.rows, t.rows);
+    }
+
+    #[test]
+    fn to_csv_empty_trace_is_header_only() {
+        let mut t = SimTrace::new();
+        t.feed_line("t,scope");
+        assert_eq!(t.to_csv(), "t,scope\n");
     }
 
     #[test]
