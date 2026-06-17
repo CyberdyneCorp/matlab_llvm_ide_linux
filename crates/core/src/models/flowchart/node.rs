@@ -128,6 +128,8 @@ pub enum NodeKind {
     // continuous
     #[serde(rename = "signal_integrator")]
     SignalIntegrator,
+    #[serde(rename = "signal_pid")]
+    SignalPid,
     #[serde(rename = "signal_derivative")]
     SignalDerivative,
     #[serde(rename = "signal_transfer_fcn")]
@@ -258,7 +260,7 @@ pub enum PortAnchor {
 
 impl NodeKind {
     /// Every kind, for palette enumeration + exhaustive tests.
-    pub const ALL: [NodeKind; 84] = [
+    pub const ALL: [NodeKind; 85] = [
         NodeKind::Start, NodeKind::End, NodeKind::Comment, NodeKind::Constant,
         NodeKind::Variable, NodeKind::Assignment, NodeKind::Expression, NodeKind::Input,
         NodeKind::Display, NodeKind::FunctionCall, NodeKind::MatrixLiteral, NodeKind::IfBlock,
@@ -268,6 +270,7 @@ impl NodeKind {
         NodeKind::SignalRamp, NodeKind::SignalClock, NodeKind::SignalChirp, NodeKind::SignalNoise,
         NodeKind::SignalFunctionCallGenerator, NodeKind::SignalScope, NodeKind::SignalDisplay,
         NodeKind::SignalToWorkspace, NodeKind::SignalTerminator, NodeKind::SignalIntegrator,
+        NodeKind::SignalPid,
         NodeKind::SignalDerivative, NodeKind::SignalTransferFcn, NodeKind::SignalStateSpace,
         NodeKind::SignalZeroPole, NodeKind::SignalTransportDelay, NodeKind::SignalUnitDelay,
         NodeKind::SignalZoh, NodeKind::SignalDiscreteIntegrator, NodeKind::SignalDiscreteFilter,
@@ -303,7 +306,7 @@ impl NodeKind {
             SignalConstant | SignalStep | SignalSine | SignalPulse | SignalRamp | SignalClock
             | SignalChirp | SignalNoise | SignalFunctionCallGenerator => C::SignalSources,
             SignalScope | SignalDisplay | SignalToWorkspace | SignalTerminator => C::SignalSinks,
-            SignalIntegrator | SignalDerivative | SignalTransferFcn | SignalStateSpace
+            SignalIntegrator | SignalPid | SignalDerivative | SignalTransferFcn | SignalStateSpace
             | SignalZeroPole | SignalTransportDelay => C::SignalContinuous,
             SignalUnitDelay | SignalZoh | SignalDiscreteIntegrator | SignalDiscreteFilter
             | SignalRateTransition => C::SignalDiscrete,
@@ -385,6 +388,7 @@ impl NodeKind {
             SignalToWorkspace => "To Workspace",
             SignalTerminator => "Terminator",
             SignalIntegrator => "Integrator",
+            SignalPid => "PID Controller",
             SignalDerivative => "Derivative",
             SignalTransferFcn => "Transfer Fcn",
             SignalStateSpace => "State-Space",
@@ -842,6 +846,7 @@ mod tests {
             (NodeKind::FunctionCall, "\"function_call\""),
             (NodeKind::SignalZoh, "\"signal_zoh\""),
             (NodeKind::SignalLookup1D, "\"signal_lookup_1d\""),
+            (NodeKind::SignalPid, "\"signal_pid\""),
         ];
         for (kind, json) in cases {
             assert_eq!(serde_json::to_string(&kind).unwrap(), json);
