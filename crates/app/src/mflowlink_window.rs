@@ -335,7 +335,10 @@ fn build_model_canvas(vm: &Rc<MflowLinkViewModel>) -> GtkBox {
                 let (ux, uy) = user_pan.get();
                 vp.pan = (vp.pan.0 + ux, vp.pan.1 + uy);
                 let bps = std::collections::BTreeMap::new();
-                flow_render::draw_document(ctx, w as f64, h as f64, doc, vp, None, &bps, None);
+                let algebraic = doc.algebraic_loop_nodes();
+                flow_render::draw_document(
+                    ctx, w as f64, h as f64, doc, vp, None, &bps, None, &algebraic,
+                );
             });
         });
     }

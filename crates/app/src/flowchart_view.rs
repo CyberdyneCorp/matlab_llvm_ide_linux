@@ -80,6 +80,7 @@ pub fn build_flowchart_view(
                 pan: fc.pan.get(),
                 zoom: fc.zoom.get(),
             };
+            let algebraic = fc.algebraic_loop_nodes();
             fc.document.with(|doc| {
                 let sel = fc.selected_id.get();
                 let exec = fc.execution_node.get();
@@ -93,6 +94,7 @@ pub fn build_flowchart_view(
                         sel.as_deref(),
                         bps,
                         exec.as_deref(),
+                        &algebraic,
                     );
                 });
             });
@@ -751,6 +753,18 @@ fn build_inspector_body(fc: &Rc<FlowchartViewModel>) -> ScrolledWindow {
             title.set_halign(gtk::Align::Start);
             body.append(&title);
 
+            // Algebraic-loop warning for the selected block.
+            if fc.algebraic_loop_nodes().contains(&id) {
+                let warn = Label::new(Some(
+                    "⚠ On an algebraic loop — insert a state block (Integrator / Unit Delay / ZOH) to break direct feedthrough.",
+                ));
+                warn.add_css_class("mf-field-error-text");
+                warn.set_halign(gtk::Align::Start);
+                warn.set_wrap(true);
+                body.append(&warn);
+            }
+
+            let kind = node.kind;
             for (label_text, key) in node_fields(&node) {
                 let field = GtkBox::new(Orientation::Vertical, 2);
                 let lbl = Label::new(Some(&label_text));
@@ -759,16 +773,36 @@ fn build_inspector_body(fc: &Rc<FlowchartViewModel>) -> ScrolledWindow {
                 let entry = Entry::new();
                 entry.set_text(&field_get(&node, &key));
                 entry.set_hexpand(true);
+                // Inline validation message, hidden until the value is invalid.
+                let err = Label::new(None);
+                err.add_css_class("mf-field-error-text");
+                err.set_halign(gtk::Align::Start);
+                err.set_wrap(true);
+                err.set_visible(false);
                 // Connect *after* set_text so the initial value is not echoed
                 // back through edit_node (which would falsely mark dirty).
                 let fc2 = fc.clone();
                 let id2 = id.clone();
+                let err2 = err.clone();
                 entry.connect_changed(move |e| {
                     let value = e.text().to_string();
+                    // Signal-flow parameters are validated; an invalid value is
+                    // flagged inline and not committed (no silent bad params).
+                    if let FieldKey::Param(k) = &key {
+                        if let Err(msg) = SignalFlowParamSpec::validate_field(kind, k, &value) {
+                            e.add_css_class("mf-field-error");
+                            err2.set_text(&msg);
+                            err2.set_visible(true);
+                            return;
+                        }
+                        e.remove_css_class("mf-field-error");
+                        err2.set_visible(false);
+                    }
                     fc2.edit_node(&id2, |n| field_set(n, &key, &value));
                 });
                 field.append(&lbl);
                 field.append(&entry);
+                field.append(&err);
                 body.append(&field);
             }
 

@@ -4,7 +4,7 @@
 //! world → screen. Geometry reads the tested core model (`NodeKind` shapes,
 //! ports, anchors); this only paints.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use gtk::cairo;
 
@@ -53,6 +53,7 @@ pub fn draw_document(
     selected: Option<&str>,
     breakpoints: &BTreeMap<String, BreakpointConfig>,
     exec_node: Option<&str>,
+    algebraic: &BTreeSet<String>,
 ) {
     set_rgb(ctx, crate::theme_css::current().editor_bg);
     ctx.rectangle(0.0, 0.0, w, h);
@@ -108,6 +109,18 @@ pub fn draw_document(
             set_rgb(ctx, crate::theme_css::current().yellow);
             ctx.set_line_width(2.0);
             ctx.stroke().ok();
+        }
+
+        // Algebraic-loop warning: an amber dashed halo on every block whose
+        // output feeds back into its own input without a state block to break
+        // the loop.
+        if algebraic.contains(&node.id) {
+            draw_shape(ctx, node.kind.shape(), x - 3.0, y - 3.0, nw + 6.0, nh + 6.0);
+            set_rgb(ctx, crate::theme_css::current().amber);
+            ctx.set_line_width(2.0);
+            ctx.set_dash(&[4.0, 3.0], 0.0);
+            ctx.stroke().ok();
+            ctx.set_dash(&[], 0.0);
         }
 
         // Label.

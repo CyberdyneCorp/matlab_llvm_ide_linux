@@ -248,6 +248,8 @@ fn build_chart_canvas(vm: &Rc<StateChartViewModel>) -> GtkBox {
                 // Highlight the most recently entered active state.
                 let active = vm.active_states.with(|s| s.iter().next_back().cloned());
                 let bps = BTreeMap::new();
+                // Charts have no algebraic loops; pass an empty set.
+                let algebraic = std::collections::BTreeSet::new();
                 flow_render::draw_document(
                     ctx,
                     w as f64,
@@ -257,6 +259,7 @@ fn build_chart_canvas(vm: &Rc<StateChartViewModel>) -> GtkBox {
                     None,
                     &bps,
                     active.as_deref(),
+                    &algebraic,
                 );
             });
         });
