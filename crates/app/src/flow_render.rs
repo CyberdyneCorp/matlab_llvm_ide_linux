@@ -56,6 +56,7 @@ pub fn draw_document(
     algebraic: &BTreeSet<String>,
     lint: &BTreeSet<String>,
     hierarchy_lint: &BTreeSet<String>,
+    active: &BTreeSet<String>,
 ) {
     set_rgb(ctx, crate::theme_css::current().editor_bg);
     ctx.rectangle(0.0, 0.0, w, h);
@@ -139,6 +140,15 @@ pub fn draw_document(
             },
         );
         ctx.stroke().ok();
+
+        // Live active-state halo (mStateflow): a solid green ring on every state
+        // currently active during a chart run.
+        if active.contains(&node.id) {
+            draw_shape(ctx, node.kind.shape(), x - 2.0, y - 2.0, nw + 4.0, nh + 4.0);
+            set_rgb(ctx, crate::theme_css::current().green);
+            ctx.set_line_width(2.5);
+            ctx.stroke().ok();
+        }
 
         if is_exec {
             draw_shape(ctx, node.kind.shape(), x - 2.0, y - 2.0, nw + 4.0, nh + 4.0);

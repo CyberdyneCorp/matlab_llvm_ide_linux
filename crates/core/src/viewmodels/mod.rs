@@ -38,7 +38,7 @@ pub use plots::PlotsViewModel;
 pub use project_explorer::ProjectExplorerViewModel;
 pub use repl::ReplViewModel;
 pub use search::{SearchResult, SearchViewModel};
-pub use statechart::StateChartViewModel;
+pub use statechart::{LoggedEvent, StateChartViewModel};
 pub use status_bar::StatusBarViewModel;
 pub use toast::ToastViewModel;
 pub use toolbar::ToolbarViewModel;

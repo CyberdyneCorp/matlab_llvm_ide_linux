@@ -105,6 +105,7 @@ pub fn build_flowchart_view(
                         &algebraic,
                         &lint,
                         &hierarchy_lint,
+                        &std::collections::BTreeSet::new(),
                     );
                 });
             });

@@ -69,11 +69,18 @@ pub fn open(
     root.add_css_class("mf-window");
     root.append(&build_transport(app, &vm, &sim, &dap, path.clone()));
 
+    // Right column: the active-state tree above the streaming event log.
+    let right = gtk::Paned::new(Orientation::Vertical);
+    right.set_wide_handle(true);
+    right.set_start_child(Some(&build_active_tree(&vm)));
+    right.set_end_child(Some(&build_event_log(app, &vm, path.clone())));
+    right.set_position(240);
+
     let split = gtk::Paned::new(Orientation::Horizontal);
     split.set_wide_handle(true);
     split.set_vexpand(true);
     split.set_start_child(Some(&build_chart_canvas(&vm)));
-    split.set_end_child(Some(&build_event_log(&vm)));
+    split.set_end_child(Some(&right));
     split.set_position(600);
     root.append(&split);
     window.set_child(Some(&root));
@@ -372,8 +379,10 @@ fn build_chart_canvas(vm: &Rc<StateChartViewModel>) -> GtkBox {
         canvas.set_draw_func(move |_a, ctx, w, h| {
             vm.document.with(|doc| {
                 let vp = fit_viewport(flow_render::content_bounds(doc), w as f64, h as f64);
-                // Highlight the most recently entered active state.
-                let active = vm.active_states.with(|s| s.iter().next_back().cloned());
+                // Halo every active state (green); the event-log "reveal" state
+                // gets the yellow exec halo on top.
+                let active = vm.active_states.get();
+                let revealed = vm.revealed.get();
                 let bps = BTreeMap::new();
                 // Charts have no algebraic loops; the live runner doesn't lint.
                 let algebraic = std::collections::BTreeSet::new();
@@ -387,10 +396,11 @@ fn build_chart_canvas(vm: &Rc<StateChartViewModel>) -> GtkBox {
                     vp,
                     None,
                     &bps,
-                    active.as_deref(),
+                    revealed.as_deref(),
                     &algebraic,
                     &lint,
                     &hierarchy_lint,
+                    &active,
                 );
             });
         });
@@ -398,6 +408,10 @@ fn build_chart_canvas(vm: &Rc<StateChartViewModel>) -> GtkBox {
     {
         let canvas = canvas.clone();
         vm.active_states.subscribe(move |_| canvas.queue_draw());
+    }
+    {
+        let canvas = canvas.clone();
+        vm.revealed.subscribe(move |_| canvas.queue_draw());
     }
     v.append(&canvas);
     v
@@ -423,17 +437,97 @@ fn fit_viewport(bounds: Option<(f64, f64, f64, f64)>, w: f64, h: f64) -> Viewpor
     }
 }
 
-fn build_event_log(vm: &Rc<StateChartViewModel>) -> GtkBox {
+/// The active-state hierarchy pane: the chart's state tree with a live green dot
+/// on active states and an OR/AND decomposition badge per compound. Rebuilt when
+/// the active set changes.
+fn build_active_tree(vm: &Rc<StateChartViewModel>) -> GtkBox {
+    use matforge_core::models::flowchart::{StateDecomposition, StateTreeNode};
+
     let panel = GtkBox::new(Orientation::Vertical, 0);
     panel.add_css_class("mf-panel");
-    panel.add_css_class("mf-border-left");
-    panel.set_size_request(380, -1);
-    let header = Label::new(Some("EVENT LOG"));
+    let header = Label::new(Some("ACTIVE STATES"));
     header.add_css_class("mf-panel-header");
     header.set_halign(gtk::Align::Start);
     header.set_margin_start(8);
     header.set_margin_top(6);
     panel.append(&header);
+
+    let rows = GtkBox::new(Orientation::Vertical, 1);
+    rows.set_margin_start(6);
+    rows.set_margin_top(4);
+    let scroll = ScrolledWindow::new();
+    scroll.set_vexpand(true);
+    scroll.set_child(Some(&rows));
+    panel.append(&scroll);
+
+    fn render(rows: &GtkBox, vm: &Rc<StateChartViewModel>, nodes: &[StateTreeNode], depth: i32) {
+        for node in nodes {
+            let active = vm.is_active(&node.id);
+            let badge = if node.children.is_empty() {
+                ""
+            } else if node.decomposition == StateDecomposition::And {
+                "  [AND]"
+            } else {
+                "  [OR]"
+            };
+            let dot = if active { "● " } else { "○ " };
+            let row = Label::new(Some(&format!("{dot}{}{badge}", node.label)));
+            row.set_halign(gtk::Align::Start);
+            row.set_margin_start(depth * 16);
+            row.add_css_class(if active {
+                "mf-text-primary"
+            } else {
+                "mf-text-muted"
+            });
+            rows.append(&row);
+            render(rows, vm, &node.children, depth + 1);
+        }
+    }
+
+    {
+        let rows = rows.clone();
+        let vm2 = vm.clone();
+        let active = vm.active_states.clone();
+        active.subscribe(move |_| {
+            while let Some(c) = rows.first_child() {
+                rows.remove(&c);
+            }
+            render(&rows, &vm2, &vm2.state_tree(), 0);
+        });
+    }
+    render(&rows, vm, &vm.state_tree(), 0);
+    panel
+}
+
+fn build_event_log(
+    app: &Rc<AppState>,
+    vm: &Rc<StateChartViewModel>,
+    path: Option<PathBuf>,
+) -> GtkBox {
+    let panel = GtkBox::new(Orientation::Vertical, 0);
+    panel.add_css_class("mf-panel");
+    panel.add_css_class("mf-border-left");
+    panel.set_size_request(380, -1);
+
+    let header_bar = GtkBox::new(Orientation::Horizontal, 6);
+    let header = Label::new(Some("EVENT LOG"));
+    header.add_css_class("mf-panel-header");
+    header.set_halign(gtk::Align::Start);
+    header.set_hexpand(true);
+    header.set_margin_start(8);
+    header.set_margin_top(6);
+    header_bar.append(&header);
+    let export = Button::with_label("⭳ CSV");
+    export.add_css_class("mf-tool");
+    export.set_tooltip_text(Some("Export the event log as CSV"));
+    export.set_margin_end(8);
+    {
+        let app = app.clone();
+        let vm = vm.clone();
+        export.connect_clicked(move |_| export_events_csv(&app, &vm, path.as_deref()));
+    }
+    header_bar.append(&export);
+    panel.append(&header_bar);
 
     let list = ListBox::new();
     list.add_css_class("mf-event-log");
@@ -442,6 +536,14 @@ fn build_event_log(vm: &Rc<StateChartViewModel>) -> GtkBox {
     scroll.set_child(Some(&list));
     panel.append(&scroll);
 
+    // Click a row → reveal its state on the canvas (id stored as the widget name).
+    {
+        let vm = vm.clone();
+        list.connect_row_activated(move |_, row| {
+            let id = row.widget_name();
+            vm.reveal((!id.is_empty()).then(|| id.as_str()));
+        });
+    }
     {
         let list = list.clone();
         vm.events.bind(move |events| {
@@ -450,13 +552,42 @@ fn build_event_log(vm: &Rc<StateChartViewModel>) -> GtkBox {
             }
             // Show the most recent events last; cap to keep the list snappy.
             let start = events.len().saturating_sub(500);
-            for e in &events[start..] {
-                let row = Label::new(Some(&e.summary()));
-                row.set_halign(gtk::Align::Start);
-                row.add_css_class("mf-event-row");
+            for logged in &events[start..] {
+                let label = Label::new(Some(&format!(
+                    "[{}] {}",
+                    logged.step,
+                    logged.event.summary()
+                )));
+                label.set_halign(gtk::Align::Start);
+                label.add_css_class("mf-event-row");
+                let row = gtk::ListBoxRow::new();
+                row.set_child(Some(&label));
+                row.set_widget_name(logged.event.reveal_state().unwrap_or(""));
                 list.append(&row);
             }
         });
     }
     panel
+}
+
+/// Write the chart event log to a CSV beside the model file (or the temp dir),
+/// and toast where it landed.
+fn export_events_csv(app: &Rc<AppState>, vm: &Rc<StateChartViewModel>, path: Option<&Path>) {
+    let target = match path {
+        Some(p) => {
+            let stem = p.file_stem().map(|s| s.to_string_lossy().into_owned());
+            p.with_file_name(format!(
+                "{}_chart_trace.csv",
+                stem.as_deref().unwrap_or("chart")
+            ))
+        }
+        None => std::env::temp_dir().join("mf_chart_trace.csv"),
+    };
+    match std::fs::write(&target, vm.events_csv()) {
+        Ok(()) => app
+            .vm
+            .toast
+            .show(format!("Event log → {}", target.display())),
+        Err(e) => app.vm.toast.show(format!("CSV export failed: {e}")),
+    }
 }

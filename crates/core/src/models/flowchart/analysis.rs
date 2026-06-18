@@ -369,6 +369,39 @@ pub fn hierarchy_errors(flow: &Flow) -> BTreeMap<String, String> {
     out
 }
 
+/// One node in the chart's state hierarchy tree.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StateTreeNode {
+    pub id: String,
+    pub label: String,
+    pub decomposition: StateDecomposition,
+    pub children: Vec<StateTreeNode>,
+}
+
+/// The chart's state hierarchy as a tree (root states first, then nested by
+/// parent, in document order). Only `State` nodes participate; junctions and
+/// other node kinds are skipped.
+pub fn state_tree(flow: &Flow) -> Vec<StateTreeNode> {
+    use crate::models::flowchart::NodeKind;
+    fn build(flow: &Flow, parent: Option<&str>) -> Vec<StateTreeNode> {
+        flow.nodes
+            .iter()
+            .filter(|n| n.kind == NodeKind::State && n.parent.as_deref() == parent)
+            .map(|n| StateTreeNode {
+                id: n.id.clone(),
+                label: if n.label.is_empty() {
+                    n.id.clone()
+                } else {
+                    n.label.clone()
+                },
+                decomposition: n.data.decomposition.unwrap_or_default(),
+                children: build(flow, Some(&n.id)),
+            })
+            .collect()
+    }
+    build(flow, None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -586,5 +619,30 @@ mod tests {
         assert!(errs.contains_key("s1"));
         assert!(errs.contains_key("s2"));
         assert!(!errs.contains_key("s3"));
+    }
+
+    #[test]
+    fn state_tree_nests_by_parent() {
+        let mut root = state("root", None);
+        root.data.decomposition = Some(StateDecomposition::And);
+        let flow = flow_of(
+            vec![
+                root,
+                state("a", Some("root")),
+                state("b", Some("root")),
+                state("a1", Some("a")),
+                node("junction", NodeKind::JunctionEntry), // skipped (not a State)
+                state("top2", None),
+            ],
+            vec![],
+        );
+        let tree = state_tree(&flow);
+        assert_eq!(tree.len(), 2); // root + top2
+        assert_eq!(tree[0].id, "root");
+        assert_eq!(tree[0].decomposition, StateDecomposition::And);
+        assert_eq!(tree[0].children.len(), 2); // a, b
+        assert_eq!(tree[0].children[0].id, "a");
+        assert_eq!(tree[0].children[0].children[0].id, "a1");
+        assert_eq!(tree[1].id, "top2");
     }
 }
