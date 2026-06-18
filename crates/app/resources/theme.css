@@ -356,6 +356,12 @@ entry {
 }
 entry:focus-within { border-color: @mf_accent; }
 
+/* Inspector field validation: red border on an invalid block parameter and a
+   small red message beneath it. */
+entry.mf-field-error { border-color: @mf_red; }
+entry.mf-field-error:focus-within { border-color: @mf_red; }
+.mf-field-error-text { color: @mf_red; font-size: __FS_XXS__; }
+
 /* Dropdowns (target / theme / accent pickers). */
 dropdown > button {
     background-color: @mf_panel_alt;

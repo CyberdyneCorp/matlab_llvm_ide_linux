@@ -149,8 +149,17 @@ impl FlowchartViewModel {
 
     /// The entry-flow node with `id`, cloned (for the inspector).
     pub fn node(&self, id: &str) -> Option<FlowNode> {
-        self.document
-            .with(|d| d.flows.first().and_then(|f| f.nodes.iter().find(|n| n.id == id).cloned()))
+        self.document.with(|d| {
+            d.flows
+                .first()
+                .and_then(|f| f.nodes.iter().find(|n| n.id == id).cloned())
+        })
+    }
+
+    /// Block ids sitting on an algebraic loop — drives the inspector note and
+    /// the canvas warning outline. Empty unless this is a signal-flow document.
+    pub fn algebraic_loop_nodes(&self) -> std::collections::BTreeSet<String> {
+        self.document.with(|d| d.algebraic_loop_nodes())
     }
 
     /// The document's solver settings, or the variable-step default if unset.
@@ -197,7 +206,13 @@ impl FlowchartViewModel {
     }
 
     /// Connect two ports with a control edge; returns the new edge id.
-    pub fn add_edge(&self, from_node: &str, from_port: &str, to_node: &str, to_port: &str) -> String {
+    pub fn add_edge(
+        &self,
+        from_node: &str,
+        from_port: &str,
+        to_node: &str,
+        to_port: &str,
+    ) -> String {
         self.push_undo();
         let id = format!("e{}", self.next_seq());
         let edge = FlowEdge::new(
@@ -260,10 +275,14 @@ impl FlowchartViewModel {
     pub fn execution_order(&self) -> Vec<String> {
         use std::collections::{HashMap, HashSet};
         self.document.with(|doc| {
-            let Some(flow) = doc.flows.first() else { return Vec::new() };
+            let Some(flow) = doc.flows.first() else {
+                return Vec::new();
+            };
             let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
             for e in &flow.edges {
-                adj.entry(e.from.node.as_str()).or_default().push(e.to.node.as_str());
+                adj.entry(e.from.node.as_str())
+                    .or_default()
+                    .push(e.to.node.as_str());
             }
             let start = flow
                 .nodes
@@ -330,10 +349,12 @@ impl FlowchartViewModel {
 
     /// Node count in the entry flow (for tests / status).
     pub fn node_count(&self) -> usize {
-        self.document.with(|d| d.flows.first().map(|f| f.nodes.len()).unwrap_or(0))
+        self.document
+            .with(|d| d.flows.first().map(|f| f.nodes.len()).unwrap_or(0))
     }
     pub fn edge_count(&self) -> usize {
-        self.document.with(|d| d.flows.first().map(|f| f.edges.len()).unwrap_or(0))
+        self.document
+            .with(|d| d.flows.first().map(|f| f.edges.len()).unwrap_or(0))
     }
 }
 
@@ -350,17 +371,28 @@ const LAY_MARGIN: f64 = 40.0;
 /// otherwise top→down. Pure — the caller applies the result.
 pub fn arrange(doc: &FlowchartDocument, horizontal: bool) -> Vec<(String, FlowPosition)> {
     use std::collections::HashMap;
-    let Some(flow) = doc.flows.first() else { return Vec::new() };
+    let Some(flow) = doc.flows.first() else {
+        return Vec::new();
+    };
     let n = flow.nodes.len();
     if n == 0 {
         return Vec::new();
     }
-    let idx: HashMap<&str, usize> =
-        flow.nodes.iter().enumerate().map(|(i, nd)| (nd.id.as_str(), i)).collect();
+    let idx: HashMap<&str, usize> = flow
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(i, nd)| (nd.id.as_str(), i))
+        .collect();
     let edges: Vec<(usize, usize)> = flow
         .edges
         .iter()
-        .filter_map(|e| Some((*idx.get(e.from.node.as_str())?, *idx.get(e.to.node.as_str())?)))
+        .filter_map(|e| {
+            Some((
+                *idx.get(e.from.node.as_str())?,
+                *idx.get(e.to.node.as_str())?,
+            ))
+        })
         .collect();
 
     let forward = arrange_forward_edges(n, &edges);
@@ -386,7 +418,10 @@ pub fn arrange(doc: &FlowchartDocument, horizontal: bool) -> Vec<(String, FlowPo
     let cross_step = if horizontal { LAY_NODE_H } else { LAY_NODE_W } + LAY_SIBLING_GAP;
     let main_step = if horizontal { LAY_NODE_W } else { LAY_NODE_H } + LAY_LAYER_GAP;
     let extent = |count: usize| (count as f64) * cross_step - LAY_SIBLING_GAP;
-    let max_extent = by_layer.iter().map(|ids| extent(ids.len())).fold(0.0, f64::max);
+    let max_extent = by_layer
+        .iter()
+        .map(|ids| extent(ids.len()))
+        .fold(0.0, f64::max);
 
     let mut out = vec![FlowPosition { x: 0.0, y: 0.0 }; n];
     for (l, ids) in by_layer.iter().enumerate() {
@@ -401,7 +436,11 @@ pub fn arrange(doc: &FlowchartDocument, horizontal: bool) -> Vec<(String, FlowPo
             cross += cross_step;
         }
     }
-    flow.nodes.iter().enumerate().map(|(i, nd)| (nd.id.clone(), out[i])).collect()
+    flow.nodes
+        .iter()
+        .enumerate()
+        .map(|(i, nd)| (nd.id.clone(), out[i]))
+        .collect()
 }
 
 /// Edges with cycle-forming back edges removed (iterative DFS, gray = on stack).
@@ -439,7 +478,13 @@ fn arrange_forward_edges(n: usize, edges: &[(usize, usize)]) -> Vec<(usize, usiz
             }
         }
     }
-    edges.iter().copied().enumerate().filter(|(i, _)| keep[*i]).map(|(_, e)| e).collect()
+    edges
+        .iter()
+        .copied()
+        .enumerate()
+        .filter(|(i, _)| keep[*i])
+        .map(|(_, e)| e)
+        .collect()
 }
 
 #[cfg(test)]
@@ -463,7 +508,13 @@ mod tests {
 
         let pos = |id: &str| {
             vm.document.with(|d| {
-                d.flows[0].nodes.iter().find(|n| n.id == id).unwrap().ui.position
+                d.flows[0]
+                    .nodes
+                    .iter()
+                    .find(|n| n.id == id)
+                    .unwrap()
+                    .ui
+                    .position
             })
         };
         // start above a above end; all share a column (top-down layering).
@@ -487,7 +538,15 @@ mod tests {
         vm.auto_layout(true); // left-to-right
 
         let pos = |id: &str| {
-            vm.document.with(|d| d.flows[0].nodes.iter().find(|n| n.id == id).unwrap().ui.position)
+            vm.document.with(|d| {
+                d.flows[0]
+                    .nodes
+                    .iter()
+                    .find(|n| n.id == id)
+                    .unwrap()
+                    .ui
+                    .position
+            })
         };
         assert!(pos(&src).x < pos(&gain).x && pos(&gain).x < pos(&sink).x);
     }
@@ -556,7 +615,13 @@ mod tests {
         let vm = FlowchartViewModel::empty("D", SchemaKind::ControlFlow);
         vm.move_node("main_end", 500.0, 333.0);
         let pos = vm.document.with(|d| {
-            d.flows[0].nodes.iter().find(|n| n.id == "main_end").unwrap().ui.position
+            d.flows[0]
+                .nodes
+                .iter()
+                .find(|n| n.id == "main_end")
+                .unwrap()
+                .ui
+                .position
         });
         assert_eq!((pos.x, pos.y), (500.0, 333.0));
     }
@@ -631,14 +696,26 @@ mod tests {
         vm.set_node_position("main_end", 300.0, 300.0);
         vm.set_node_position("main_end", 310.0, 320.0);
         let pos = vm.document.with(|d| {
-            d.flows[0].nodes.iter().find(|n| n.id == "main_end").unwrap().ui.position
+            d.flows[0]
+                .nodes
+                .iter()
+                .find(|n| n.id == "main_end")
+                .unwrap()
+                .ui
+                .position
         });
         assert_eq!((pos.x, pos.y), (310.0, 320.0));
         assert!(vm.is_dirty.get());
         // A single undo restores the pre-drag position.
         vm.undo();
         let pos = vm.document.with(|d| {
-            d.flows[0].nodes.iter().find(|n| n.id == "main_end").unwrap().ui.position
+            d.flows[0]
+                .nodes
+                .iter()
+                .find(|n| n.id == "main_end")
+                .unwrap()
+                .ui
+                .position
         });
         assert_eq!((pos.x, pos.y), (240.0, 220.0));
     }

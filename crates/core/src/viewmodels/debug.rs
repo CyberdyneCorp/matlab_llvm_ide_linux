@@ -70,7 +70,8 @@ impl DebugViewModel {
     pub fn on_stopped(&self, frames: Vec<DapStackFrame>, locals: Vec<DapVariable>) {
         let top = frames.first();
         self.current_line.set(top.and_then(|f| f.line));
-        self.current_source.set(top.and_then(|f| f.source_path.clone()));
+        self.current_source
+            .set(top.and_then(|f| f.source_path.clone()));
         self.stack_frames.set(frames);
         self.locals.set(locals);
         self.state.set(DebugState::Paused);
@@ -78,7 +79,8 @@ impl DebugViewModel {
 
     /// Record a watch-box evaluation result.
     pub fn add_evaluation(&self, expression: impl Into<String>, result: impl Into<String>) {
-        self.evaluations.update(|e| e.push(DapEvaluation::new(expression, result)));
+        self.evaluations
+            .update(|e| e.push(DapEvaluation::new(expression, result)));
     }
 
     /// The session ended — clear transient state.
@@ -91,7 +93,10 @@ impl DebugViewModel {
     }
 
     pub fn is_active(&self) -> bool {
-        matches!(self.state.get(), DebugState::Launching | DebugState::Running | DebugState::Paused)
+        matches!(
+            self.state.get(),
+            DebugState::Launching | DebugState::Running | DebugState::Paused
+        )
     }
 
     pub fn is_paused(&self) -> bool {
@@ -104,7 +109,12 @@ mod tests {
     use super::*;
 
     fn frame(line: usize) -> DapStackFrame {
-        DapStackFrame { id: 1, name: "main".into(), source_path: Some("/p/a.m".into()), line: Some(line) }
+        DapStackFrame {
+            id: 1,
+            name: "main".into(),
+            source_path: Some("/p/a.m".into()),
+            line: Some(line),
+        }
     }
 
     #[test]

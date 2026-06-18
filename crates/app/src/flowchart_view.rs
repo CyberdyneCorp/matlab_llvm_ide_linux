@@ -29,7 +29,10 @@ enum DragMode {
     /// Moving the node under the cursor.
     Move { id: String, px: f64, py: f64 },
     /// Drawing an edge out of a port (rubber band to the cursor).
-    Edge { from_node: String, from_port: String },
+    Edge {
+        from_node: String,
+        from_port: String,
+    },
 }
 
 /// Build the palette + canvas + inspector surface for a flowchart tab. `path` is
@@ -65,6 +68,7 @@ pub fn build_flowchart_view(
     canvas.set_vexpand(true);
 
     // Endpoints (world coords) of the edge being dragged, drawn as a rubber band.
+    #[allow(clippy::type_complexity)]
     let pending_edge: Rc<RefCell<Option<((f64, f64), (f64, f64))>>> = Rc::new(RefCell::new(None));
 
     // Draw.
@@ -72,7 +76,11 @@ pub fn build_flowchart_view(
         let fc = fc.clone();
         let pending = pending_edge.clone();
         canvas.set_draw_func(move |_a, ctx, w, h| {
-            let vp = Viewport { pan: fc.pan.get(), zoom: fc.zoom.get() };
+            let vp = Viewport {
+                pan: fc.pan.get(),
+                zoom: fc.zoom.get(),
+            };
+            let algebraic = fc.algebraic_loop_nodes();
             fc.document.with(|doc| {
                 let sel = fc.selected_id.get();
                 let exec = fc.execution_node.get();
@@ -86,11 +94,13 @@ pub fn build_flowchart_view(
                         sel.as_deref(),
                         bps,
                         exec.as_deref(),
+                        &algebraic,
                     );
                 });
             });
             if let Some((s, e)) = *pending.borrow() {
-                let to_screen = |p: (f64, f64)| (p.0 * vp.zoom + vp.pan.0, p.1 * vp.zoom + vp.pan.1);
+                let to_screen =
+                    |p: (f64, f64)| (p.0 * vp.zoom + vp.pan.0, p.1 * vp.zoom + vp.pan.1);
                 let (sx, sy) = to_screen(s);
                 let (ex, ey) = to_screen(e);
                 ctx.set_source_rgba(0.31, 0.64, 0.89, 0.9);
@@ -137,7 +147,10 @@ pub fn build_flowchart_view(
         let fc = fc.clone();
         let canvas2 = canvas.clone();
         click.connect_released(move |_g, _n, x, y| {
-            let vp = Viewport { pan: fc.pan.get(), zoom: fc.zoom.get() };
+            let vp = Viewport {
+                pan: fc.pan.get(),
+                zoom: fc.zoom.get(),
+            };
             let world = flow_render::screen_to_world(vp, x, y);
             let hit = fc.document.with(|d| flow_render::hit_test(d, world));
             fc.select(hit);
@@ -199,7 +212,10 @@ pub fn build_flowchart_view(
         let target = menu_target.clone();
         let pop = menu_pop.clone();
         rclick.connect_pressed(move |_g, _n, x, y| {
-            let vp = Viewport { pan: fc.pan.get(), zoom: fc.zoom.get() };
+            let vp = Viewport {
+                pan: fc.pan.get(),
+                zoom: fc.zoom.get(),
+            };
             let world = flow_render::screen_to_world(vp, x, y);
             if let Some(id) = fc.document.with(|d| flow_render::hit_test(d, world)) {
                 fc.select(Some(id.clone()));
@@ -222,17 +238,26 @@ pub fn build_flowchart_view(
         let state = drag_state.clone();
         let pending = pending_edge.clone();
         drag.connect_drag_begin(move |_g, x, y| {
-            let vp = Viewport { pan: fc.pan.get(), zoom: fc.zoom.get() };
+            let vp = Viewport {
+                pan: fc.pan.get(),
+                zoom: fc.zoom.get(),
+            };
             let world = flow_render::screen_to_world(vp, x, y);
             // Port stubs win over the body so you can pull an edge off a node edge.
             let port_radius = 14.0 / fc.zoom.get().max(0.1);
-            if let Some((node, port)) =
-                fc.document.with(|d| flow_render::output_port_hit(d, world, port_radius))
+            if let Some((node, port)) = fc
+                .document
+                .with(|d| flow_render::output_port_hit(d, world, port_radius))
             {
-                let start = fc.document.with(|d| flow_render::port_world(d, &node, &port));
+                let start = fc
+                    .document
+                    .with(|d| flow_render::port_world(d, &node, &port));
                 if let Some(start) = start {
                     *pending.borrow_mut() = Some((start, (world.x, world.y)));
-                    *state.borrow_mut() = Some(DragMode::Edge { from_node: node, from_port: port });
+                    *state.borrow_mut() = Some(DragMode::Edge {
+                        from_node: node,
+                        from_port: port,
+                    });
                     return;
                 }
             }
@@ -251,24 +276,25 @@ pub fn build_flowchart_view(
         let state = drag_state.clone();
         let pending = pending_edge.clone();
         let canvas2 = canvas.clone();
-        drag.connect_drag_update(move |g, dx, dy| {
-            match &*state.borrow() {
-                Some(DragMode::Move { id, px, py }) => {
-                    let zoom = fc.zoom.get();
-                    fc.set_node_position(id, px + dx / zoom, py + dy / zoom);
-                }
-                Some(DragMode::Edge { .. }) => {
-                    if let Some((start_x, start_y)) = g.start_point() {
-                        let vp = Viewport { pan: fc.pan.get(), zoom: fc.zoom.get() };
-                        let world = flow_render::screen_to_world(vp, start_x + dx, start_y + dy);
-                        if let Some(p) = pending.borrow_mut().as_mut() {
-                            p.1 = (world.x, world.y);
-                        }
-                        canvas2.queue_draw();
-                    }
-                }
-                None => {}
+        drag.connect_drag_update(move |g, dx, dy| match &*state.borrow() {
+            Some(DragMode::Move { id, px, py }) => {
+                let zoom = fc.zoom.get();
+                fc.set_node_position(id, px + dx / zoom, py + dy / zoom);
             }
+            Some(DragMode::Edge { .. }) => {
+                if let Some((start_x, start_y)) = g.start_point() {
+                    let vp = Viewport {
+                        pan: fc.pan.get(),
+                        zoom: fc.zoom.get(),
+                    };
+                    let world = flow_render::screen_to_world(vp, start_x + dx, start_y + dy);
+                    if let Some(p) = pending.borrow_mut().as_mut() {
+                        p.1 = (world.x, world.y);
+                    }
+                    canvas2.queue_draw();
+                }
+            }
+            None => {}
         });
     }
     {
@@ -277,15 +303,23 @@ pub fn build_flowchart_view(
         let pending = pending_edge.clone();
         let canvas2 = canvas.clone();
         drag.connect_drag_end(move |g, dx, dy| {
-            if let Some(DragMode::Edge { from_node, from_port }) = state.borrow_mut().take() {
+            if let Some(DragMode::Edge {
+                from_node,
+                from_port,
+            }) = state.borrow_mut().take()
+            {
                 if let Some((start_x, start_y)) = g.start_point() {
-                    let vp = Viewport { pan: fc.pan.get(), zoom: fc.zoom.get() };
+                    let vp = Viewport {
+                        pan: fc.pan.get(),
+                        zoom: fc.zoom.get(),
+                    };
                     let world = flow_render::screen_to_world(vp, start_x + dx, start_y + dy);
                     let target = fc.document.with(|d| flow_render::hit_test(d, world));
                     if let Some(to_node) = target {
                         if to_node != from_node {
-                            if let Some(to_port) =
-                                fc.document.with(|d| flow_render::nearest_input_port(d, &to_node, world))
+                            if let Some(to_port) = fc
+                                .document
+                                .with(|d| flow_render::nearest_input_port(d, &to_node, world))
                             {
                                 fc.add_edge(&from_node, &from_port, &to_node, &to_port);
                             }
@@ -359,8 +393,8 @@ pub fn build_flowchart_view(
     corner.set_margin_end(8);
 
     // Signal-flow lays out left→right (Simulink-style); the rest top→down.
-    let horizontal =
-        fc.document.with(|d| d.schema_kind()) == matforge_core::models::flowchart::SchemaKind::SignalFlow;
+    let horizontal = fc.document.with(|d| d.schema_kind())
+        == matforge_core::models::flowchart::SchemaKind::SignalFlow;
     let organize = Button::with_label("Organize");
     organize.add_css_class("mf-tool");
     organize.add_css_class("mf-flow-fit");
@@ -403,7 +437,7 @@ pub fn build_flowchart_view(
 
     // The block inspector lives in the shared right-side panel: install it when
     // this flowchart tab is shown, remove it when hidden.
-    let inspector: gtk::Widget = build_inspector_body(&fc).upcast();
+    let inspector: gtk::Widget = build_inspector_body(app, &fc).upcast();
     {
         let inspector = inspector.clone();
         let fc = fc.clone();
@@ -444,7 +478,14 @@ enum Hook {
 }
 
 fn redraw_hooks() -> Vec<Hook> {
-    vec![Hook::Doc, Hook::Sel, Hook::Zoom, Hook::Pan, Hook::Bp, Hook::Exec]
+    vec![
+        Hook::Doc,
+        Hook::Sel,
+        Hook::Zoom,
+        Hook::Pan,
+        Hook::Bp,
+        Hook::Exec,
+    ]
 }
 
 /// The collapsible BLOCKS palette: a list of dialect-appropriate node kinds that
@@ -797,7 +838,9 @@ fn fit_view(fc: &Rc<FlowchartViewModel>, cw: f64, ch: f64) {
     let bw = (maxx - minx).max(1.0);
     let bh = (maxy - miny).max(1.0);
     let margin = 48.0;
-    let zoom = ((cw - 2.0 * margin) / bw).min((ch - 2.0 * margin) / bh).clamp(ZOOM_MIN, ZOOM_MAX);
+    let zoom = ((cw - 2.0 * margin) / bw)
+        .min((ch - 2.0 * margin) / bh)
+        .clamp(ZOOM_MIN, ZOOM_MAX);
     let cx = (minx + maxx) / 2.0;
     let cy = (miny + maxy) / 2.0;
     fc.set_zoom(zoom);
@@ -809,7 +852,48 @@ fn fit_view(fc: &Rc<FlowchartViewModel>, cw: f64, ch: f64) {
 /// Build the block-property editor body. It lives in the shared right-side
 /// BLOCK INSPECTOR tab (installed/removed as the flowchart tab is shown/hidden),
 /// so the diagram canvas keeps the full editor width.
-fn build_inspector_body(fc: &Rc<FlowchartViewModel>) -> ScrolledWindow {
+/// Compute Bode / step / Nyquist for a transfer-function block and add them as
+/// figures in the Plots panel. Bode magnitude/phase use `log10(ω)` on the x
+/// axis so the curve reads as a conventional Bode plot.
+fn analyze_block(app: &Rc<AppState>, node: &FlowNode) {
+    use matforge_core::models::{PlotFigure, PlotKind};
+    use matforge_core::services::control_analysis::TransferFunction;
+    let Some(tf) = TransferFunction::from_node(node) else {
+        return;
+    };
+    let name = if node.label.is_empty() {
+        node.kind.display_name().to_string()
+    } else {
+        node.label.clone()
+    };
+
+    let fr = tf.frequency_response(0.01, 1000.0, 400);
+    let log_w: Vec<f64> = fr.iter().map(|p| p.w.log10()).collect();
+    let mag: Vec<f64> = fr.iter().map(|p| p.mag_db).collect();
+    let phase: Vec<f64> = fr.iter().map(|p| p.phase_deg).collect();
+    let re: Vec<f64> = fr.iter().map(|p| p.re).collect();
+    let im: Vec<f64> = fr.iter().map(|p| p.im).collect();
+    let (st, sy): (Vec<f64>, Vec<f64>) = tf.step_response(10.0, 0.02).into_iter().unzip();
+
+    let mut idx = app.vm.plots.figures.with(|f| f.len() as i32);
+    let mut add = |title: String, xs: Vec<f64>, ys: Vec<f64>| {
+        idx += 1;
+        app.vm
+            .plots
+            .add(PlotFigure::series(idx, title, PlotKind::Line2D, xs, ys));
+    };
+    add(format!("{name} — Step response"), st, sy);
+    add(
+        format!("{name} — Bode magnitude dB (x=log10 ω)"),
+        log_w.clone(),
+        mag,
+    );
+    add(format!("{name} — Bode phase deg (x=log10 ω)"), log_w, phase);
+    add(format!("{name} — Nyquist (Re vs Im)"), re, im);
+    app.vm.toast.show("Added Bode / step / Nyquist to Plots");
+}
+
+fn build_inspector_body(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>) -> ScrolledWindow {
     let body = GtkBox::new(Orientation::Vertical, 8);
     body.set_margin_start(10);
     body.set_margin_end(10);
@@ -820,6 +904,7 @@ fn build_inspector_body(fc: &Rc<FlowchartViewModel>) -> ScrolledWindow {
 
     let rebuild = {
         let fc = fc.clone();
+        let app = app.clone();
         let body = body.clone();
         move || {
             while let Some(child) = body.first_child() {
@@ -839,6 +924,18 @@ fn build_inspector_body(fc: &Rc<FlowchartViewModel>) -> ScrolledWindow {
             title.set_halign(gtk::Align::Start);
             body.append(&title);
 
+            // Algebraic-loop warning for the selected block.
+            if fc.algebraic_loop_nodes().contains(&id) {
+                let warn = Label::new(Some(
+                    "⚠ On an algebraic loop — insert a state block (Integrator / Unit Delay / ZOH) to break direct feedthrough.",
+                ));
+                warn.add_css_class("mf-field-error-text");
+                warn.set_halign(gtk::Align::Start);
+                warn.set_wrap(true);
+                body.append(&warn);
+            }
+
+            let kind = node.kind;
             for (label_text, key) in node_fields(&node) {
                 let field = GtkBox::new(Orientation::Vertical, 2);
                 let lbl = Label::new(Some(&label_text));
@@ -847,16 +944,36 @@ fn build_inspector_body(fc: &Rc<FlowchartViewModel>) -> ScrolledWindow {
                 let entry = Entry::new();
                 entry.set_text(&field_get(&node, &key));
                 entry.set_hexpand(true);
+                // Inline validation message, hidden until the value is invalid.
+                let err = Label::new(None);
+                err.add_css_class("mf-field-error-text");
+                err.set_halign(gtk::Align::Start);
+                err.set_wrap(true);
+                err.set_visible(false);
                 // Connect *after* set_text so the initial value is not echoed
                 // back through edit_node (which would falsely mark dirty).
                 let fc2 = fc.clone();
                 let id2 = id.clone();
+                let err2 = err.clone();
                 entry.connect_changed(move |e| {
                     let value = e.text().to_string();
+                    // Signal-flow parameters are validated; an invalid value is
+                    // flagged inline and not committed (no silent bad params).
+                    if let FieldKey::Param(k) = &key {
+                        if let Err(msg) = SignalFlowParamSpec::validate_field(kind, k, &value) {
+                            e.add_css_class("mf-field-error");
+                            err2.set_text(&msg);
+                            err2.set_visible(true);
+                            return;
+                        }
+                        e.remove_css_class("mf-field-error");
+                        err2.set_visible(false);
+                    }
                     fc2.edit_node(&id2, |n| field_set(n, &key, &value));
                 });
                 field.append(&lbl);
                 field.append(&entry);
+                field.append(&err);
                 body.append(&field);
             }
 
@@ -869,6 +986,19 @@ fn build_inspector_body(fc: &Rc<FlowchartViewModel>) -> ScrolledWindow {
                     fc2.toggle_breakpoint(&id2);
                 });
                 body.append(&bp);
+            }
+
+            // Linear analysis for blocks with a transfer function (Transfer
+            // Fcn today): plots Bode / step / Nyquist into the Plots panel.
+            if matforge_core::services::control_analysis::TransferFunction::from_node(&node)
+                .is_some()
+            {
+                let analyze = Button::with_label("Analyze (Bode / Step / Nyquist)");
+                analyze.add_css_class("mf-tool");
+                let app2 = app.clone();
+                let node2 = node.clone();
+                analyze.connect_clicked(move |_| analyze_block(&app2, &node2));
+                body.append(&analyze);
             }
         }
     };
@@ -977,7 +1107,11 @@ fn field_get(node: &FlowNode, key: &FieldKey) -> String {
 
 fn field_set(node: &mut FlowNode, key: &FieldKey, value: &str) {
     fn put(slot: &mut Option<String>, value: &str) {
-        *slot = if value.is_empty() { None } else { Some(value.to_string()) };
+        *slot = if value.is_empty() {
+            None
+        } else {
+            Some(value.to_string())
+        };
     }
     match key {
         FieldKey::Label => node.label = value.to_string(),
@@ -1010,15 +1144,26 @@ fn field_set(node: &mut FlowNode, key: &FieldKey, value: &str) {
 /// Write the document to its `.mflow` path.
 fn save_flowchart(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>, path: Option<&Path>) {
     let Some(path) = path else {
-        app.vm.status_bar.set_message("Save As is not wired for unsaved charts yet");
+        app.vm
+            .status_bar
+            .set_message("Save As is not wired for unsaved charts yet");
         return;
     };
     match fc.encode() {
         Ok(json) => match std::fs::write(path, json) {
-            Ok(()) => app.vm.status_bar.set_message(format!("Saved {}", path.display())),
-            Err(e) => app.vm.console.log(ConsoleLevel::Error, format!("save failed: {e}")),
+            Ok(()) => app
+                .vm
+                .status_bar
+                .set_message(format!("Saved {}", path.display())),
+            Err(e) => app
+                .vm
+                .console
+                .log(ConsoleLevel::Error, format!("save failed: {e}")),
         },
-        Err(e) => app.vm.console.log(ConsoleLevel::Error, format!("encode failed: {e}")),
+        Err(e) => app
+            .vm
+            .console
+            .log(ConsoleLevel::Error, format!("encode failed: {e}")),
     }
 }
 
@@ -1042,18 +1187,25 @@ pub(crate) fn emit_matlab(
     match fc.encode() {
         Ok(json) => {
             if let Err(e) = std::fs::write(mflow, json) {
-                app.vm.console.log(ConsoleLevel::Error, format!("save failed: {e}"));
+                app.vm
+                    .console
+                    .log(ConsoleLevel::Error, format!("save failed: {e}"));
                 return None;
             }
         }
         Err(e) => {
-            app.vm.console.log(ConsoleLevel::Error, format!("encode failed: {e}"));
+            app.vm
+                .console
+                .log(ConsoleLevel::Error, format!("encode failed: {e}"));
             return None;
         }
     }
 
     if !app.settings.matlabc_path.exists() {
-        app.vm.console.log(ConsoleLevel::Error, "matlabc not found — cannot compile flowchart");
+        app.vm.console.log(
+            ConsoleLevel::Error,
+            "matlabc not found — cannot compile flowchart",
+        );
         return None;
     }
     app.vm.status_bar.set_message("Compiling flowchart…");
@@ -1068,11 +1220,15 @@ pub(crate) fn emit_matlab(
             match std::fs::write(&m_path, code.as_bytes()) {
                 Ok(()) => {
                     crate::ui::open_file_path(app, &m_path);
-                    app.vm.status_bar.set_message(format!("Generated {}", m_path.display()));
+                    app.vm
+                        .status_bar
+                        .set_message(format!("Generated {}", m_path.display()));
                     Some(m_path)
                 }
                 Err(e) => {
-                    app.vm.console.log(ConsoleLevel::Error, format!("write .m failed: {e}"));
+                    app.vm
+                        .console
+                        .log(ConsoleLevel::Error, format!("write .m failed: {e}"));
                     None
                 }
             }
@@ -1086,7 +1242,9 @@ pub(crate) fn emit_matlab(
             None
         }
         Err(e) => {
-            app.vm.console.log(ConsoleLevel::Error, format!("matlabc: {e}"));
+            app.vm
+                .console
+                .log(ConsoleLevel::Error, format!("matlabc: {e}"));
             None
         }
     }
