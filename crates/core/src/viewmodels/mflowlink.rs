@@ -38,6 +38,10 @@ pub struct MflowLinkViewModel {
     /// Live mode: per-edge `(t, value)` samples from `signalSample` events,
     /// keyed by edge id (insertion-ordered by `BTreeMap`). Feeds the scopes.
     pub live_signals: Property<BTreeMap<String, Vec<(f64, f64)>>>,
+    /// Snapshot-ring entries `(major_step, depth)` from `snapshotTaken` events.
+    pub snapshots: Property<Vec<(i64, i64)>>,
+    /// Why the live run last paused (`stopped` reason), for the transport row.
+    pub stop_reason: Property<Option<String>>,
 }
 
 impl MflowLinkViewModel {
@@ -53,6 +57,8 @@ impl MflowLinkViewModel {
             major_step: Property::new(0),
             active_block: Property::new(None),
             live_signals: Property::new(BTreeMap::new()),
+            snapshots: Property::new(Vec::new()),
+            stop_reason: Property::new(None),
         }
     }
 
@@ -74,11 +80,12 @@ impl MflowLinkViewModel {
             SimEvent::ActiveBlock { node_id } => {
                 self.active_block.set(Some(node_id.clone()));
             }
-            SimEvent::Stopped { .. } => {
+            SimEvent::Stopped { reason } => {
                 // The runtime paused (entry / breakpoint / step / pause /
                 // crossing). Settle into Paused unless we never started.
                 if self.state.get() != SimState::Idle {
                     self.state.set(SimState::Paused);
+                    self.stop_reason.set(Some(reason.clone()));
                 }
             }
             SimEvent::Signal { edge_id, t, value } => {
@@ -87,8 +94,11 @@ impl MflowLinkViewModel {
                 // Drive the scope redraw subscription (shared with CSV mode).
                 self.sample_count.update(|c| *c += 1);
             }
-            // Zero-crossings and snapshots are surfaced by later slices.
-            SimEvent::ZeroCrossing { .. } | SimEvent::Snapshot { .. } => {}
+            SimEvent::Snapshot { major_step, depth } => {
+                self.snapshots.update(|s| s.push((*major_step, *depth)));
+            }
+            // Zero-crossings are surfaced by a later slice.
+            SimEvent::ZeroCrossing { .. } => {}
         }
     }
 
@@ -171,6 +181,8 @@ impl MflowLinkViewModel {
         self.major_step.set(0);
         self.active_block.set(None);
         self.live_signals.set(BTreeMap::new());
+        self.snapshots.set(Vec::new());
+        self.stop_reason.set(None);
     }
 
     /// Number of plotted signals — live edges in live mode, else trace columns.
@@ -369,5 +381,29 @@ mod tests {
         // Reset clears the live buffer.
         vm.reset();
         assert_eq!(vm.signal_count(), 0);
+    }
+
+    #[test]
+    fn snapshots_and_stop_reason_track_events() {
+        use crate::services::sim_dap::SimEvent;
+        let vm = vm();
+        vm.start_live();
+        vm.on_sim_event(&SimEvent::Snapshot {
+            major_step: 10,
+            depth: 1,
+        });
+        vm.on_sim_event(&SimEvent::Snapshot {
+            major_step: 20,
+            depth: 2,
+        });
+        assert_eq!(vm.snapshots.get(), vec![(10, 1), (20, 2)]);
+        vm.on_sim_event(&SimEvent::Stopped {
+            reason: "breakpoint".into(),
+        });
+        assert_eq!(vm.stop_reason.get().as_deref(), Some("breakpoint"));
+        assert_eq!(vm.state.get(), SimState::Paused);
+        vm.reset();
+        assert!(vm.snapshots.get().is_empty());
+        assert!(vm.stop_reason.get().is_none());
     }
 }
