@@ -133,6 +133,11 @@ fn build_transport(
             }
         }
     };
+    // Model path the sim-DAP adapter keys signal-breakpoint edge ids against.
+    let source: String = path
+        .as_ref()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "model.mflow".to_string());
 
     {
         let app = app.clone();
@@ -237,12 +242,21 @@ fn build_transport(
             }
         });
     }
+    let bp = Button::with_label("Breakpoints…");
+    bp.add_css_class("mf-tool");
+    bp.set_tooltip_text(Some("Signal / time breakpoints + live solver tuning"));
+    {
+        let vm = vm.clone();
+        let dap = dap.clone();
+        bp.connect_clicked(move |b| open_breakpoints_popover(&vm, &dap, &source, b));
+    }
     bar.append(&play);
     bar.append(&pause);
     bar.append(&step);
     bar.append(&back);
     bar.append(&stop);
     bar.append(&reset);
+    bar.append(&bp);
 
     let status = Label::new(Some("idle"));
     status.add_css_class("mf-text-secondary");
@@ -258,6 +272,10 @@ fn build_transport(
     let clock = Label::new(Some("t = 0.000 s"));
     clock.add_css_class("mf-mono");
     bar.append(&clock);
+    let snaps = Label::new(Some(""));
+    snaps.add_css_class("mf-mono");
+    snaps.set_margin_start(10);
+    bar.append(&snaps);
 
     {
         let status = status.clone();
@@ -268,6 +286,27 @@ fn build_transport(
                 SimState::Paused => "paused",
                 SimState::Finished => "finished",
             });
+        });
+    }
+    // Surface why the live run paused (breakpoint / step / crossing / entry).
+    {
+        let status = status.clone();
+        vm.stop_reason.bind(move |r| {
+            if let Some(reason) = r {
+                status.set_text(&format!("paused — {reason}"));
+            }
+        });
+    }
+    // Snapshot-ring depth from snapshotTaken events.
+    {
+        let snaps = snaps.clone();
+        vm.snapshots.bind(move |s| {
+            let text = if s.is_empty() {
+                String::new()
+            } else {
+                format!("⛁ {} snapshots", s.len())
+            };
+            snaps.set_text(&text);
         });
     }
     // Clock + position follow the playback cursor.
@@ -316,6 +355,108 @@ fn send_sim(dap: &LiveSession, req: &SimRequest) {
         let frame = sim_dap::build_request(&mut s.client, req);
         let _ = s.write_frame(&frame);
     }
+}
+
+/// Popover to set time / signal breakpoints and tune the solver live. Applying
+/// sends the corresponding `--sim-dap` requests to the running session.
+fn open_breakpoints_popover(
+    vm: &Rc<MflowLinkViewModel>,
+    dap: &LiveSession,
+    source: &str,
+    anchor: &Button,
+) {
+    use matforge_core::services::sim_dap::{SignalBreakpoint, TimeBreakpoint};
+
+    let entry = |placeholder: &str| {
+        let e = gtk::Entry::new();
+        e.set_placeholder_text(Some(placeholder));
+        e.set_width_chars(16);
+        e
+    };
+    let label = |t: &str| {
+        let l = Label::new(Some(t));
+        l.add_css_class("mf-col-title");
+        l.set_halign(gtk::Align::Start);
+        l
+    };
+
+    let times = entry("2.5, 5, 7.5");
+    let cond = entry("abs(value) > 1e3");
+    let rtol = entry("relTol e.g. 1e-4");
+    let mstep = entry("maxStep e.g. 0.01");
+    let edges: Vec<String> = vm.document.with(|d| {
+        d.flows.first().map(|f| f.edges.iter().map(|e| e.id.clone()).collect()).unwrap_or_default()
+    });
+    let edge_dd =
+        gtk::DropDown::from_strings(&edges.iter().map(String::as_str).collect::<Vec<_>>());
+
+    let grid = gtk::Grid::new();
+    grid.set_row_spacing(6);
+    grid.set_column_spacing(8);
+    grid.set_margin_top(10);
+    grid.set_margin_bottom(10);
+    grid.set_margin_start(10);
+    grid.set_margin_end(10);
+    let rows: [(&str, &gtk::Widget); 5] = [
+        ("Time bps (s)", times.upcast_ref()),
+        ("Signal edge", edge_dd.upcast_ref()),
+        ("Condition", cond.upcast_ref()),
+        ("relTol", rtol.upcast_ref()),
+        ("maxStep", mstep.upcast_ref()),
+    ];
+    for (r, (text, widget)) in rows.iter().enumerate() {
+        grid.attach(&label(text), 0, r as i32, 1, 1);
+        grid.attach(*widget, 1, r as i32, 1, 1);
+    }
+    let apply = Button::with_label("Apply");
+    apply.add_css_class("mf-compile-cta");
+    grid.attach(&apply, 0, 5, 2, 1);
+
+    let pop = gtk::Popover::new();
+    pop.set_parent(anchor);
+    pop.set_child(Some(&grid));
+
+    {
+        let dap = dap.clone();
+        let pop = pop.clone();
+        let source = source.to_string();
+        apply.connect_clicked(move |_| {
+            // Time breakpoints — comma-separated seconds.
+            let ts: Vec<TimeBreakpoint> = times
+                .text()
+                .split(',')
+                .filter_map(|s| s.trim().parse::<f64>().ok())
+                .map(|t| TimeBreakpoint { t, condition: None })
+                .collect();
+            send_sim(&dap, &SimRequest::SetTimeBreakpoints(ts));
+
+            // Signal breakpoint — selected edge + value condition.
+            let condition = cond.text().to_string();
+            if !condition.trim().is_empty() {
+                if let Some(edge_id) = edges.get(edge_dd.selected() as usize) {
+                    send_sim(
+                        &dap,
+                        &SimRequest::SetSignalBreakpoints {
+                            source: source.clone(),
+                            breakpoints: vec![SignalBreakpoint {
+                                edge_id: edge_id.clone(),
+                                condition: Some(condition),
+                            }],
+                        },
+                    );
+                }
+            }
+
+            // Live solver tuning.
+            let rel_tol = rtol.text().trim().parse::<f64>().ok();
+            let max_step = mstep.text().trim().parse::<f64>().ok();
+            if rel_tol.is_some() || max_step.is_some() {
+                send_sim(&dap, &SimRequest::ConfigureSolver { rel_tol, max_step });
+            }
+            pop.popdown();
+        });
+    }
+    pop.popup();
 }
 
 /// Persist the current model to disk for the simulator to read; returns the
