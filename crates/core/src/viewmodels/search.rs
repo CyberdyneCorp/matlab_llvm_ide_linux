@@ -59,9 +59,16 @@ impl SearchViewModel {
         let mut out = Vec::new();
         let needle = query.to_lowercase();
         for path in files {
-            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
             if mode.matches_filenames() && name.to_lowercase().contains(&needle) {
-                out.push(SearchResult { path: path.clone(), line: None, preview: name.clone() });
+                out.push(SearchResult {
+                    path: path.clone(),
+                    line: None,
+                    preview: name.clone(),
+                });
             }
             if mode.matches_content() {
                 if let Ok(text) = fs.read_to_string(&path) {
@@ -82,9 +89,15 @@ impl SearchViewModel {
 }
 
 fn collect_files(fs: &dyn FileSystem, dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs.read_dir(dir) else { return };
+    let Ok(entries) = fs.read_dir(dir) else {
+        return;
+    };
     for entry in entries {
-        let name = entry.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let name = entry
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         if name.starts_with('.') {
             continue;
         }
@@ -139,8 +152,12 @@ mod tests {
         vm.run(&fs(), Path::new("/p"));
         let results = vm.results.get();
         // "disp(total)" in alpha.m line 2 and "total = 2;" in beta.m line 1
-        assert!(results.iter().any(|r| r.line == Some(2) && r.path.ends_with("alpha.m")));
-        assert!(results.iter().any(|r| r.line == Some(1) && r.path.ends_with("beta.m")));
+        assert!(results
+            .iter()
+            .any(|r| r.line == Some(2) && r.path.ends_with("alpha.m")));
+        assert!(results
+            .iter()
+            .any(|r| r.line == Some(1) && r.path.ends_with("beta.m")));
     }
 
     #[test]
