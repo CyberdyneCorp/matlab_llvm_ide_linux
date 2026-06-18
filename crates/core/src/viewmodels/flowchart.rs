@@ -7,9 +7,9 @@ use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 
 use crate::models::flowchart::{
-    self, ChartSymbols, EdgeData, EdgeEndpoint, EdgeKind, FlowEdge, FlowNode, FlowPosition, FlowUi,
-    FlowchartDocument, NodeData, NodeKind, ParamValue, SchemaKind, SolverConfig,
-    StateDecomposition, TransitionLabel,
+    self, ChartSymbols, EdgeData, EdgeEndpoint, EdgeKind, Flow, FlowEdge, FlowKind, FlowNode,
+    FlowPort, FlowPorts, FlowPosition, FlowSignature, FlowUi, FlowchartDocument, NodeData,
+    NodeKind, ParamValue, SchemaKind, SolverConfig, StateDecomposition, TransitionLabel,
 };
 
 use crate::models::BreakpointConfig;
@@ -39,6 +39,10 @@ pub struct FlowchartViewModel {
     pub pan: Property<(f64, f64)>,
     pub node_breakpoints: Property<BTreeMap<String, BreakpointConfig>>,
     pub execution_node: Property<Option<String>>,
+    /// Navigation breadcrumb of `document.flows` indices; the last entry is the
+    /// flow currently shown/edited. Root charts stay at `[0]`; entering a
+    /// subsystem pushes its sub-flow index.
+    pub nav_stack: Property<Vec<usize>>,
     undo_stack: RefCell<Vec<FlowchartDocument>>,
     redo_stack: RefCell<Vec<FlowchartDocument>>,
     seq: Cell<u64>,
@@ -54,10 +58,16 @@ impl FlowchartViewModel {
             pan: Property::new((0.0, 0.0)),
             node_breakpoints: Property::new(BTreeMap::new()),
             execution_node: Property::new(None),
+            nav_stack: Property::new(vec![0]),
             undo_stack: RefCell::new(Vec::new()),
             redo_stack: RefCell::new(Vec::new()),
             seq: Cell::new(0),
         }
+    }
+
+    /// Index into `document.flows` of the flow currently shown/edited.
+    pub fn current_flow_index(&self) -> usize {
+        self.nav_stack.with(|s| s.last().copied().unwrap_or(0))
     }
 
     pub fn empty(name: &str, kind: SchemaKind) -> FlowchartViewModel {
@@ -88,8 +98,9 @@ impl FlowchartViewModel {
             NodeData::default(),
             FlowUi::at(FlowPosition { x, y }),
         );
+        let idx = self.current_flow_index();
         self.document.update(|d| {
-            if let Some(flow) = d.flows.first_mut() {
+            if let Some(flow) = d.flows.get_mut(idx) {
                 flow.nodes.push(node);
             }
         });
@@ -113,8 +124,9 @@ impl FlowchartViewModel {
 
     /// Set a node's position without snapshotting undo (for smooth drags).
     pub fn set_node_position(&self, id: &str, x: f64, y: f64) {
+        let idx = self.current_flow_index();
         self.document.update(|d| {
-            if let Some(flow) = d.flows.first_mut() {
+            if let Some(flow) = d.flows.get_mut(idx) {
                 if let Some(node) = flow.nodes.iter_mut().find(|n| n.id == id) {
                     node.ui.position = FlowPosition { x, y };
                 }
@@ -127,13 +139,19 @@ impl FlowchartViewModel {
     /// flows left→right (signal-flow / Simulink-style); otherwise top→down
     /// (control-flow fluxogramas / state charts).
     pub fn auto_layout(&self, horizontal: bool) {
-        let placed = self.document.with(|d| arrange(d, horizontal));
+        let idx = self.current_flow_index();
+        let placed = self.document.with(|d| {
+            d.flows
+                .get(idx)
+                .map(|f| arrange(f, horizontal))
+                .unwrap_or_default()
+        });
         if placed.is_empty() {
             return;
         }
         self.push_undo();
         self.document.update(|d| {
-            if let Some(flow) = d.flows.first_mut() {
+            if let Some(flow) = d.flows.get_mut(idx) {
                 let map: std::collections::HashMap<&str, FlowPosition> =
                     placed.iter().map(|(id, p)| (id.as_str(), *p)).collect();
                 for node in &mut flow.nodes {
@@ -151,8 +169,9 @@ impl FlowchartViewModel {
     /// document dirty. Pair with [`begin_edit`](Self::begin_edit) if a single
     /// undo step per editing session is wanted.
     pub fn edit_node(&self, id: &str, f: impl FnOnce(&mut FlowNode)) {
+        let idx = self.current_flow_index();
         self.document.update(|d| {
-            if let Some(flow) = d.flows.first_mut() {
+            if let Some(flow) = d.flows.get_mut(idx) {
                 if let Some(node) = flow.nodes.iter_mut().find(|n| n.id == id) {
                     f(node);
                 }
@@ -161,19 +180,30 @@ impl FlowchartViewModel {
         self.is_dirty.set(true);
     }
 
-    /// The entry-flow node with `id`, cloned (for the inspector).
+    /// The current-flow node with `id`, cloned (for the inspector).
     pub fn node(&self, id: &str) -> Option<FlowNode> {
+        let idx = self.current_flow_index();
         self.document.with(|d| {
             d.flows
-                .first()
+                .get(idx)
                 .and_then(|f| f.nodes.iter().find(|n| n.id == id).cloned())
         })
     }
 
-    /// Block ids sitting on an algebraic loop — drives the inspector note and
-    /// the canvas warning outline. Empty unless this is a signal-flow document.
+    /// Block ids sitting on an algebraic loop in the current flow — drives the
+    /// inspector note and the canvas warning outline. Empty unless this is a
+    /// signal-flow document.
     pub fn algebraic_loop_nodes(&self) -> std::collections::BTreeSet<String> {
-        self.document.with(|d| d.algebraic_loop_nodes())
+        let idx = self.current_flow_index();
+        self.document.with(|d| {
+            if d.schema_kind() != SchemaKind::SignalFlow {
+                return std::collections::BTreeSet::new();
+            }
+            d.flows
+                .get(idx)
+                .map(crate::models::flowchart::algebraic_loop_nodes)
+                .unwrap_or_default()
+        })
     }
 
     /// State nodes flagged by the action linter (id → first error message).
@@ -317,8 +347,9 @@ impl FlowchartViewModel {
     /// Delete a node and any edge that touches it.
     pub fn delete_node(&self, id: &str) {
         self.push_undo();
+        let idx = self.current_flow_index();
         self.document.update(|d| {
-            if let Some(flow) = d.flows.first_mut() {
+            if let Some(flow) = d.flows.get_mut(idx) {
                 flow.nodes.retain(|n| n.id != id);
                 flow.edges.retain(|e| e.from.node != id && e.to.node != id);
             }
@@ -351,8 +382,9 @@ impl FlowchartViewModel {
         if from_node == to_node {
             return false;
         }
+        let idx = self.current_flow_index();
         self.document.with(|d| {
-            d.flows.first().is_some_and(|flow| {
+            d.flows.get(idx).is_some_and(|flow| {
                 !flow
                     .edges
                     .iter()
@@ -377,8 +409,9 @@ impl FlowchartViewModel {
             EdgeEndpoint::new(from_node, from_port),
             EdgeEndpoint::new(to_node, to_port),
         );
+        let idx = self.current_flow_index();
         self.document.update(|d| {
-            if let Some(flow) = d.flows.first_mut() {
+            if let Some(flow) = d.flows.get_mut(idx) {
                 flow.edges.push(edge);
             }
         });
@@ -469,6 +502,95 @@ impl FlowchartViewModel {
         self.is_dirty.set(true);
     }
 
+    /// Enter the sub-flow of a subsystem node (resolved by its `data.flow_id`).
+    /// Returns false when the node has no linked sub-flow in the document.
+    pub fn enter_subflow(&self, node_id: &str) -> bool {
+        let Some(flow_id) = self.node(node_id).and_then(|n| n.data.flow_id) else {
+            return false;
+        };
+        let found = self
+            .document
+            .with(|d| d.flows.iter().position(|f| f.id == flow_id));
+        if let Some(idx) = found {
+            self.nav_stack.update(|s| s.push(idx));
+            self.selected_id.set(None);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Navigate up one level (no-op at the root).
+    pub fn nav_back(&self) {
+        self.nav_stack.update(|s| {
+            if s.len() > 1 {
+                s.pop();
+            }
+        });
+        self.selected_id.set(None);
+    }
+
+    /// Jump to a breadcrumb depth (0 = root chart).
+    pub fn nav_to_depth(&self, depth: usize) {
+        self.nav_stack.update(|s| {
+            if depth < s.len() {
+                s.truncate(depth + 1);
+            }
+        });
+        self.selected_id.set(None);
+    }
+
+    /// Breadcrumb of flow names from the root to the current flow.
+    pub fn breadcrumb(&self) -> Vec<String> {
+        self.document.with(|d| {
+            self.nav_stack.with(|s| {
+                s.iter()
+                    .map(|&i| {
+                        d.flows
+                            .get(i)
+                            .map(|f| f.name.clone())
+                            .unwrap_or_else(|| format!("flow {i}"))
+                    })
+                    .collect()
+            })
+        })
+    }
+
+    /// Extract the given nodes from the current flow into a new subsystem: the
+    /// nodes (and their internal wires) move to a fresh sub-flow, boundary wires
+    /// are rerouted through inport/outport blocks, and a `signal_subsystem` node
+    /// linking that sub-flow replaces them. Returns the new node's id. One undo
+    /// step.
+    pub fn extract_to_subsystem(&self, ids: &[String]) -> Option<String> {
+        if ids.is_empty() {
+            return None;
+        }
+        let idx = self.current_flow_index();
+        let set: std::collections::BTreeSet<String> = ids.iter().cloned().collect();
+        let sub_flow_id = format!("flow_sub{}", self.next_seq());
+        let sub_node_id = format!("n{}", self.next_seq());
+        self.push_undo();
+        let mut result = None;
+        self.document.update(|d| {
+            let extracted = match d.flows.get_mut(idx) {
+                Some(flow) => extract_subsystem(flow, &set, &sub_flow_id, &sub_node_id),
+                None => None,
+            };
+            if let Some((subflow, node_id)) = extracted {
+                d.flows.push(subflow);
+                result = Some(node_id);
+            }
+        });
+        if result.is_some() {
+            self.is_dirty.set(true);
+            self.selected_id.set(result.clone());
+        } else {
+            // Nothing extracted — drop the speculative undo snapshot.
+            self.undo_stack.borrow_mut().pop();
+        }
+        result
+    }
+
     pub fn select(&self, id: Option<String>) {
         self.selected_id.set(id);
     }
@@ -513,8 +635,9 @@ impl FlowchartViewModel {
     /// purely structural — no value evaluation, so branches are all explored.
     pub fn execution_order(&self) -> Vec<String> {
         use std::collections::{HashMap, HashSet};
+        let idx = self.current_flow_index();
         self.document.with(|doc| {
-            let Some(flow) = doc.flows.first() else {
+            let Some(flow) = doc.flows.get(idx) else {
                 return Vec::new();
             };
             let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
@@ -586,14 +709,16 @@ impl FlowchartViewModel {
         Ok(json)
     }
 
-    /// Node count in the entry flow (for tests / status).
+    /// Node count in the current flow (for tests / status).
     pub fn node_count(&self) -> usize {
+        let idx = self.current_flow_index();
         self.document
-            .with(|d| d.flows.first().map(|f| f.nodes.len()).unwrap_or(0))
+            .with(|d| d.flows.get(idx).map(|f| f.nodes.len()).unwrap_or(0))
     }
     pub fn edge_count(&self) -> usize {
+        let idx = self.current_flow_index();
         self.document
-            .with(|d| d.flows.first().map(|f| f.edges.len()).unwrap_or(0))
+            .with(|d| d.flows.get(idx).map(|f| f.edges.len()).unwrap_or(0))
     }
 }
 
@@ -635,11 +760,153 @@ fn set_edge_priority(edge: &mut FlowEdge, priority: Option<u32>) {
 /// longest-path pass (back edges dropped so loops/cycles don't blow up), then
 /// each layer is centered on the cross axis. `horizontal` flows left→right;
 /// otherwise top→down. Pure — the caller applies the result.
-pub fn arrange(doc: &FlowchartDocument, horizontal: bool) -> Vec<(String, FlowPosition)> {
-    use std::collections::HashMap;
-    let Some(flow) = doc.flows.first() else {
-        return Vec::new();
+/// Move `ids` out of `flow` into a new sub-flow, rerouting boundary wires through
+/// inport / outport blocks and replacing them in `flow` with a `signal_subsystem`
+/// node (ports matching the boundary). Returns `(sub_flow, subsystem_node_id)`,
+/// or `None` when no listed node is present. `flow` is mutated in place.
+fn extract_subsystem(
+    flow: &mut Flow,
+    ids: &std::collections::BTreeSet<String>,
+    sub_flow_id: &str,
+    sub_node_id: &str,
+) -> Option<(Flow, String)> {
+    let inside: Vec<FlowNode> = flow
+        .nodes
+        .iter()
+        .filter(|n| ids.contains(&n.id))
+        .cloned()
+        .collect();
+    if inside.is_empty() {
+        return None;
+    }
+
+    // Centroid + top-left of the extracted block, to place the new node + ports.
+    let (mut cx, mut cy) = (0.0, 0.0);
+    let (mut minx, mut miny) = (f64::INFINITY, f64::INFINITY);
+    for n in &inside {
+        let size = n.ui.size.unwrap_or_else(|| n.kind.default_size());
+        cx += n.ui.position.x + size.width / 2.0;
+        cy += n.ui.position.y + size.height / 2.0;
+        minx = minx.min(n.ui.position.x);
+        miny = miny.min(n.ui.position.y);
+    }
+    cx /= inside.len() as f64;
+    cy /= inside.len() as f64;
+
+    let mut sub_nodes = inside.clone();
+    let mut sub_edges: Vec<FlowEdge> = Vec::new();
+    let mut parent_edges: Vec<FlowEdge> = Vec::new();
+    let mut in_ports: Vec<FlowPort> = Vec::new();
+    let mut out_ports: Vec<FlowPort> = Vec::new();
+    let port_node = |id: &str, kind: NodeKind, label: &str, x: f64, y: f64| {
+        FlowNode::new(
+            id,
+            kind,
+            label,
+            kind.default_ports(),
+            NodeData::default(),
+            FlowUi::at(FlowPosition { x, y }),
+        )
     };
+
+    for e in &flow.edges {
+        match (ids.contains(&e.from.node), ids.contains(&e.to.node)) {
+            (true, true) => sub_edges.push(e.clone()),
+            (false, false) => parent_edges.push(e.clone()),
+            (false, true) => {
+                // Entering wire → a subsystem input + an inport inside the sub-flow.
+                let k = in_ports.len();
+                let port = format!("in{}", k + 1);
+                let ip_id = format!("{sub_node_id}_ip{k}");
+                sub_nodes.push(port_node(
+                    &ip_id,
+                    NodeKind::SignalInport,
+                    &port,
+                    minx - 140.0,
+                    miny + k as f64 * 70.0,
+                ));
+                sub_edges.push(FlowEdge::new(
+                    &format!("{ip_id}_e"),
+                    EdgeKind::Data,
+                    EdgeEndpoint::new(&ip_id, "out"),
+                    EdgeEndpoint::new(&e.to.node, &e.to.port),
+                ));
+                parent_edges.push(FlowEdge::new(
+                    &e.id,
+                    EdgeKind::Data,
+                    e.from.clone(),
+                    EdgeEndpoint::new(sub_node_id, &port),
+                ));
+                in_ports.push(FlowPort::new(&port));
+            }
+            (true, false) => {
+                // Leaving wire → a subsystem output + an outport inside the sub-flow.
+                let m = out_ports.len();
+                let port = format!("out{}", m + 1);
+                let op_id = format!("{sub_node_id}_op{m}");
+                sub_nodes.push(port_node(
+                    &op_id,
+                    NodeKind::SignalOutport,
+                    &port,
+                    minx + 280.0,
+                    miny + m as f64 * 70.0,
+                ));
+                sub_edges.push(FlowEdge::new(
+                    &format!("{op_id}_e"),
+                    EdgeKind::Data,
+                    e.from.clone(),
+                    EdgeEndpoint::new(&op_id, "in"),
+                ));
+                parent_edges.push(FlowEdge::new(
+                    &e.id,
+                    EdgeKind::Data,
+                    EdgeEndpoint::new(sub_node_id, &port),
+                    e.to.clone(),
+                ));
+                out_ports.push(FlowPort::new(&port));
+            }
+        }
+    }
+
+    let sub_node = FlowNode::new(
+        sub_node_id,
+        NodeKind::SignalSubsystem,
+        "Subsystem",
+        FlowPorts {
+            inputs: in_ports,
+            outputs: out_ports,
+        },
+        NodeData {
+            flow_id: Some(sub_flow_id.to_string()),
+            ..NodeData::default()
+        },
+        FlowUi::at(FlowPosition {
+            x: cx - 60.0,
+            y: cy - 30.0,
+        }),
+    );
+
+    flow.nodes.retain(|n| !ids.contains(&n.id));
+    flow.nodes.push(sub_node);
+    flow.edges = parent_edges;
+
+    let subflow = Flow::new(
+        sub_flow_id,
+        FlowKind::Function,
+        "Subsystem",
+        FlowSignature::default(),
+        sub_nodes,
+        sub_edges,
+        flow.layout.clone(),
+    );
+    Some((subflow, sub_node_id.to_string()))
+}
+
+pub fn arrange(
+    flow: &crate::models::flowchart::Flow,
+    horizontal: bool,
+) -> Vec<(String, FlowPosition)> {
+    use std::collections::HashMap;
     let n = flow.nodes.len();
     if n == 0 {
         return Vec::new();
@@ -823,7 +1090,9 @@ mod tests {
         let n = vm.add_node(NodeKind::Assignment, 0.0, 0.0);
         vm.add_edge("main_start", "out", &n, "in");
         vm.add_edge(&n, "out", "main_start", "in"); // cycle
-        let placed = vm.document.with(|d| super::arrange(d, false));
+        let placed = vm
+            .document
+            .with(|d| super::arrange(d.flows.first().unwrap(), false));
         assert_eq!(placed.len(), vm.node_count()); // every node placed, no hang
     }
 
@@ -1180,5 +1449,42 @@ mod tests {
         assert_eq!(vm.transition_rows()[0].priority, None);
         vm.delete_edge(&id);
         assert!(vm.transition_rows().is_empty());
+    }
+
+    #[test]
+    fn extract_to_subsystem_and_navigate() {
+        let vm = FlowchartViewModel::empty("Model", SchemaKind::SignalFlow);
+        let a = vm.add_node(NodeKind::SignalGain, 0.0, 0.0);
+        let b = vm.add_node(NodeKind::SignalGain, 200.0, 0.0);
+        let c = vm.add_node(NodeKind::SignalGain, 400.0, 0.0);
+        vm.add_edge(&a, "out", &b, "in"); // entering B
+        vm.add_edge(&b, "out", &c, "in"); // leaving B
+        assert_eq!(vm.node_count(), 3);
+
+        // Extract B → A, C and a subsystem node remain at the root.
+        let sub = vm.extract_to_subsystem(std::slice::from_ref(&b)).unwrap();
+        assert_eq!(vm.node_count(), 3); // A, C, subsystem
+        assert!(vm.node(&b).is_none()); // B moved out of the root flow
+        let sub_node = vm.node(&sub).unwrap();
+        assert_eq!(sub_node.kind, NodeKind::SignalSubsystem);
+        assert_eq!(sub_node.ports.inputs.len(), 1);
+        assert_eq!(sub_node.ports.outputs.len(), 1);
+        assert!(sub_node.data.flow_id.is_some());
+
+        // Enter the subsystem: B plus its boundary inport + outport.
+        assert!(vm.enter_subflow(&sub));
+        assert_eq!(vm.breadcrumb().len(), 2);
+        assert_eq!(vm.node_count(), 3); // B + inport + outport
+        assert!(vm.node(&b).is_some());
+
+        // Back to the root.
+        vm.nav_back();
+        assert_eq!(vm.current_flow_index(), 0);
+        assert!(vm.node(&a).is_some());
+
+        // Undo reverses the whole extraction.
+        vm.undo();
+        assert!(vm.node(&b).is_some());
+        assert!(vm.node(&sub).is_none());
     }
 }

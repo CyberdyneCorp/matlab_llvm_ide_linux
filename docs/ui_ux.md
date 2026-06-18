@@ -173,6 +173,12 @@ through the tested [`FlowchartViewModel`](../crates/core/src/viewmodels/flowchar
   source × dest × event × guard × cond-action × trans-action × priority. Edits
   write straight back to the chart edges (ids preserved), so the table and canvas
   stay in sync.
+* **Subsystems** (signal flow): **double-click** a `signal_subsystem` block to
+  descend into its sub-flow; a **breadcrumb** bar (with an **Up** action and a
+  clickable crumb per level) tracks where you are and navigates back. Right-click
+  a block ▸ **Extract to Subsystem** moves it into a fresh sub-flow, rerouting its
+  wires through inport / outport blocks and leaving a linked subsystem node in its
+  place.
 * **Save** writes the `.mflow` back to disk; **Compile** lowers the chart to MATLAB
   via `matlabc -emit-matlab`, writes the generated `.m` beside it, and opens it in
   the editor.

@@ -378,7 +378,7 @@ fn build_chart_canvas(vm: &Rc<StateChartViewModel>) -> GtkBox {
         let vm = vm.clone();
         canvas.set_draw_func(move |_a, ctx, w, h| {
             vm.document.with(|doc| {
-                let vp = fit_viewport(flow_render::content_bounds(doc), w as f64, h as f64);
+                let vp = fit_viewport(flow_render::content_bounds(doc, 0), w as f64, h as f64);
                 // Halo every active state (green); the event-log "reveal" state
                 // gets the yellow exec halo on top.
                 let active = vm.active_states.get();
@@ -393,6 +393,7 @@ fn build_chart_canvas(vm: &Rc<StateChartViewModel>) -> GtkBox {
                     w as f64,
                     h as f64,
                     doc,
+                    0,
                     vp,
                     None,
                     &bps,

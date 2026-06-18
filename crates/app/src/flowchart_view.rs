@@ -90,6 +90,7 @@ pub fn build_flowchart_view(
                 fc.action_lint_nodes().into_keys().collect();
             let hierarchy_lint: std::collections::BTreeSet<String> =
                 fc.hierarchy_errors().into_keys().collect();
+            let flow_index = fc.current_flow_index();
             fc.document.with(|doc| {
                 let sel = fc.selected_id.get();
                 let exec = fc.execution_node.get();
@@ -99,6 +100,7 @@ pub fn build_flowchart_view(
                         w as f64,
                         h as f64,
                         doc,
+                        flow_index,
                         vp,
                         sel.as_deref(),
                         bps,
@@ -151,6 +153,16 @@ pub fn build_flowchart_view(
         }
     }
 
+    // Navigating in/out of a subsystem swaps the visible flow: refit and redraw.
+    {
+        let c = canvas.clone();
+        let fc2 = fc.clone();
+        fc.nav_stack.subscribe(move |_| {
+            fit_view(&fc2, c.width() as f64, c.height() as f64);
+            c.queue_draw();
+        });
+    }
+
     // Click to select (clears selection when clicking empty canvas). Left button
     // only, so the middle-button pan gesture below has the diagram to itself.
     let click = gtk::GestureClick::new();
@@ -164,12 +176,38 @@ pub fn build_flowchart_view(
                 zoom: fc.zoom.get(),
             };
             let world = flow_render::screen_to_world(vp, x, y);
-            let hit = fc.document.with(|d| flow_render::hit_test(d, world));
+            let idx = fc.current_flow_index();
+            let hit = fc.document.with(|d| flow_render::hit_test(d, idx, world));
             fc.select(hit);
             canvas2.queue_draw();
         });
     }
     canvas.add_controller(click);
+
+    // Double-click a subsystem block to enter its sub-flow.
+    let dclick = gtk::GestureClick::new();
+    dclick.set_button(gtk::gdk::BUTTON_PRIMARY);
+    {
+        let fc = fc.clone();
+        let canvas2 = canvas.clone();
+        dclick.connect_pressed(move |_g, n_press, x, y| {
+            if n_press < 2 {
+                return;
+            }
+            let vp = Viewport {
+                pan: fc.pan.get(),
+                zoom: fc.zoom.get(),
+            };
+            let world = flow_render::screen_to_world(vp, x, y);
+            let idx = fc.current_flow_index();
+            if let Some(hit) = fc.document.with(|d| flow_render::hit_test(d, idx, world)) {
+                if fc.enter_subflow(&hit) {
+                    canvas2.queue_draw();
+                }
+            }
+        });
+    }
+    canvas.add_controller(dclick);
 
     // Right-click a node → context menu: toggle a breakpoint or delete the block.
     let menu_pop = gtk::Popover::new();
@@ -214,6 +252,26 @@ pub fn build_flowchart_view(
             });
         }
         menu.append(&del);
+
+        // Extract the right-clicked block into its own subsystem (signal flow).
+        let extract = Button::with_label("Extract to Subsystem");
+        extract.set_has_frame(false);
+        extract.set_halign(gtk::Align::Start);
+        {
+            let app = app.clone();
+            let fc = fc.clone();
+            let target = menu_target.clone();
+            let pop = menu_pop.clone();
+            extract.connect_clicked(move |_| {
+                if let Some(id) = target.borrow().clone() {
+                    if fc.extract_to_subsystem(&[id]).is_some() {
+                        app.vm.toast.show("Extracted to subsystem");
+                    }
+                }
+                pop.popdown();
+            });
+        }
+        menu.append(&extract);
         menu_pop.set_child(Some(&menu));
     }
     let rclick = gtk::GestureClick::new();
@@ -229,7 +287,8 @@ pub fn build_flowchart_view(
                 zoom: fc.zoom.get(),
             };
             let world = flow_render::screen_to_world(vp, x, y);
-            if let Some(id) = fc.document.with(|d| flow_render::hit_test(d, world)) {
+            let idx = fc.current_flow_index();
+            if let Some(id) = fc.document.with(|d| flow_render::hit_test(d, idx, world)) {
                 fc.select(Some(id.clone()));
                 *target.borrow_mut() = Some(id);
                 pop.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
@@ -255,15 +314,16 @@ pub fn build_flowchart_view(
                 zoom: fc.zoom.get(),
             };
             let world = flow_render::screen_to_world(vp, x, y);
+            let idx = fc.current_flow_index();
             // Port stubs win over the body so you can pull an edge off a node edge.
             let port_radius = 14.0 / fc.zoom.get().max(0.1);
             if let Some((node, port)) = fc
                 .document
-                .with(|d| flow_render::output_port_hit(d, world, port_radius))
+                .with(|d| flow_render::output_port_hit(d, idx, world, port_radius))
             {
                 let start = fc
                     .document
-                    .with(|d| flow_render::port_world(d, &node, &port));
+                    .with(|d| flow_render::port_world(d, idx, &node, &port));
                 if let Some(start) = start {
                     *pending.borrow_mut() = Some((start, (world.x, world.y)));
                     *state.borrow_mut() = Some(DragMode::Edge {
@@ -273,7 +333,7 @@ pub fn build_flowchart_view(
                     return;
                 }
             }
-            if let Some(id) = fc.document.with(|d| flow_render::hit_test(d, world)) {
+            if let Some(id) = fc.document.with(|d| flow_render::hit_test(d, idx, world)) {
                 let pos = fc.node(&id).map(|n| (n.ui.position.x, n.ui.position.y));
                 if let Some((px, py)) = pos {
                     fc.select(Some(id.clone()));
@@ -331,11 +391,12 @@ pub fn build_flowchart_view(
                         zoom: fc.zoom.get(),
                     };
                     let world = flow_render::screen_to_world(vp, start_x + dx, start_y + dy);
-                    let target = fc.document.with(|d| flow_render::hit_test(d, world));
+                    let idx = fc.current_flow_index();
+                    let target = fc.document.with(|d| flow_render::hit_test(d, idx, world));
                     if let Some(to_node) = target {
                         let to_port = fc
                             .document
-                            .with(|d| flow_render::nearest_input_port(d, &to_node, world));
+                            .with(|d| flow_render::nearest_input_port(d, idx, &to_node, world));
                         match to_port {
                             Some(to_port)
                                 if fc.can_add_edge(&from_node, &from_port, &to_node, &to_port) =>
@@ -465,6 +526,7 @@ pub fn build_flowchart_view(
     content.append(&preview_pane);
 
     root.append(&toolbar);
+    root.append(&build_breadcrumb(&fc));
     root.append(&content);
 
     // The block inspector lives in the shared right-side panel: install it when
@@ -861,6 +923,56 @@ fn open_symbols_popover(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>, anchor:
     pop.popup();
 }
 
+/// A navigation breadcrumb shown only inside a subsystem: an **Up** action plus
+/// a clickable crumb per level (root → … → current sub-flow). Rebuilds whenever
+/// the navigation stack changes.
+fn build_breadcrumb(fc: &Rc<FlowchartViewModel>) -> GtkBox {
+    let bar = GtkBox::new(Orientation::Horizontal, 4);
+    bar.add_css_class("mf-toolbar");
+    bar.set_margin_start(8);
+    bar.set_margin_end(8);
+
+    let rebuild: Rc<dyn Fn()> = {
+        let fc = fc.clone();
+        let bar = bar.clone();
+        Rc::new(move || {
+            while let Some(c) = bar.first_child() {
+                bar.remove(&c);
+            }
+            let crumbs = fc.breadcrumb();
+            if crumbs.len() <= 1 {
+                bar.set_visible(false);
+                return;
+            }
+            bar.set_visible(true);
+            let up = Button::with_label("⬆ Up");
+            up.add_css_class("mf-tool");
+            {
+                let fc = fc.clone();
+                up.connect_clicked(move |_| fc.nav_back());
+            }
+            bar.append(&up);
+            for (i, name) in crumbs.iter().enumerate() {
+                if i > 0 {
+                    bar.append(&Label::new(Some("›")));
+                }
+                let crumb = Button::with_label(name);
+                crumb.set_has_frame(false);
+                crumb.add_css_class("mf-row");
+                let fc = fc.clone();
+                crumb.connect_clicked(move |_| fc.nav_to_depth(i));
+                bar.append(&crumb);
+            }
+        })
+    };
+    rebuild();
+    {
+        let rebuild = rebuild.clone();
+        fc.nav_stack.subscribe(move |_| rebuild());
+    }
+    bar
+}
+
 fn build_flow_toolbar(
     app: &Rc<AppState>,
     fc: &Rc<FlowchartViewModel>,
@@ -1104,7 +1216,9 @@ fn build_flow_toolbar(
 
 /// Center the chart in the canvas at a zoom that fits all nodes.
 fn fit_view(fc: &Rc<FlowchartViewModel>, cw: f64, ch: f64) {
-    let Some((minx, miny, maxx, maxy)) = fc.document.with(flow_render::content_bounds) else {
+    let idx = fc.current_flow_index();
+    let Some((minx, miny, maxx, maxy)) = fc.document.with(|d| flow_render::content_bounds(d, idx))
+    else {
         return;
     };
     let bw = (maxx - minx).max(1.0);
