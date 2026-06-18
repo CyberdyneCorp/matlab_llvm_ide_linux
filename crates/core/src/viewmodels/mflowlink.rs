@@ -82,7 +82,8 @@ impl MflowLinkViewModel {
                 }
             }
             SimEvent::Signal { edge_id, t, value } => {
-                self.live_signals.update(|m| m.entry(edge_id.clone()).or_default().push((*t, *value)));
+                self.live_signals
+                    .update(|m| m.entry(edge_id.clone()).or_default().push((*t, *value)));
                 // Drive the scope redraw subscription (shared with CSV mode).
                 self.sample_count.update(|c| *c += 1);
             }
@@ -193,8 +194,12 @@ impl MflowLinkViewModel {
     /// `(time, value)` series for scope signal `i`.
     pub fn scope_series(&self, i: usize) -> (Vec<f64>, Vec<f64>) {
         if self.live.get() {
-            self.live_signals
-                .with(|m| m.values().nth(i).map(|s| s.iter().copied().unzip()).unwrap_or_default())
+            self.live_signals.with(|m| {
+                m.values()
+                    .nth(i)
+                    .map(|s| s.iter().copied().unzip())
+                    .unwrap_or_default()
+            })
         } else {
             self.trace.with(|t| t.series(i))
         }
@@ -305,15 +310,22 @@ mod tests {
         assert!(vm.live.get());
         assert_eq!(vm.state.get(), SimState::Running);
 
-        vm.on_sim_event(&SimEvent::Time { t: 1.25, major_step: 7 });
+        vm.on_sim_event(&SimEvent::Time {
+            t: 1.25,
+            major_step: 7,
+        });
         assert_eq!(vm.sim_time.get(), 1.25);
         assert_eq!(vm.major_step.get(), 7);
 
-        vm.on_sim_event(&SimEvent::ActiveBlock { node_id: "gain_1".into() });
+        vm.on_sim_event(&SimEvent::ActiveBlock {
+            node_id: "gain_1".into(),
+        });
         assert_eq!(vm.active_block.get().as_deref(), Some("gain_1"));
 
         // A stopped event (breakpoint / step / entry) pauses the transport.
-        vm.on_sim_event(&SimEvent::Stopped { reason: "breakpoint".into() });
+        vm.on_sim_event(&SimEvent::Stopped {
+            reason: "breakpoint".into(),
+        });
         assert_eq!(vm.state.get(), SimState::Paused);
 
         // Reset clears the live state back to Idle.
@@ -327,7 +339,9 @@ mod tests {
     fn stopped_event_ignored_when_idle() {
         use crate::services::sim_dap::SimEvent;
         let vm = vm();
-        vm.on_sim_event(&SimEvent::Stopped { reason: "entry".into() });
+        vm.on_sim_event(&SimEvent::Stopped {
+            reason: "entry".into(),
+        });
         assert_eq!(vm.state.get(), SimState::Idle);
     }
 
@@ -336,7 +350,11 @@ mod tests {
         use crate::services::sim_dap::SimEvent;
         let vm = vm();
         vm.start_live();
-        let sig = |e: &str, t, v| SimEvent::Signal { edge_id: e.into(), t, value: v };
+        let sig = |e: &str, t, v| SimEvent::Signal {
+            edge_id: e.into(),
+            t,
+            value: v,
+        };
         vm.on_sim_event(&sig("scope", 0.0, 1.0));
         vm.on_sim_event(&sig("src", 0.0, 5.0));
         vm.on_sim_event(&sig("scope", 0.1, 2.0));
