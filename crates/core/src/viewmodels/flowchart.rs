@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use crate::models::flowchart::{
     EdgeEndpoint, EdgeKind, FlowEdge, FlowNode, FlowPosition, FlowUi, FlowchartDocument, NodeData,
-    NodeKind, SchemaKind,
+    NodeKind, SchemaKind, SolverConfig,
 };
 use crate::models::BreakpointConfig;
 use crate::observable::Property;
@@ -160,6 +160,25 @@ impl FlowchartViewModel {
     /// the canvas warning outline. Empty unless this is a signal-flow document.
     pub fn algebraic_loop_nodes(&self) -> std::collections::BTreeSet<String> {
         self.document.with(|d| d.algebraic_loop_nodes())
+    }
+
+    /// The document's solver settings, or the variable-step default if unset.
+    pub fn solver_config(&self) -> SolverConfig {
+        self.document.with(|d| {
+            d.settings
+                .as_ref()
+                .and_then(|s| s.solver.clone())
+                .unwrap_or_else(SolverConfig::default_variable_step)
+        })
+    }
+
+    /// Replace the solver settings (one undo step) and mark the document dirty.
+    pub fn set_solver_config(&self, cfg: SolverConfig) {
+        self.push_undo();
+        self.document.update(|d| {
+            d.settings.get_or_insert_with(Default::default).solver = Some(cfg);
+        });
+        self.is_dirty.set(true);
     }
 
     /// Delete a node and any edge that touches it.
@@ -737,5 +756,30 @@ mod tests {
         assert_eq!(vm.execution_node.get().as_deref(), Some("main_start"));
         vm.set_execution_node(None);
         assert!(vm.execution_node.get().is_none());
+    }
+
+    #[test]
+    fn solver_config_defaults_then_round_trips() {
+        use crate::models::flowchart::{SolverAlgorithm, SolverType};
+        let vm = FlowchartViewModel::empty("S", SchemaKind::SignalFlow);
+        // Unset → variable-step ode45 default.
+        let def = vm.solver_config();
+        assert_eq!(def.solver_type, Some(SolverType::VariableStep));
+        assert_eq!(def.algorithm, Some(SolverAlgorithm::Ode45));
+
+        // Set a fixed-step Euler config; it persists and re-reads.
+        let mut cfg = def.clone();
+        cfg.solver_type = Some(SolverType::FixedStep);
+        cfg.algorithm = Some(SolverAlgorithm::Euler);
+        cfg.stop_time = Some(42.0);
+        vm.set_solver_config(cfg.clone());
+        assert_eq!(vm.solver_config(), cfg);
+        assert!(vm.is_dirty.get());
+        // It round-trips through the codec (lands in settings.solver).
+        let json = vm.encode().unwrap();
+        assert!(json.contains("\"stopTime\""));
+        // Undo restores the previous (default) solver.
+        vm.undo();
+        assert_eq!(vm.solver_config().algorithm, Some(SolverAlgorithm::Ode45));
     }
 }
