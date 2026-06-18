@@ -656,7 +656,7 @@ fn build_model_canvas(vm: &Rc<MflowLinkViewModel>) -> GtkBox {
             // execution halo so you can watch the solver walk the diagram.
             let active = vm.active_block.get();
             vm.document.with(|doc| {
-                let bounds = flow_render::content_bounds(doc);
+                let bounds = flow_render::content_bounds(doc, 0);
                 let mut vp = fit_viewport(bounds, w as f64, h as f64);
                 let (ux, uy) = user_pan.get();
                 vp.pan = (vp.pan.0 + ux, vp.pan.1 + uy);
@@ -667,6 +667,7 @@ fn build_model_canvas(vm: &Rc<MflowLinkViewModel>) -> GtkBox {
                     w as f64,
                     h as f64,
                     doc,
+                    0,
                     vp,
                     None,
                     &bps,

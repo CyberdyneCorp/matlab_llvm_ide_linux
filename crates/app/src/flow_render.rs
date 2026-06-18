@@ -49,6 +49,7 @@ pub fn draw_document(
     w: f64,
     h: f64,
     doc: &FlowchartDocument,
+    flow_index: usize,
     vp: Viewport,
     selected: Option<&str>,
     breakpoints: &BTreeMap<String, BreakpointConfig>,
@@ -63,7 +64,7 @@ pub fn draw_document(
     ctx.translate(vp.pan.0, vp.pan.1);
     ctx.scale(vp.zoom, vp.zoom);
 
-    let Some(flow) = doc.flows.first() else {
+    let Some(flow) = doc.flows.get(flow_index) else {
         ctx.restore().ok();
         return;
     };
@@ -252,8 +253,8 @@ pub fn screen_to_world(vp: Viewport, sx: f64, sy: f64) -> FlowPosition {
 }
 
 /// Topmost node id containing the world point, if any.
-pub fn hit_test(doc: &FlowchartDocument, world: FlowPosition) -> Option<String> {
-    let flow = doc.flows.first()?;
+pub fn hit_test(doc: &FlowchartDocument, flow_index: usize, world: FlowPosition) -> Option<String> {
+    let flow = doc.flows.get(flow_index)?;
     for node in flow.nodes.iter().rev() {
         let (x, y, w, h) = node_rect(node);
         if world.x >= x && world.x <= x + w && world.y >= y && world.y <= y + h {
@@ -295,8 +296,8 @@ fn node_label(node: &FlowNode) -> String {
 
 /// Bounding box `(min_x, min_y, max_x, max_y)` of all nodes in the entry flow,
 /// in world coordinates. `None` for an empty flow. Used for zoom-to-fit.
-pub fn content_bounds(doc: &FlowchartDocument) -> Option<(f64, f64, f64, f64)> {
-    let flow = doc.flows.first()?;
+pub fn content_bounds(doc: &FlowchartDocument, flow_index: usize) -> Option<(f64, f64, f64, f64)> {
+    let flow = doc.flows.get(flow_index)?;
     let mut it = flow.nodes.iter();
     let first = it.next()?;
     let (x, y, w, h) = node_rect(first);
@@ -312,8 +313,13 @@ pub fn content_bounds(doc: &FlowchartDocument) -> Option<(f64, f64, f64, f64)> {
 }
 
 /// World-space position of a node's port (for the edge-drag rubber band).
-pub fn port_world(doc: &FlowchartDocument, node_id: &str, port: &str) -> Option<(f64, f64)> {
-    let flow = doc.flows.first()?;
+pub fn port_world(
+    doc: &FlowchartDocument,
+    flow_index: usize,
+    node_id: &str,
+    port: &str,
+) -> Option<(f64, f64)> {
+    let flow = doc.flows.get(flow_index)?;
     let node = flow.nodes.iter().find(|n| n.id == node_id)?;
     Some(port_point(node, port))
 }
@@ -322,10 +328,11 @@ pub fn port_world(doc: &FlowchartDocument, node_id: &str, port: &str) -> Option<
 /// `(node_id, port_id)`. Used to start an edge drag from a port stub.
 pub fn output_port_hit(
     doc: &FlowchartDocument,
+    flow_index: usize,
     world: FlowPosition,
     radius: f64,
 ) -> Option<(String, String)> {
-    let flow = doc.flows.first()?;
+    let flow = doc.flows.get(flow_index)?;
     let mut best: Option<(f64, String, String)> = None;
     for node in &flow.nodes {
         for p in &node.ports.outputs {
@@ -343,10 +350,11 @@ pub fn output_port_hit(
 /// Falls back to `"in"` when the node declares no input ports.
 pub fn nearest_input_port(
     doc: &FlowchartDocument,
+    flow_index: usize,
     node_id: &str,
     world: FlowPosition,
 ) -> Option<String> {
-    let flow = doc.flows.first()?;
+    let flow = doc.flows.get(flow_index)?;
     let node = flow.nodes.iter().find(|n| n.id == node_id)?;
     if node.ports.inputs.is_empty() {
         return None;
