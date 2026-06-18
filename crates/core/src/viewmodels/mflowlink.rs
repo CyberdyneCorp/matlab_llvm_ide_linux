@@ -77,7 +77,8 @@ impl MflowLinkViewModel {
             }
             // Signal samples feed the live scopes (#53); zero-crossings and
             // snapshots are surfaced by later slices.
-            SimEvent::Signal { .. } | SimEvent::ZeroCrossing { .. } | SimEvent::Snapshot { .. } => {}
+            SimEvent::Signal { .. } | SimEvent::ZeroCrossing { .. } | SimEvent::Snapshot { .. } => {
+            }
         }
     }
 
@@ -270,15 +271,22 @@ mod tests {
         assert!(vm.live.get());
         assert_eq!(vm.state.get(), SimState::Running);
 
-        vm.on_sim_event(&SimEvent::Time { t: 1.25, major_step: 7 });
+        vm.on_sim_event(&SimEvent::Time {
+            t: 1.25,
+            major_step: 7,
+        });
         assert_eq!(vm.sim_time.get(), 1.25);
         assert_eq!(vm.major_step.get(), 7);
 
-        vm.on_sim_event(&SimEvent::ActiveBlock { node_id: "gain_1".into() });
+        vm.on_sim_event(&SimEvent::ActiveBlock {
+            node_id: "gain_1".into(),
+        });
         assert_eq!(vm.active_block.get().as_deref(), Some("gain_1"));
 
         // A stopped event (breakpoint / step / entry) pauses the transport.
-        vm.on_sim_event(&SimEvent::Stopped { reason: "breakpoint".into() });
+        vm.on_sim_event(&SimEvent::Stopped {
+            reason: "breakpoint".into(),
+        });
         assert_eq!(vm.state.get(), SimState::Paused);
 
         // Reset clears the live state back to Idle.
@@ -292,7 +300,9 @@ mod tests {
     fn stopped_event_ignored_when_idle() {
         use crate::services::sim_dap::SimEvent;
         let vm = vm();
-        vm.on_sim_event(&SimEvent::Stopped { reason: "entry".into() });
+        vm.on_sim_event(&SimEvent::Stopped {
+            reason: "entry".into(),
+        });
         assert_eq!(vm.state.get(), SimState::Idle);
     }
 }
