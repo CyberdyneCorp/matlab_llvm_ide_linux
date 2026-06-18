@@ -201,7 +201,10 @@ fn fence_marker(trimmed: &str) -> Option<&'static str> {
 
 fn is_hr(trimmed: &str) -> bool {
     let t = trimmed.replace(' ', "");
-    t.len() >= 3 && (t.chars().all(|c| c == '-') || t.chars().all(|c| c == '*') || t.chars().all(|c| c == '_'))
+    t.len() >= 3
+        && (t.chars().all(|c| c == '-')
+            || t.chars().all(|c| c == '*')
+            || t.chars().all(|c| c == '_'))
 }
 
 fn heading(trimmed: &str) -> Option<(usize, &str)> {
@@ -243,10 +246,7 @@ fn list_marker(trimmed: &str) -> Option<(String, &str)> {
 fn next_is_table_sep(lines: &[&str], i: usize) -> bool {
     lines.get(i + 1).is_some_and(|l| {
         let t = l.trim();
-        t.contains('|')
-            && t.chars()
-                .all(|c| matches!(c, '|' | '-' | ':' | ' '))
-            && t.contains('-')
+        t.contains('|') && t.chars().all(|c| matches!(c, '|' | '-' | ':' | ' ')) && t.contains('-')
     })
 }
 
@@ -266,6 +266,9 @@ fn table_to_markup(header: &[String], rows: &[Vec<String>]) -> String {
     let mut out = String::from("<tt>");
     for (ri, r) in all.iter().enumerate() {
         let mut line = String::new();
+        // Indexing by column is clearer here: the body reads `r.get(c)`, the
+        // per-column `widths[c]`, and the `c + 1 < cols` separator guard.
+        #[allow(clippy::needless_range_loop)]
         for c in 0..cols {
             let cell = r.get(c).map(String::as_str).unwrap_or("");
             let pad = widths[c].saturating_sub(cell.chars().count());
@@ -471,7 +474,8 @@ mod tests {
 
     #[test]
     fn parse_splits_code_and_mermaid_fences() {
-        let blocks = parse("# Hi\n\n```rust\nlet x = 1;\n```\n\n```mermaid\ngraph TD\nA-->B\n```\n");
+        let blocks =
+            parse("# Hi\n\n```rust\nlet x = 1;\n```\n\n```mermaid\ngraph TD\nA-->B\n```\n");
         assert!(matches!(blocks[0], Block::Markup(_)));
         match &blocks[1] {
             Block::Code { lang, body } => {
@@ -507,6 +511,12 @@ mod tests {
     fn parse_keeps_code_body_unescaped() {
         // The card renderer escapes itself, so the block body stays raw.
         let blocks = parse("```\na < b\n```");
-        assert_eq!(blocks, vec![Block::Code { lang: String::new(), body: "a < b".to_string() }]);
+        assert_eq!(
+            blocks,
+            vec![Block::Code {
+                lang: String::new(),
+                body: "a < b".to_string()
+            }]
+        );
     }
 }

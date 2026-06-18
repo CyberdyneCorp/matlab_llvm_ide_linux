@@ -55,7 +55,9 @@ impl Default for ActivityBarViewModel {
 
 impl ActivityBarViewModel {
     pub fn new() -> ActivityBarViewModel {
-        ActivityBarViewModel { selected: Property::new(ActivityItem::Explorer) }
+        ActivityBarViewModel {
+            selected: Property::new(ActivityItem::Explorer),
+        }
     }
 
     pub fn select(&self, item: ActivityItem) {

@@ -12,13 +12,18 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use matforge_core::models::{CompilerTarget, OptimizationProfile};
-use matforge_core::services::compiler::{CompilerInvocation, CompilerService, ProcessCompilerService};
+use matforge_core::services::compiler::{
+    CompilerInvocation, CompilerService, ProcessCompilerService,
+};
 use matforge_core::services::settings::Settings;
 
 /// Resolve `matlabc`, or `None` (→ skip) if it isn't installed.
 fn matlabc() -> Option<PathBuf> {
     let settings = Settings::from_env();
-    settings.matlabc_path.exists().then_some(settings.matlabc_path)
+    settings
+        .matlabc_path
+        .exists()
+        .then_some(settings.matlabc_path)
 }
 
 /// Write a `.m` source to a unique temp file and return its path.
@@ -40,12 +45,16 @@ fn emit_cpp_produces_source() {
         return;
     };
     let src = temp_source("hello.m", "x = 1 + 2;\ndisp(x)\n");
-    let inv = CompilerInvocation::emit(&binary, CompilerTarget::Cpp, OptimizationProfile::O0, &src).unwrap();
+    let inv = CompilerInvocation::emit(&binary, CompilerTarget::Cpp, OptimizationProfile::O0, &src)
+        .unwrap();
     let result = ProcessCompilerService.run(&inv, &mut |_| {}).unwrap();
     std::fs::remove_file(&src).ok();
 
     assert!(result.success(), "stderr: {:?}", result.stderr_lines);
-    assert!(!result.stdout.trim().is_empty(), "expected generated C++ on stdout");
+    assert!(
+        !result.stdout.trim().is_empty(),
+        "expected generated C++ on stdout"
+    );
 }
 
 #[test]
@@ -55,7 +64,9 @@ fn emit_llvm_contains_ir() {
         return;
     };
     let src = temp_source("ir.m", "y = 3 * 4;\n");
-    let inv = CompilerInvocation::emit(&binary, CompilerTarget::Llvm, OptimizationProfile::O0, &src).unwrap();
+    let inv =
+        CompilerInvocation::emit(&binary, CompilerTarget::Llvm, OptimizationProfile::O0, &src)
+            .unwrap();
     let result = ProcessCompilerService.run(&inv, &mut |_| {}).unwrap();
     std::fs::remove_file(&src).ok();
 
@@ -95,7 +106,12 @@ fn repl_plot_emits_figure_sentinel() {
         .write_all(b"plot(1:10);\ndrawnow;\nexit\n")
         .unwrap();
     let mut out = String::new();
-    child.stdout.take().unwrap().read_to_string(&mut out).unwrap();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut out)
+        .unwrap();
     let _ = child.wait();
 
     assert!(
@@ -113,15 +129,19 @@ fn diagnostics_surface_for_bad_source() {
     };
     // Undefined name should produce a clang-style diagnostic on stderr.
     let src = temp_source("bad.m", "x = 1 + + undefined_name_zzz;\n");
-    let inv = CompilerInvocation::emit(&binary, CompilerTarget::Cpp, OptimizationProfile::O0, &src).unwrap();
+    let inv = CompilerInvocation::emit(&binary, CompilerTarget::Cpp, OptimizationProfile::O0, &src)
+        .unwrap();
     let mut logs = Vec::new();
-    let result = ProcessCompilerService.run(&inv, &mut |l| logs.push(l.to_string())).unwrap();
+    let result = ProcessCompilerService
+        .run(&inv, &mut |l| logs.push(l.to_string()))
+        .unwrap();
     std::fs::remove_file(&src).ok();
 
     // Either it fails, or it emits at least one diagnostic-looking line.
-    let saw_diag = result.stderr_lines.iter().any(|l| {
-        matforge_core::services::compiler::parse_diagnostic(l).is_some()
-    });
+    let saw_diag = result
+        .stderr_lines
+        .iter()
+        .any(|l| matforge_core::services::compiler::parse_diagnostic(l).is_some());
     assert!(
         !result.success() || saw_diag,
         "expected a failure or a diagnostic for undefined name"

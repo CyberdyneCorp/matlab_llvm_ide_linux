@@ -56,7 +56,10 @@ impl SimTrace {
     }
 
     fn push_row(&mut self, fields: &[&str]) -> bool {
-        let row: Vec<f64> = fields.iter().map(|f| f.parse::<f64>().unwrap_or(f64::NAN)).collect();
+        let row: Vec<f64> = fields
+            .iter()
+            .map(|f| f.parse::<f64>().unwrap_or(f64::NAN))
+            .collect();
         self.rows.push(row);
         true
     }
@@ -73,14 +76,21 @@ impl SimTrace {
 
     /// The time column (column 0) across all rows.
     pub fn time(&self) -> Vec<f64> {
-        self.rows.iter().map(|r| r.first().copied().unwrap_or(f64::NAN)).collect()
+        self.rows
+            .iter()
+            .map(|r| r.first().copied().unwrap_or(f64::NAN))
+            .collect()
     }
 
     /// `(time, values)` for signal `i` (0-based among signals).
     pub fn series(&self, i: usize) -> (Vec<f64>, Vec<f64>) {
         let col = i + 1;
         let xs = self.time();
-        let ys = self.rows.iter().map(|r| r.get(col).copied().unwrap_or(f64::NAN)).collect();
+        let ys = self
+            .rows
+            .iter()
+            .map(|r| r.get(col).copied().unwrap_or(f64::NAN))
+            .collect();
         (xs, ys)
     }
 

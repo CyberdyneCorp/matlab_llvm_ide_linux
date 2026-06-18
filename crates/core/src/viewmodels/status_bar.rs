@@ -18,7 +18,9 @@ impl Default for StatusBarViewModel {
 
 impl StatusBarViewModel {
     pub fn new() -> StatusBarViewModel {
-        StatusBarViewModel { state: Property::new(StatusBarState::default()) }
+        StatusBarViewModel {
+            state: Property::new(StatusBarState::default()),
+        }
     }
 
     pub fn set_cursor(&self, line: usize, column: usize) {

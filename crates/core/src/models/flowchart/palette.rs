@@ -142,22 +142,39 @@ impl NodeCategory {
 /// Every addable block for `schema`, grouped under its category in display order
 /// (empty categories dropped). The structural `Start`/`End` scaffold is excluded
 /// — they already live on the canvas. Drives the Block Library window.
-pub fn library_blocks(
-    schema: super::document::SchemaKind,
-) -> Vec<(NodeCategory, Vec<NodeKind>)> {
+pub fn library_blocks(schema: super::document::SchemaKind) -> Vec<(NodeCategory, Vec<NodeKind>)> {
     NodeCategory::order_for(schema)
         .into_iter()
         .filter_map(|cat| {
             let kinds: Vec<NodeKind> = NodeKind::ALL
                 .iter()
                 .copied()
-                .filter(|k| {
-                    k.category() == cat && !matches!(k, NodeKind::Start | NodeKind::End)
-                })
+                .filter(|k| k.category() == cat && !matches!(k, NodeKind::Start | NodeKind::End))
                 .collect();
             (!kinds.is_empty()).then_some((cat, kinds))
         })
         .collect()
+}
+
+/// The kind of value a [`SignalFlowParamSpec`] field accepts. Drives inspector
+/// validation so a malformed parameter is caught at edit time rather than later
+/// inside `matlabc`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ParamConstraint {
+    /// Any finite real number.
+    Number,
+    /// A whole number with an optional inclusive minimum (e.g. input counts ≥ 1).
+    Integer { min: Option<i64> },
+    /// A comma/space-separated list of reals (polynomial coefficients).
+    CoeffList,
+    /// A MATLAB matrix literal (`[1 2; 3 4]`) or a scalar/coefficient row.
+    Matrix,
+    /// A sign string built only from `+` and `-` (e.g. Sum's `"+-"`).
+    Signs,
+    /// One of a fixed set of allowed strings (case-insensitive).
+    Enum(&'static [&'static str]),
+    /// Free-form text (names, titles, expressions); always valid.
+    Text,
 }
 
 /// One signal-flow block parameter shown by the inspector.
@@ -166,20 +183,56 @@ pub struct SignalFlowParamSpec {
     pub key: &'static str,
     pub label: &'static str,
     pub default_value: ParamValue,
+    pub constraint: ParamConstraint,
 }
 
 impl SignalFlowParamSpec {
     fn d(key: &'static str, label: &'static str, v: f64) -> SignalFlowParamSpec {
-        SignalFlowParamSpec { key, label, default_value: ParamValue::Double(v) }
+        SignalFlowParamSpec {
+            key,
+            label,
+            default_value: ParamValue::Double(v),
+            constraint: ParamConstraint::Number,
+        }
     }
     fn s(key: &'static str, label: &'static str, v: &str) -> SignalFlowParamSpec {
-        SignalFlowParamSpec { key, label, default_value: ParamValue::Str(v.to_string()) }
+        SignalFlowParamSpec {
+            key,
+            label,
+            default_value: ParamValue::Str(v.to_string()),
+            constraint: ParamConstraint::Text,
+        }
+    }
+
+    /// Override this field's constraint (builder style).
+    fn with(mut self, constraint: ParamConstraint) -> SignalFlowParamSpec {
+        self.constraint = constraint;
+        self
+    }
+    fn int(self, min: i64) -> SignalFlowParamSpec {
+        self.with(ParamConstraint::Integer { min: Some(min) })
+    }
+    fn coeffs(self) -> SignalFlowParamSpec {
+        self.with(ParamConstraint::CoeffList)
+    }
+    fn matrix(self) -> SignalFlowParamSpec {
+        self.with(ParamConstraint::Matrix)
+    }
+    fn signs(self) -> SignalFlowParamSpec {
+        self.with(ParamConstraint::Signs)
+    }
+    fn choices(self, set: &'static [&'static str]) -> SignalFlowParamSpec {
+        self.with(ParamConstraint::Enum(set))
     }
 
     /// Per-kind tunable parameter list (matches roadmap §4.3 / Simulink dialogs).
     /// Returns `[]` for kinds with no user-tunable parameters.
     pub fn fields(kind: NodeKind) -> Vec<SignalFlowParamSpec> {
         use NodeKind::*;
+        const RELOP_OPS: &[&str] = &["<", "<=", ">", ">=", "==", "~="];
+        const LOGICAL_OPS: &[&str] = &["AND", "OR", "NAND", "NOR", "XOR", "NOT"];
+        const DISCRETE_METHODS: &[&str] = &["ForwardEuler", "BackwardEuler", "Trapezoidal"];
+        const NOISE_DISTS: &[&str] = &["uniform", "gaussian", "normal"];
         match kind {
             SignalConstant => vec![Self::d("value", "Value", 1.0)],
             SignalStep => vec![
@@ -205,23 +258,33 @@ impl SignalFlowParamSpec {
                 Self::d("initialOutput", "Initial Output", 0.0),
             ],
             SignalGain => vec![Self::d("gain", "Gain", 1.0)],
-            SignalSum => vec![Self::s("signs", "List of Signs", "++")],
-            SignalProduct => vec![Self::d("numInputs", "Number of Inputs", 2.0)],
+            SignalSum => vec![Self::s("signs", "List of Signs", "++").signs()],
+            SignalProduct => vec![Self::d("numInputs", "Number of Inputs", 2.0).int(1)],
             SignalSaturation => vec![
                 Self::d("upperLimit", "Upper Limit", 1.0),
                 Self::d("lowerLimit", "Lower Limit", -1.0),
             ],
             SignalIntegrator => vec![Self::d("initialCondition", "Initial Condition", 0.0)],
+            // Parallel-form PID: C(s) = Kp + Ki/s + Kd·N/(s+N). Optional output
+            // saturation limits (upperLimit/lowerLimit) are honoured by the
+            // compiler but omitted here — they need "empty = no limit" handling.
+            SignalPid => vec![
+                Self::d("Kp", "Proportional (Kp)", 1.0),
+                Self::d("Ki", "Integral (Ki)", 0.0),
+                Self::d("Kd", "Derivative (Kd)", 0.0),
+                Self::d("N", "Filter coefficient (N)", 100.0),
+                Self::d("initialIntegral", "Initial Integral", 0.0),
+            ],
             SignalTransferFcn => vec![
-                Self::s("num", "Numerator coeffs", "1"),
-                Self::s("den", "Denominator coeffs", "1, 1"),
+                Self::s("num", "Numerator coeffs", "1").coeffs(),
+                Self::s("den", "Denominator coeffs", "1, 1").coeffs(),
             ],
             SignalStateSpace => vec![
-                Self::s("A", "A matrix", "0"),
-                Self::s("B", "B matrix", "1"),
-                Self::s("C", "C matrix", "1"),
+                Self::s("A", "A matrix", "0").matrix(),
+                Self::s("B", "B matrix", "1").matrix(),
+                Self::s("C", "C matrix", "1").matrix(),
                 Self::d("D", "D feedthru", 0.0),
-                Self::s("x0", "Initial state", "0"),
+                Self::s("x0", "Initial state", "0").coeffs(),
             ],
             SignalUnitDelay => vec![
                 Self::d("initialValue", "Initial Value", 0.0),
@@ -232,11 +295,11 @@ impl SignalFlowParamSpec {
                 Self::d("yMin", "Y min", -1.0),
                 Self::d("yMax", "Y max", 1.0),
                 Self::s("title", "Title", ""),
-                Self::d("decimation", "Decimation", 1.0),
+                Self::d("decimation", "Decimation", 1.0).int(1),
             ],
             SignalToWorkspace => vec![Self::s("variableName", "Variable name", "simout")],
-            SignalMux => vec![Self::d("numInputs", "Number of Inputs", 2.0)],
-            SignalDemux => vec![Self::d("numOutputs", "Number of Outputs", 2.0)],
+            SignalMux => vec![Self::d("numInputs", "Number of Inputs", 2.0).int(1)],
+            SignalDemux => vec![Self::d("numOutputs", "Number of Outputs", 2.0).int(1)],
             SignalSwitch => vec![Self::d("threshold", "Threshold", 0.0)],
             SignalChirp => vec![
                 Self::d("amplitude", "Amplitude", 1.0),
@@ -246,16 +309,16 @@ impl SignalFlowParamSpec {
             ],
             SignalNoise => vec![
                 Self::d("amplitude", "Amplitude", 1.0),
-                Self::d("seed", "Seed", 1.0),
-                Self::s("kind", "Distribution", "uniform"),
+                Self::d("seed", "Seed", 1.0).int(0),
+                Self::s("kind", "Distribution", "uniform").choices(NOISE_DISTS),
             ],
             SignalFunctionCallGenerator => vec![
                 Self::d("period", "Period", 1.0),
                 Self::d("phaseDelay", "Phase Delay", 0.0),
             ],
             SignalZeroPole => vec![
-                Self::s("zeros", "Zeros", ""),
-                Self::s("poles", "Poles", "-1"),
+                Self::s("zeros", "Zeros", "").coeffs(),
+                Self::s("poles", "Poles", "-1").coeffs(),
                 Self::d("gain", "Scalar Gain", 1.0),
             ],
             SignalTransportDelay => vec![
@@ -263,13 +326,13 @@ impl SignalFlowParamSpec {
                 Self::d("initialOutput", "Initial Output", 0.0),
             ],
             SignalDiscreteIntegrator => vec![
-                Self::s("method", "Method", "ForwardEuler"),
+                Self::s("method", "Method", "ForwardEuler").choices(DISCRETE_METHODS),
                 Self::d("initialCondition", "Initial Condition", 0.0),
                 Self::d("sampleTime", "Sample Time", 1.0),
             ],
             SignalDiscreteFilter => vec![
-                Self::s("num", "Numerator coeffs", "1"),
-                Self::s("den", "Denominator coeffs", "1, -0.9"),
+                Self::s("num", "Numerator coeffs", "1").coeffs(),
+                Self::s("den", "Denominator coeffs", "1, -0.9").coeffs(),
                 Self::d("sampleTime", "Sample Time", 1.0),
             ],
             SignalRateTransition => vec![Self::d("sampleTime", "Sample Time", 1.0)],
@@ -279,14 +342,14 @@ impl SignalFlowParamSpec {
                 Self::d("lowerLimit", "Start of dead zone", -0.5),
                 Self::d("upperLimit", "End of dead zone", 0.5),
             ],
-            SignalRelop => vec![Self::s("op", "Operator", "<")],
-            SignalLogical => vec![Self::s("op", "Operator", "AND")],
-            SignalCompareToZero => vec![Self::s("op", "Operator", ">")],
+            SignalRelop => vec![Self::s("op", "Operator", "<").choices(RELOP_OPS)],
+            SignalLogical => vec![Self::s("op", "Operator", "AND").choices(LOGICAL_OPS)],
+            SignalCompareToZero => vec![Self::s("op", "Operator", ">").choices(RELOP_OPS)],
             SignalBusCreator => vec![Self::s("field_names", "Field Names", "")],
             SignalBusSelector => vec![Self::s("field", "Field", "")],
             SignalReshape => vec![
-                Self::d("rows", "Rows", 1.0),
-                Self::d("cols", "Cols", 1.0),
+                Self::d("rows", "Rows", 1.0).int(1),
+                Self::d("cols", "Cols", 1.0).int(1),
                 Self::s("shape", "Shape (alt form)", ""),
             ],
             SignalMatlabFcn => vec![
@@ -296,6 +359,94 @@ impl SignalFlowParamSpec {
             _ => vec![],
         }
     }
+
+    /// Validate `input` for the parameter `key` of `kind`. Unknown keys are
+    /// accepted (no spec to check against).
+    pub fn validate_field(kind: NodeKind, key: &str, input: &str) -> Result<(), String> {
+        match Self::fields(kind).into_iter().find(|f| f.key == key) {
+            Some(spec) => spec.validate(input),
+            None => Ok(()),
+        }
+    }
+
+    /// Validate `input` against this field's constraint. Empty input is valid —
+    /// the inspector treats it as "clear the parameter".
+    pub fn validate(&self, input: &str) -> Result<(), String> {
+        let t = input.trim();
+        if t.is_empty() {
+            return Ok(());
+        }
+        match &self.constraint {
+            ParamConstraint::Text => Ok(()),
+            ParamConstraint::Number => parse_real(t)
+                .map(|_| ())
+                .ok_or_else(|| format!("“{t}” is not a number")),
+            ParamConstraint::Integer { min } => {
+                let v = parse_real(t).ok_or_else(|| format!("“{t}” is not a number"))?;
+                if v.fract() != 0.0 {
+                    return Err(format!("“{t}” must be a whole number"));
+                }
+                match min {
+                    Some(m) if (v as i64) < *m => Err(format!("must be ≥ {m}")),
+                    _ => Ok(()),
+                }
+            }
+            ParamConstraint::CoeffList => validate_coeff_list(t),
+            ParamConstraint::Matrix => validate_matrix(t),
+            ParamConstraint::Signs => {
+                if t.chars().all(|c| c == '+' || c == '-') {
+                    Ok(())
+                } else {
+                    Err("only “+” and “-” are allowed".to_string())
+                }
+            }
+            ParamConstraint::Enum(set) => {
+                if set.iter().any(|s| s.eq_ignore_ascii_case(t)) {
+                    Ok(())
+                } else {
+                    Err(format!("must be one of: {}", set.join(", ")))
+                }
+            }
+        }
+    }
+}
+
+/// Parse a finite real number (rejects `inf`/`NaN`).
+fn parse_real(s: &str) -> Option<f64> {
+    let v: f64 = s.trim().parse().ok()?;
+    v.is_finite().then_some(v)
+}
+
+/// Validate a comma/space-separated list of reals (polynomial coefficients).
+fn validate_coeff_list(s: &str) -> Result<(), String> {
+    let toks: Vec<&str> = s
+        .split([',', ' ', '\t'])
+        .filter(|t| !t.is_empty())
+        .collect();
+    if toks.is_empty() {
+        return Err("expected at least one coefficient".to_string());
+    }
+    for t in toks {
+        if parse_real(t).is_none() {
+            return Err(format!("“{t}” is not a number"));
+        }
+    }
+    Ok(())
+}
+
+/// Validate a MATLAB matrix literal (`[1 2; 3 4]`) or a bare scalar/row.
+fn validate_matrix(s: &str) -> Result<(), String> {
+    let inner = s
+        .strip_prefix('[')
+        .and_then(|r| r.strip_suffix(']'))
+        .unwrap_or(s);
+    if inner.trim().is_empty() {
+        return Err("matrix is empty".to_string());
+    }
+    for row in inner.split(';') {
+        validate_coeff_list(row).map_err(|_| "matrix entries must be numbers".to_string())?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -316,14 +467,23 @@ mod tests {
         // Signal-flow shows many blocks across its categories, all signal-flow,
         // ordered with Sources first; no structural Start/End leak in.
         let sig = library_blocks(SchemaKind::SignalFlow);
-        assert!(sig.len() >= 4, "expected several signal categories, got {}", sig.len());
+        assert!(
+            sig.len() >= 4,
+            "expected several signal categories, got {}",
+            sig.len()
+        );
         assert_eq!(sig[0].0, NodeCategory::SignalSources);
         let total: usize = sig.iter().map(|(_, ks)| ks.len()).sum();
-        assert!(total > 6, "library should list more than the curated palette ({total})");
+        assert!(
+            total > 6,
+            "library should list more than the curated palette ({total})"
+        );
         for (cat, kinds) in &sig {
             assert!(cat.is_signal_flow());
             assert!(!kinds.is_empty());
-            assert!(kinds.iter().all(|k| !matches!(k, NodeKind::Start | NodeKind::End)));
+            assert!(kinds
+                .iter()
+                .all(|k| !matches!(k, NodeKind::Start | NodeKind::End)));
         }
 
         // Control-flow and state-chart produce their own non-empty groupings.
@@ -361,16 +521,32 @@ mod tests {
     fn every_category_has_label_accent_and_one_dialect() {
         use NodeCategory::*;
         let all = [
-            ControlFlow, Data, Io, Functions, Matrix, Other,
-            SignalSources, SignalSinks, SignalContinuous, SignalDiscrete,
-            SignalMath, SignalRouting, SignalLookup, SignalComposite,
-            ChartStates, ChartJunctions, ChartFunctions,
+            ControlFlow,
+            Data,
+            Io,
+            Functions,
+            Matrix,
+            Other,
+            SignalSources,
+            SignalSinks,
+            SignalContinuous,
+            SignalDiscrete,
+            SignalMath,
+            SignalRouting,
+            SignalLookup,
+            SignalComposite,
+            ChartStates,
+            ChartJunctions,
+            ChartFunctions,
         ];
         for c in all {
             assert!(!c.label().is_empty(), "{c:?} has no label");
             let _ = c.accent(); // every arm returns a color
-            // Signal/state predicates partition the dialect-specific categories.
-            assert!(!(c.is_signal_flow() && c.is_state_chart()), "{c:?} in two dialects");
+                                // Signal/state predicates partition the dialect-specific categories.
+            assert!(
+                !(c.is_signal_flow() && c.is_state_chart()),
+                "{c:?} in two dialects"
+            );
         }
         // The control-flow categories are neither signal nor chart.
         for c in [ControlFlow, Data, Io, Functions, Matrix, Other] {
@@ -390,6 +566,26 @@ mod tests {
 
         let sum = SignalFlowParamSpec::fields(NodeKind::SignalSum);
         assert_eq!(sum[0].default_value, ParamValue::Str("++".into()));
+
+        // PID exposes the gains + filter coefficient; keys match the compiler's
+        // signal_pid evaluator (docs/mflowlink_blocks.md).
+        let pid = SignalFlowParamSpec::fields(NodeKind::SignalPid);
+        let keys: Vec<&str> = pid.iter().map(|f| f.key).collect();
+        assert_eq!(keys, ["Kp", "Ki", "Kd", "N", "initialIntegral"]);
+        assert!(pid
+            .iter()
+            .all(|f| f.validate(&f.default_value.display_string()).is_ok()));
+    }
+
+    #[test]
+    fn pid_is_continuous_and_not_a_loop_breaker() {
+        // Direct-feedthrough (Kp + Kd·N path), so PID must NOT break a loop.
+        assert!(NodeKind::SignalPid.is_signal_flow());
+        assert_eq!(
+            NodeKind::SignalPid.category(),
+            NodeCategory::SignalContinuous
+        );
+        assert!(!NodeKind::SignalPid.breaks_algebraic_loop());
     }
 
     #[test]
@@ -397,5 +593,77 @@ mod tests {
         assert!(SignalFlowParamSpec::fields(NodeKind::SignalAbs).is_empty());
         assert!(SignalFlowParamSpec::fields(NodeKind::SignalTerminator).is_empty());
         assert!(SignalFlowParamSpec::fields(NodeKind::Assignment).is_empty());
+    }
+
+    fn spec(c: ParamConstraint) -> SignalFlowParamSpec {
+        SignalFlowParamSpec {
+            key: "k",
+            label: "K",
+            default_value: ParamValue::Str(String::new()),
+            constraint: c,
+        }
+    }
+
+    #[test]
+    fn validate_number_and_integer() {
+        assert!(spec(ParamConstraint::Number).validate("3.14").is_ok());
+        assert!(spec(ParamConstraint::Number).validate("-2e-3").is_ok());
+        assert!(spec(ParamConstraint::Number).validate("abc").is_err());
+        assert!(spec(ParamConstraint::Number).validate("inf").is_err());
+        let int1 = spec(ParamConstraint::Integer { min: Some(1) });
+        assert!(int1.validate("2").is_ok());
+        assert!(int1.validate("0").is_err()); // below min
+        assert!(int1.validate("1.5").is_err()); // not whole
+    }
+
+    #[test]
+    fn validate_coeff_matrix_signs_enum() {
+        assert!(spec(ParamConstraint::CoeffList).validate("1, 2, 3").is_ok());
+        assert!(spec(ParamConstraint::CoeffList).validate("1 2 3").is_ok());
+        assert!(spec(ParamConstraint::CoeffList)
+            .validate("1, x, 3")
+            .is_err());
+        assert!(spec(ParamConstraint::Matrix).validate("[1 2; 3 4]").is_ok());
+        assert!(spec(ParamConstraint::Matrix).validate("0").is_ok());
+        assert!(spec(ParamConstraint::Matrix).validate("[1 a]").is_err());
+        assert!(spec(ParamConstraint::Signs).validate("+-+").is_ok());
+        assert!(spec(ParamConstraint::Signs).validate("+x").is_err());
+        let e = spec(ParamConstraint::Enum(&["AND", "OR"]));
+        assert!(e.validate("and").is_ok()); // case-insensitive
+        assert!(e.validate("XOR").is_err());
+    }
+
+    #[test]
+    fn empty_input_is_always_valid() {
+        assert!(spec(ParamConstraint::Number).validate("").is_ok());
+        assert!(spec(ParamConstraint::CoeffList).validate("   ").is_ok());
+        assert!(spec(ParamConstraint::Enum(&["AND"])).validate("").is_ok());
+    }
+
+    #[test]
+    fn every_default_parameter_validates() {
+        for kind in NodeKind::ALL {
+            for spec in SignalFlowParamSpec::fields(kind) {
+                let v = spec.default_value.display_string();
+                assert!(
+                    spec.validate(&v).is_ok(),
+                    "{:?}.{} default {:?} should validate",
+                    kind,
+                    spec.key,
+                    v
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn validate_field_by_kind_key() {
+        assert!(SignalFlowParamSpec::validate_field(NodeKind::SignalGain, "gain", "2").is_ok());
+        assert!(SignalFlowParamSpec::validate_field(NodeKind::SignalGain, "gain", "x").is_err());
+        assert!(
+            SignalFlowParamSpec::validate_field(NodeKind::SignalProduct, "numInputs", "0").is_err()
+        );
+        // Unknown key → accepted (no spec).
+        assert!(SignalFlowParamSpec::validate_field(NodeKind::SignalGain, "nope", "x").is_ok());
     }
 }

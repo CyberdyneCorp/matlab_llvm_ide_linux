@@ -25,7 +25,10 @@ impl Settings {
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(DEFAULT_MATLABC));
         let runtime_archive = runtime_archive_for(&matlabc);
-        Settings { matlabc_path: matlabc, runtime_archive }
+        Settings {
+            matlabc_path: matlabc,
+            runtime_archive,
+        }
     }
 
     /// Resolve using the real process environment (`$MATLABC_PATH`).

@@ -22,7 +22,12 @@ pub enum ReplEvent {
     /// A complete value/`disp` block (inner text between the VAL sentinels).
     Value(String),
     /// A complete figure PNG reassembled from the FIG block.
-    Figure { runtime_id: i64, width: i64, height: i64, png: Vec<u8> },
+    Figure {
+        runtime_id: i64,
+        width: i64,
+        height: i64,
+        png: Vec<u8>,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -219,7 +224,11 @@ mod tests {
         const A: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
         let mut out = String::new();
         for chunk in data.chunks(3) {
-            let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+            let b = [
+                chunk[0],
+                *chunk.get(1).unwrap_or(&0),
+                *chunk.get(2).unwrap_or(&0),
+            ];
             out.push(A[(b[0] >> 2) as usize] as char);
             out.push(A[(((b[0] & 0x03) << 4) | (b[1] >> 4)) as usize] as char);
             if chunk.len() > 1 {
@@ -249,7 +258,10 @@ mod tests {
         assert_eq!(r.consume("a  1x1  double"), None);
         assert_eq!(r.consume("b  2x2  double"), None);
         let ev = r.consume(WS_END).unwrap();
-        assert_eq!(ev, ReplEvent::Workspace("a  1x1  double\nb  2x2  double".into()));
+        assert_eq!(
+            ev,
+            ReplEvent::Workspace("a  1x1  double\nb  2x2  double".into())
+        );
         // back to normal afterwards
         assert_eq!(r.consume("ok"), Some(ReplEvent::Console("ok".into())));
     }
@@ -276,7 +288,12 @@ mod tests {
         let ev = r.consume(FIG_END).unwrap();
         assert_eq!(
             ev,
-            ReplEvent::Figure { runtime_id: 7, width: 320, height: 240, png }
+            ReplEvent::Figure {
+                runtime_id: 7,
+                width: 320,
+                height: 240,
+                png
+            }
         );
     }
 
