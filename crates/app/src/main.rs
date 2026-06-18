@@ -193,6 +193,14 @@ fn build_main_window(app: &Application) {
     if std::env::var("MATFORGE_NORIGHT").is_ok() {
         app.vm.layout.workspace_visible.set(false);
     }
+    // Deterministically open the Search panel (what Ctrl+F does), so the e2e
+    // harness needn't rely on a keyboard accelerator landing under headless X.
+    if std::env::var("MATFORGE_SEARCH").is_ok() {
+        app.vm
+            .activity_bar
+            .select(matforge_core::viewmodels::ActivityItem::Search);
+        app.vm.layout.sidebar_visible.set(true);
+    }
     // Demo/verification: force a theme/accent at launch.
     if let Ok(theme) = std::env::var("MATFORGE_THEME") {
         app.vm
