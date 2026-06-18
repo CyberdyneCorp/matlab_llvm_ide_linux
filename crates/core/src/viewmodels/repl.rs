@@ -55,7 +55,12 @@ impl ReplViewModel {
             return None;
         }
         self.history.update(|h| h.push(trimmed.clone()));
-        self.transcript.update(|t| t.push(ConsoleMessage::new(ConsoleLevel::Command, format!(">> {trimmed}"))));
+        self.transcript.update(|t| {
+            t.push(ConsoleMessage::new(
+                ConsoleLevel::Command,
+                format!(">> {trimmed}"),
+            ))
+        });
         self.input.set(String::new());
         self.history_cursor.set(None);
         Some(trimmed)
@@ -67,7 +72,8 @@ impl ReplViewModel {
         match self.router.borrow_mut().consume(line) {
             Some(ReplEvent::Console(text)) => {
                 let level = classify(&text);
-                self.transcript.update(|t| t.push(ConsoleMessage::new(level, text)));
+                self.transcript
+                    .update(|t| t.push(ConsoleMessage::new(level, text)));
                 None
             }
             other => other,
@@ -159,7 +165,10 @@ mod tests {
     fn feed_classifies_error_lines() {
         let vm = ReplViewModel::new();
         vm.feed_line("error: undefined");
-        assert_eq!(vm.transcript.get().last().unwrap().level, ConsoleLevel::Error);
+        assert_eq!(
+            vm.transcript.get().last().unwrap().level,
+            ConsoleLevel::Error
+        );
     }
 
     #[test]
@@ -178,7 +187,10 @@ mod tests {
         let vm = ReplViewModel::new();
         vm.feed_line(VAL_BEGIN);
         vm.feed_line("1 2 3");
-        assert_eq!(vm.feed_line(VAL_END), Some(ReplEvent::Value("1 2 3".into())));
+        assert_eq!(
+            vm.feed_line(VAL_END),
+            Some(ReplEvent::Value("1 2 3".into()))
+        );
     }
 
     #[test]

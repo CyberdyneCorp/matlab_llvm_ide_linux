@@ -13,7 +13,9 @@ use std::f64::consts::PI;
 use std::rc::Rc;
 
 use gtk::prelude::*;
-use gtk::{cairo, Box as GtkBox, DrawingArea, Orientation, ScrolledWindow, TextView, TextWindowType};
+use gtk::{
+    cairo, Box as GtkBox, DrawingArea, Orientation, ScrolledWindow, TextView, TextWindowType,
+};
 
 use matforge_core::services::highlighter::Language;
 
@@ -78,7 +80,9 @@ pub fn build_code_view(
         let app = app.clone();
         buffer.connect_cursor_position_notify(move |b| {
             let it = b.iter_at_offset(b.cursor_position());
-            app.vm.status_bar.set_cursor(it.line() as usize + 1, it.line_offset() as usize + 1);
+            app.vm
+                .status_bar
+                .set_cursor(it.line() as usize + 1, it.line_offset() as usize + 1);
             update_caret_decorations(b);
         });
     }
@@ -104,7 +108,9 @@ pub fn build_code_view(
     // Redraw the gutter on scroll, on edits, and when bp/exec state changes.
     {
         let gutter = gutter.clone();
-        scroll.vadjustment().connect_value_changed(move |_| gutter.queue_draw());
+        scroll
+            .vadjustment()
+            .connect_value_changed(move |_| gutter.queue_draw());
     }
     {
         let gutter = gutter.clone();
@@ -164,7 +170,9 @@ pub fn build_code_view(
             // click in the gutter margin still maps to the right line).
             let (_, by) = view.window_to_buffer_coords(TextWindowType::Widget, 0, y as i32);
             let (iter, _) = view.line_at_y(by);
-            app.vm.editor.toggle_breakpoint(tab_id, iter.line() as usize + 1);
+            app.vm
+                .editor
+                .toggle_breakpoint(tab_id, iter.line() as usize + 1);
             app.refresh_breakpoints();
             gutter2.queue_draw();
         });
@@ -180,7 +188,9 @@ pub fn build_code_view(
         keys.connect_key_pressed(move |_c, keyval, _code, _state| {
             if keyval == gtk::gdk::Key::F9 {
                 let it = buffer.iter_at_offset(buffer.cursor_position());
-                app.vm.editor.toggle_breakpoint(tab_id, it.line() as usize + 1);
+                app.vm
+                    .editor
+                    .toggle_breakpoint(tab_id, it.line() as usize + 1);
                 app.refresh_breakpoints();
                 gutter3.queue_draw();
                 gtk::glib::Propagation::Stop
@@ -364,7 +374,9 @@ fn table_grid(header: &[String], rows: &[Vec<String>]) -> GtkBox {
     grid.add_css_class("mf-md-table");
     grid.set_column_homogeneous(false);
 
-    let cols = header.len().max(rows.iter().map(Vec::len).max().unwrap_or(0));
+    let cols = header
+        .len()
+        .max(rows.iter().map(Vec::len).max().unwrap_or(0));
     let cell = |text: &str, is_header: bool| -> gtk::Label {
         let label = gtk::Label::new(None);
         label.set_markup(&matforge_core::services::markdown::inline_markup(text));
@@ -435,15 +447,15 @@ fn mermaid_block(src: &str) -> GtkBox {
         Some(Diagram::Flow(graph)) => {
             Some(crate::mermaid_render::drawing_area(mermaid::layout(&graph)))
         }
-        Some(Diagram::Sequence(seq)) => {
-            Some(crate::mermaid_render::drawing_area_seq(mermaid::layout_sequence(&seq)))
-        }
-        Some(Diagram::Class(cd)) => {
-            Some(crate::mermaid_render::drawing_area_class(mermaid::layout_class(&cd)))
-        }
-        Some(Diagram::State(sm)) => {
-            Some(crate::mermaid_render::drawing_area_state(mermaid::layout_state(&sm)))
-        }
+        Some(Diagram::Sequence(seq)) => Some(crate::mermaid_render::drawing_area_seq(
+            mermaid::layout_sequence(&seq),
+        )),
+        Some(Diagram::Class(cd)) => Some(crate::mermaid_render::drawing_area_class(
+            mermaid::layout_class(&cd),
+        )),
+        Some(Diagram::State(sm)) => Some(crate::mermaid_render::drawing_area_state(
+            mermaid::layout_state(&sm),
+        )),
         None => None,
     };
     match area {
@@ -575,20 +587,36 @@ fn highlight_char(buffer: &gtk::TextBuffer, tag: &gtk::TextTag, offset: usize) {
     buffer.apply_tag(tag, &start, &end);
 }
 
-fn draw_gutter(ctx: &cairo::Context, height: i32, view: &TextView, app: &Rc<AppState>, tab_id: u64) {
+fn draw_gutter(
+    ctx: &cairo::Context,
+    height: i32,
+    view: &TextView,
+    app: &Rc<AppState>,
+    tab_id: u64,
+) {
     let (br, bg, bb) = crate::theme_css::current().editor_bg.to_unit();
     ctx.set_source_rgb(br, bg, bb);
     let _ = ctx.paint();
-    ctx.select_font_face("monospace", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+    ctx.select_font_face(
+        "monospace",
+        cairo::FontSlant::Normal,
+        cairo::FontWeight::Normal,
+    );
     ctx.set_font_size(11.0 * crate::theme_css::code_scale());
 
     let buffer = view.buffer();
-    let tab = app.vm.editor.tabs.with(|tabs| tabs.iter().find(|t| t.id == tab_id).cloned());
+    let tab = app
+        .vm
+        .editor
+        .tabs
+        .with(|tabs| tabs.iter().find(|t| t.id == tab_id).cloned());
     let Some(tab) = tab else { return };
     let line_count = buffer.line_count();
 
     for line in 0..line_count {
-        let Some(iter) = buffer.iter_at_line(line) else { continue };
+        let Some(iter) = buffer.iter_at_line(line) else {
+            continue;
+        };
         let (by, lh) = view.line_yrange(&iter);
         // Map the buffer y to an on-screen (widget window) y, accounting for scroll.
         let (_, wy) = view.buffer_to_window_coords(TextWindowType::Widget, 0, by);

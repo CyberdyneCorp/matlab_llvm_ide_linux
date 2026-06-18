@@ -68,7 +68,9 @@ impl FilePicker for FakeFilePicker {
         pop_front(&self.open_folder)
     }
     fn save_file(&self, suggested_name: &str) -> Option<PathBuf> {
-        self.save_suggestions.borrow_mut().push(suggested_name.to_string());
+        self.save_suggestions
+            .borrow_mut()
+            .push(suggested_name.to_string());
         pop_front(&self.save_file)
     }
 }

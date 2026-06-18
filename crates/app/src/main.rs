@@ -19,21 +19,21 @@ mod block_library;
 mod e2e;
 mod editor_view;
 mod flow_render;
-mod icons;
 mod flowchart_view;
 mod highlight;
+mod icons;
 mod mermaid_render;
 mod mflowlink_window;
 mod palette;
 mod plot_render;
-mod statechart_window;
 mod process;
 mod runner;
 mod services_impl;
 mod settings_view;
+mod statechart_window;
 mod theme_css;
-mod video_view;
 mod ui;
+mod video_view;
 
 use app_state::AppState;
 use services_impl::{GtkClipboard, NoopFilePicker};
@@ -80,10 +80,19 @@ fn build_main_window(app: &Application) {
         prefs.appearance.code_font.clone(),
     );
     // Restore panel visibility before the panels are built.
-    app.vm.layout.sidebar_visible.set(prefs.layout.sidebar_visible);
-    app.vm.layout.workspace_visible.set(prefs.layout.workspace_visible);
+    app.vm
+        .layout
+        .sidebar_visible
+        .set(prefs.layout.sidebar_visible);
+    app.vm
+        .layout
+        .workspace_visible
+        .set(prefs.layout.workspace_visible);
     app.vm.layout.plots_visible.set(prefs.layout.plots_visible);
-    app.vm.layout.flow_palette_visible.set(prefs.layout.flow_palette_visible);
+    app.vm
+        .layout
+        .flow_palette_visible
+        .set(prefs.layout.flow_palette_visible);
 
     ui::build(&window, app.clone());
 
@@ -94,9 +103,14 @@ fn build_main_window(app: &Application) {
         let app2 = app.clone();
         let last_video = app.vm.last_video.clone();
         last_video.subscribe(move |v| {
-            let Some(path) = v.as_ref().map(std::path::PathBuf::from) else { return };
+            let Some(path) = v.as_ref().map(std::path::PathBuf::from) else {
+                return;
+            };
             if path.exists() {
-                let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
                 app2.vm.toast.show(format!("🎬 Playing {name}"));
                 video_view::open(&app2, &path);
             }
@@ -140,8 +154,17 @@ fn build_main_window(app: &Application) {
     if std::env::var("MATFORGE_PLOT").is_ok() {
         use matforge_core::models::{PlotFigure, PlotKind};
         let xs: Vec<f64> = (0..240).map(|i| i as f64 * 0.05).collect();
-        let ys: Vec<f64> = xs.iter().map(|x| (x * 1.5).sin() * (-x * 0.1).exp()).collect();
-        app.vm.plots.add(PlotFigure::series(1, "damped sine", PlotKind::Line2D, xs, ys));
+        let ys: Vec<f64> = xs
+            .iter()
+            .map(|x| (x * 1.5).sin() * (-x * 0.1).exp())
+            .collect();
+        app.vm.plots.add(PlotFigure::series(
+            1,
+            "damped sine",
+            PlotKind::Line2D,
+            xs,
+            ys,
+        ));
     }
     if let Ok(kind) = std::env::var("MATFORGE_NEWFLOW") {
         ui::open_demo_flowchart(&app, kind == "signal");
@@ -172,10 +195,14 @@ fn build_main_window(app: &Application) {
     }
     // Demo/verification: force a theme/accent at launch.
     if let Ok(theme) = std::env::var("MATFORGE_THEME") {
-        app.vm.appearance.set_theme(matforge_core::theme::ThemeId::from_key(&theme));
+        app.vm
+            .appearance
+            .set_theme(matforge_core::theme::ThemeId::from_key(&theme));
     }
     if let Ok(accent) = std::env::var("MATFORGE_ACCENT") {
-        app.vm.appearance.set_accent(matforge_core::theme::Accent::from_key(&accent));
+        app.vm
+            .appearance
+            .set_accent(matforge_core::theme::Accent::from_key(&accent));
     }
     if std::env::var("MATFORGE_ZEN").is_ok() {
         app.vm.layout.zen.set(true);
@@ -284,9 +311,16 @@ fn save_prefs(app: &Rc<AppState>) {
     }
 
     prefs.open_tabs = app.vm.editor.tabs.with(|ts| {
-        ts.iter().filter_map(|t| t.url.as_ref().map(|u| u.display().to_string())).collect()
+        ts.iter()
+            .filter_map(|t| t.url.as_ref().map(|u| u.display().to_string()))
+            .collect()
     });
-    prefs.last_folder = app.vm.project.root_url.get().map(|u| u.display().to_string());
+    prefs.last_folder = app
+        .vm
+        .project
+        .root_url
+        .get()
+        .map(|u| u.display().to_string());
     if let Some(folder) = prefs.last_folder.clone() {
         prefs.push_recent(folder);
     }

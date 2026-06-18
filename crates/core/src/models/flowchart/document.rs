@@ -36,7 +36,22 @@ impl FlowchartDocument {
     /// Effective dialect — `settings.kind` resolved through the control-flow
     /// default (both `nil` and explicit `control_flow` read as control-flow).
     pub fn schema_kind(&self) -> SchemaKind {
-        self.settings.as_ref().and_then(|s| s.kind).unwrap_or(SchemaKind::ControlFlow)
+        self.settings
+            .as_ref()
+            .and_then(|s| s.kind)
+            .unwrap_or(SchemaKind::ControlFlow)
+    }
+
+    /// Block ids on an algebraic loop in the entry flow. Empty for non
+    /// signal-flow documents — the concept only applies to signal diagrams.
+    pub fn algebraic_loop_nodes(&self) -> std::collections::BTreeSet<String> {
+        if self.schema_kind() != SchemaKind::SignalFlow {
+            return std::collections::BTreeSet::new();
+        }
+        self.flows
+            .first()
+            .map(super::analysis::algebraic_loop_nodes)
+            .unwrap_or_default()
     }
 
     /// Fresh empty document for the given dialect.
@@ -69,7 +84,7 @@ impl FlowchartDocument {
     /// Historical control-flow document: Start → End by one control edge.
     fn empty_control_flow(name: &str) -> FlowchartDocument {
         use super::edge::{EdgeEndpoint, EdgeKind};
-        use super::node::{FlowUi, NodeData, NodeKind, FlowPosition};
+        use super::node::{FlowPosition, FlowUi, NodeData, NodeKind};
         let start = FlowNode::new(
             "main_start",
             NodeKind::Start,
@@ -99,7 +114,10 @@ impl FlowchartDocument {
             FlowSignature::default(),
             vec![start, end],
             vec![edge],
-            Some(FlowLayout { direction: Some("TB".into()), zoom: Some(1.0) }),
+            Some(FlowLayout {
+                direction: Some("TB".into()),
+                zoom: Some(1.0),
+            }),
         );
         Self::base(name, FlowchartSettings::control_flow(), vec![flow])
     }
@@ -112,7 +130,10 @@ impl FlowchartDocument {
             FlowSignature::default(),
             vec![],
             vec![],
-            Some(FlowLayout { direction: Some("LR".into()), zoom: Some(1.0) }),
+            Some(FlowLayout {
+                direction: Some("LR".into()),
+                zoom: Some(1.0),
+            }),
         );
         let mut settings = FlowchartSettings::control_flow();
         settings.kind = Some(SchemaKind::StateChart);
@@ -127,7 +148,10 @@ impl FlowchartDocument {
             FlowSignature::default(),
             vec![],
             vec![],
-            Some(FlowLayout { direction: Some("LR".into()), zoom: Some(1.0) }),
+            Some(FlowLayout {
+                direction: Some("LR".into()),
+                zoom: Some(1.0),
+            }),
         );
         let mut settings = FlowchartSettings::control_flow();
         settings.kind = Some(SchemaKind::SignalFlow);
@@ -153,11 +177,23 @@ pub struct FlowchartMetadata {
 /// Per-document defaults the compiler reads. All fields optional.
 #[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
 pub struct FlowchartSettings {
-    #[serde(rename = "columnMajor", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "columnMajor",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub column_major: Option<bool>,
-    #[serde(rename = "defaultNumericType", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "defaultNumericType",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub default_numeric_type: Option<String>,
-    #[serde(rename = "sourceLanguage", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "sourceLanguage",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub source_language: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub kind: Option<SchemaKind>,
@@ -192,8 +228,11 @@ pub enum SchemaKind {
 }
 
 impl SchemaKind {
-    pub const ALL: [SchemaKind; 3] =
-        [SchemaKind::ControlFlow, SchemaKind::SignalFlow, SchemaKind::StateChart];
+    pub const ALL: [SchemaKind; 3] = [
+        SchemaKind::ControlFlow,
+        SchemaKind::SignalFlow,
+        SchemaKind::StateChart,
+    ];
 }
 
 /// Solver config for signal-flow documents. All fields optional.
@@ -215,14 +254,23 @@ pub struct SolverConfig {
     pub rel_tol: Option<f64>,
     #[serde(rename = "absTol", skip_serializing_if = "Option::is_none", default)]
     pub abs_tol: Option<f64>,
-    #[serde(rename = "zeroCrossing", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "zeroCrossing",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub zero_crossing: Option<bool>,
-    #[serde(rename = "algebraicLoopMethod", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "algebraicLoopMethod",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub algebraic_loop_method: Option<AlgebraicLoopMethod>,
 }
 
 impl SolverConfig {
-    fn default_variable_step() -> SolverConfig {
+    /// The Simulink-like default: variable-step `ode45`, 0–10 s, standard tols.
+    pub fn default_variable_step() -> SolverConfig {
         SolverConfig {
             solver_type: Some(SolverType::VariableStep),
             algorithm: Some(SolverAlgorithm::Ode45),

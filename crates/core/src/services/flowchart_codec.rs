@@ -33,13 +33,14 @@ impl Error for FlowchartCodecError {}
 /// Pretty-printed encode so saved files diff cleanly in git. Struct field order
 /// and `BTreeMap` map fields make the output deterministic across runs.
 pub fn encode_string(document: &FlowchartDocument) -> Result<String, FlowchartCodecError> {
-    serde_json::to_string_pretty(document).map_err(|e| FlowchartCodecError::InvalidJson(e.to_string()))
+    serde_json::to_string_pretty(document)
+        .map_err(|e| FlowchartCodecError::InvalidJson(e.to_string()))
 }
 
 /// Decode + validate from a UTF-8 string.
 pub fn decode_str(string: &str) -> Result<FlowchartDocument, FlowchartCodecError> {
-    let doc: FlowchartDocument =
-        serde_json::from_str(string).map_err(|e| FlowchartCodecError::InvalidJson(e.to_string()))?;
+    let doc: FlowchartDocument = serde_json::from_str(string)
+        .map_err(|e| FlowchartCodecError::InvalidJson(e.to_string()))?;
     validate(&doc)?;
     Ok(doc)
 }
@@ -105,7 +106,9 @@ mod tests {
         let json = r#"{"schema":"other.schema","version":"0.2.0","flows":[]}"#;
         assert_eq!(
             decode_str(json),
-            Err(FlowchartCodecError::UnsupportedSchema("other.schema".into()))
+            Err(FlowchartCodecError::UnsupportedSchema(
+                "other.schema".into()
+            ))
         );
     }
 
