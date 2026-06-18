@@ -16,12 +16,27 @@ use serde_json::Value;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ChartEvent {
-    StateEnter { id: String },
-    StateExit { id: String },
-    TransitionFired { id: String, src: String, dst: String },
-    SuperStepBegin { iteration: i64 },
-    SuperStepEnd { iteration: i64, quiescent: bool },
-    Other { kind: String },
+    StateEnter {
+        id: String,
+    },
+    StateExit {
+        id: String,
+    },
+    TransitionFired {
+        id: String,
+        src: String,
+        dst: String,
+    },
+    SuperStepBegin {
+        iteration: i64,
+    },
+    SuperStepEnd {
+        iteration: i64,
+        quiescent: bool,
+    },
+    Other {
+        kind: String,
+    },
 }
 
 impl ChartEvent {
@@ -31,9 +46,17 @@ impl ChartEvent {
             ChartEvent::StateEnter { id } => format!("→ enter {id}"),
             ChartEvent::StateExit { id } => format!("← exit {id}"),
             ChartEvent::TransitionFired { src, dst, .. } => format!("⇒ {src} → {dst}"),
-            ChartEvent::SuperStepBegin { iteration } => format!("· super-step begin (i={iteration})"),
-            ChartEvent::SuperStepEnd { iteration, quiescent } => {
-                format!("· super-step end (i={iteration}{})", if *quiescent { ", quiescent" } else { "" })
+            ChartEvent::SuperStepBegin { iteration } => {
+                format!("· super-step begin (i={iteration})")
+            }
+            ChartEvent::SuperStepEnd {
+                iteration,
+                quiescent,
+            } => {
+                format!(
+                    "· super-step end (i={iteration}{})",
+                    if *quiescent { ", quiescent" } else { "" }
+                )
             }
             ChartEvent::Other { kind } => format!("· {kind}"),
         }
@@ -74,12 +97,16 @@ pub fn parse_chart_event(line: &str) -> Option<ChartEvent> {
             src: s("src").unwrap_or_default(),
             dst: s("dst").unwrap_or_default(),
         },
-        "superStepBegin" => ChartEvent::SuperStepBegin { iteration: i("iteration").unwrap_or(0) },
+        "superStepBegin" => ChartEvent::SuperStepBegin {
+            iteration: i("iteration").unwrap_or(0),
+        },
         "superStepEnd" => ChartEvent::SuperStepEnd {
             iteration: i("iteration").unwrap_or(0),
             quiescent: v.get("quiescent").and_then(Value::as_bool).unwrap_or(false),
         },
-        other => ChartEvent::Other { kind: other.to_string() },
+        other => ChartEvent::Other {
+            kind: other.to_string(),
+        },
     })
 }
 
@@ -91,11 +118,15 @@ mod tests {
     fn parses_state_events() {
         assert_eq!(
             parse_chart_event(r#"{"kind":"stateEnter","id":"Charge"}"#),
-            Some(ChartEvent::StateEnter { id: "Charge".into() })
+            Some(ChartEvent::StateEnter {
+                id: "Charge".into()
+            })
         );
         assert_eq!(
             parse_chart_event(r#"{"kind":"stateExit","id":"Charge"}"#),
-            Some(ChartEvent::StateExit { id: "Charge".into() })
+            Some(ChartEvent::StateExit {
+                id: "Charge".into()
+            })
         );
     }
 
@@ -105,24 +136,50 @@ mod tests {
             r#"{"kind":"transitionFired","id":"t1","src":"Charge","dst":"Discharge"}"#,
         )
         .unwrap();
-        assert_eq!(t, ChartEvent::TransitionFired { id: "t1".into(), src: "Charge".into(), dst: "Discharge".into() });
+        assert_eq!(
+            t,
+            ChartEvent::TransitionFired {
+                id: "t1".into(),
+                src: "Charge".into(),
+                dst: "Discharge".into()
+            }
+        );
         assert_eq!(
             parse_chart_event(r#"{"kind":"superStepEnd","iteration":2,"quiescent":true}"#),
-            Some(ChartEvent::SuperStepEnd { iteration: 2, quiescent: true })
+            Some(ChartEvent::SuperStepEnd {
+                iteration: 2,
+                quiescent: true
+            })
         );
     }
 
     #[test]
     fn entered_exited_helpers() {
-        assert_eq!(ChartEvent::StateEnter { id: "A".into() }.entered_state(), Some("A"));
-        assert_eq!(ChartEvent::StateExit { id: "A".into() }.exited_state(), Some("A"));
-        assert_eq!(ChartEvent::SuperStepBegin { iteration: 0 }.entered_state(), None);
+        assert_eq!(
+            ChartEvent::StateEnter { id: "A".into() }.entered_state(),
+            Some("A")
+        );
+        assert_eq!(
+            ChartEvent::StateExit { id: "A".into() }.exited_state(),
+            Some("A")
+        );
+        assert_eq!(
+            ChartEvent::SuperStepBegin { iteration: 0 }.entered_state(),
+            None
+        );
     }
 
     #[test]
     fn summary_is_human_readable() {
-        assert_eq!(ChartEvent::StateEnter { id: "X".into() }.summary(), "→ enter X");
-        let t = ChartEvent::TransitionFired { id: "t".into(), src: "A".into(), dst: "B".into() };
+        assert_eq!(
+            ChartEvent::StateEnter { id: "X".into() }.summary(),
+            "→ enter X"
+        );
+        let t = ChartEvent::TransitionFired {
+            id: "t".into(),
+            src: "A".into(),
+            dst: "B".into(),
+        };
         assert_eq!(t.summary(), "⇒ A → B");
     }
 
@@ -137,7 +194,9 @@ mod tests {
     fn unknown_kind_falls_back_to_other() {
         assert_eq!(
             parse_chart_event(r#"{"kind":"customEvent","foo":1}"#),
-            Some(ChartEvent::Other { kind: "customEvent".into() })
+            Some(ChartEvent::Other {
+                kind: "customEvent".into()
+            })
         );
     }
 }

@@ -23,13 +23,13 @@ real `matlabc` to an artifact tab, runs programs, evaluates live REPL commands
 with workspace sync, renders flowchart `.mflow` documents on a Cairo canvas, and
 draws plots — all driven by the tested MVVM core.
 
-> **Known external blocker — `matlabc -dap`:** the DAP debugger client is
-> complete and performs the correct `initialize → launch → setBreakpoints →
-> configurationDone` handshake, but the shipped `matlabc -dap` **segfaults**
-> before emitting a `stopped` event (and references a stale source path), so
-> stepping/locals can't yet be exercised end-to-end. The IDE detects the adapter
-> crash and tears the session down gracefully. This is a compiler-side bug, not
-> an IDE issue; once `matlabc -dap` is fixed, the existing UI works unchanged.
+> **`.m` debugger (`matlabc -dap`) — live.** The earlier launch crash
+> (`matlabc -dap` aborting before the first `stopped` event, from duplicate
+> sibling-`.m` symbols) is fixed upstream. The DAP client now drives
+> `initialize → launch → setBreakpoints → configurationDone` to a verified
+> breakpoint and a `stopped` event end-to-end, so stepping / call stack /
+> locals work. Covered by the `dap_reaches_stopped_at_breakpoint` integration
+> test (gated on a real `matlabc`).
 
 ## Remaining (architecture in place; UI to build)
 

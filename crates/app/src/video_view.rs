@@ -25,7 +25,9 @@ pub fn open(app: &Rc<AppState>, path: &Path) {
     let frames: Vec<gtk::gdk::Texture> = match decode_frames(path) {
         Some(f) if !f.is_empty() => f,
         _ => {
-            app.vm.toast.show("Could not decode the video (needs ffmpeg)");
+            app.vm
+                .toast
+                .show("Could not decode the video (needs ffmpeg)");
             return;
         }
     };
@@ -33,7 +35,10 @@ pub fn open(app: &Rc<AppState>, path: &Path) {
     let n = frames.len();
     let frames = Rc::new(frames);
 
-    let name = path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = path
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let window = Window::builder()
         .title(format!("Video — {name}"))
         .default_width(760)
@@ -159,9 +164,14 @@ pub fn open(app: &Rc<AppState>, path: &Path) {
 fn probe_fps(path: &Path) -> Option<f64> {
     let out = Command::new("ffprobe")
         .args([
-            "-v", "error", "-select_streams", "v:0",
-            "-show_entries", "stream=avg_frame_rate",
-            "-of", "default=nw=1:nk=1",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=avg_frame_rate",
+            "-of",
+            "default=nw=1:nk=1",
         ])
         .arg(path)
         .output()
@@ -199,5 +209,10 @@ fn decode_frames(path: &Path) -> Option<Vec<gtk::gdk::Texture>> {
         .filter(|p| p.extension().is_some_and(|e| e == "png"))
         .collect();
     files.sort();
-    Some(files.iter().filter_map(|p| gtk::gdk::Texture::from_filename(p).ok()).collect())
+    Some(
+        files
+            .iter()
+            .filter_map(|p| gtk::gdk::Texture::from_filename(p).ok())
+            .collect(),
+    )
 }

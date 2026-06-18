@@ -87,7 +87,12 @@ pub fn parse_matrix(text: &str) -> (usize, usize, Vec<Vec<f64>>) {
             .filter(|t| !t.is_empty())
             // Rust parses "NaN"/"inf" as real floats; the reference treats any
             // non-finite token as 0.0 (obvious in the heatmap, fine for preview).
-            .map(|t| t.parse::<f64>().ok().filter(|v| v.is_finite()).unwrap_or(0.0))
+            .map(|t| {
+                t.parse::<f64>()
+                    .ok()
+                    .filter(|v| v.is_finite())
+                    .unwrap_or(0.0)
+            })
             .collect();
         if tokens.is_empty() {
             continue;
@@ -176,7 +181,8 @@ mod tests {
 
     #[test]
     fn stitches_column_groups() {
-        let text = "  Columns 1 through 3\n  1  2  3\n  4  5  6\n  Columns 4 through 5\n  7  8\n  9  10";
+        let text =
+            "  Columns 1 through 3\n  1  2  3\n  4  5  6\n  Columns 4 through 5\n  7  8\n  9  10";
         let (rows, cols, cells) = parse_matrix(text);
         assert_eq!((rows, cols), (2, 5));
         assert_eq!(cells[0], vec![1.0, 2.0, 3.0, 7.0, 8.0]);

@@ -59,7 +59,9 @@ pub fn draw_figure(
         (0..figure.ys.len()).map(|i| i as f64).collect()
     };
     // Trace animation: reveal only the first `n` points of each series.
-    let n = reveal.map(|r| r.clamp(1, figure.ys.len())).unwrap_or(figure.ys.len());
+    let n = reveal
+        .map(|r| r.clamp(1, figure.ys.len()))
+        .unwrap_or(figure.ys.len());
     let (xs_r, ys_r) = (&xs[..n.min(xs.len())], &figure.ys[..n.min(figure.ys.len())]);
     let plot_w = (w - 2.0 * MARGIN).max(1.0);
     let plot_h = (h - 2.0 * MARGIN).max(1.0);
@@ -86,7 +88,13 @@ pub fn draw_figure(
             if !figure.ys2.is_empty() {
                 let m = n.min(figure.ys2.len());
                 let xs2: Vec<f64> = (0..m).map(|i| i as f64).collect();
-                draw_line(ctx, &xs2, &figure.ys2[..m], &map, crate::theme_css::current().green);
+                draw_line(
+                    ctx,
+                    &xs2,
+                    &figure.ys2[..m],
+                    &map,
+                    crate::theme_css::current().green,
+                );
             }
         }
     }
@@ -106,7 +114,11 @@ pub fn draw_figure(
 
     // Title.
     set_color(ctx, crate::theme_css::current().text_primary);
-    ctx.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Bold);
+    ctx.select_font_face(
+        "sans-serif",
+        cairo::FontSlant::Normal,
+        cairo::FontWeight::Bold,
+    );
     ctx.set_font_size(12.0);
     ctx.move_to(MARGIN, 20.0);
     ctx.show_text(&figure.title).ok();
@@ -124,7 +136,9 @@ fn draw_hover(
     hx: f64,
 ) {
     let (data_x, _) = data_at_pixel(view, w, h, hx, MARGIN);
-    let Some((nx, ny)) = figure.nearest(data_x) else { return };
+    let Some((nx, ny)) = figure.nearest(data_x) else {
+        return;
+    };
     let (mx, my) = map(nx, ny);
     if !in_plot_area(w, h, mx, my) {
         return;
@@ -148,7 +162,11 @@ fn draw_hover(
 
     // Readout chip.
     let label = format!("x {}   y {}", fmt_num(nx), fmt_num(ny));
-    ctx.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+    ctx.select_font_face(
+        "sans-serif",
+        cairo::FontSlant::Normal,
+        cairo::FontWeight::Normal,
+    );
     ctx.set_font_size(11.0);
     let tw = ctx.text_extents(&label).map(|e| e.width()).unwrap_or(0.0);
     let (bw, bh) = (tw + 12.0, 18.0);
@@ -170,7 +188,7 @@ fn fmt_num(v: f64) -> String {
         return "0".into();
     }
     let a = v.abs();
-    let s = if a >= 1000.0 || a < 0.001 {
+    let s = if !(0.001..1000.0).contains(&a) {
         format!("{v:.3e}")
     } else {
         format!("{v:.4}")
@@ -216,7 +234,11 @@ pub fn draw_surface(ctx: &cairo::Context, w: f64, h: f64, figure: &PlotFigure, c
     if !zmin.is_finite() {
         return;
     }
-    let zspan = if (zmax - zmin).abs() < 1e-12 { 1.0 } else { zmax - zmin };
+    let zspan = if (zmax - zmin).abs() < 1e-12 {
+        1.0
+    } else {
+        zmax - zmin
+    };
 
     let (cx, cy) = (w / 2.0, h / 2.0 + 8.0);
     let radius = (w.min(h) * 0.42).max(1.0);
@@ -234,6 +256,7 @@ pub fn draw_surface(ctx: &cairo::Context, w: f64, h: f64, figure: &PlotFigure, c
 
     // Build quads with an averaged depth + height, then sort far → near.
     let (cold, hot) = (t.blue, t.red);
+    #[allow(clippy::type_complexity)]
     let mut quads: Vec<(f64, [(f64, f64); 4], f64)> = Vec::with_capacity((nr - 1) * (nc - 1));
     for ri in 0..nr - 1 {
         for ci in 0..nc - 1 {
@@ -244,10 +267,17 @@ pub fn draw_surface(ctx: &cairo::Context, w: f64, h: f64, figure: &PlotFigure, c
                 project(ri + 1, ci),
             ];
             let depth = p.iter().map(|q| q.2).sum::<f64>() / 4.0;
-            let zavg = (grid[rs[ri]][cs[ci]] + grid[rs[ri]][cs[ci + 1]]
-                + grid[rs[ri + 1]][cs[ci]] + grid[rs[ri + 1]][cs[ci + 1]])
+            let zavg = (grid[rs[ri]][cs[ci]]
+                + grid[rs[ri]][cs[ci + 1]]
+                + grid[rs[ri + 1]][cs[ci]]
+                + grid[rs[ri + 1]][cs[ci + 1]])
                 / 4.0;
-            let pts = [(p[0].0, p[0].1), (p[1].0, p[1].1), (p[2].0, p[2].1), (p[3].0, p[3].1)];
+            let pts = [
+                (p[0].0, p[0].1),
+                (p[1].0, p[1].1),
+                (p[2].0, p[2].1),
+                (p[3].0, p[3].1),
+            ];
             quads.push((depth, pts, (zavg - zmin) / zspan));
         }
     }
@@ -269,14 +299,19 @@ pub fn draw_surface(ctx: &cairo::Context, w: f64, h: f64, figure: &PlotFigure, c
 
     // Title + orientation hint.
     set_color(ctx, t.text_primary);
-    ctx.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Bold);
+    ctx.select_font_face(
+        "sans-serif",
+        cairo::FontSlant::Normal,
+        cairo::FontWeight::Bold,
+    );
     ctx.set_font_size(12.0);
     ctx.move_to(MARGIN, 20.0);
     ctx.show_text(&figure.title).ok();
     set_color(ctx, t.text_muted);
     ctx.set_font_size(10.0);
     ctx.move_to(MARGIN, h - 12.0);
-    ctx.show_text("drag to orbit · scroll to zoom · double-click to reset").ok();
+    ctx.show_text("drag to orbit · scroll to zoom · double-click to reset")
+        .ok();
 }
 
 /// Drop consecutive duplicates from an ascending index list.
@@ -314,11 +349,18 @@ pub fn draw_thumbnail(ctx: &cairo::Context, w: f64, h: f64, figure: &PlotFigure)
     let plot_w = (w - 2.0 * pad).max(1.0);
     let plot_h = (h - 2.0 * pad).max(1.0);
     let map = |x: f64, y: f64| -> (f64, f64) {
-        (pad + norm(x, x_min, x_max) * plot_w, pad + (1.0 - norm(y, y_min, y_max)) * plot_h)
+        (
+            pad + norm(x, x_min, x_max) * plot_w,
+            pad + (1.0 - norm(y, y_min, y_max)) * plot_h,
+        )
     };
     match figure.kind {
-        PlotKind::Scatter => draw_scatter(ctx, &xs, &figure.ys, &map, crate::theme_css::current().blue),
-        PlotKind::Bar | PlotKind::Histogram => draw_bars(ctx, &figure.ys, x_min, x_max, &map, plot_w),
+        PlotKind::Scatter => {
+            draw_scatter(ctx, &xs, &figure.ys, &map, crate::theme_css::current().blue)
+        }
+        PlotKind::Bar | PlotKind::Histogram => {
+            draw_bars(ctx, &figure.ys, x_min, x_max, &map, plot_w)
+        }
         _ => draw_line(ctx, &xs, &figure.ys, &map, crate::theme_css::current().blue),
     }
 }
@@ -330,7 +372,11 @@ fn draw_axes(ctx: &cairo::Context, w: f64, h: f64, x_min: f64, x_max: f64, y_min
 
     // Faint horizontal gridlines + y tick labels at each division.
     let (gr, gg, gb) = t.border.to_unit();
-    ctx.select_font_face("monospace", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+    ctx.select_font_face(
+        "monospace",
+        cairo::FontSlant::Normal,
+        cairo::FontWeight::Normal,
+    );
     ctx.set_font_size(9.0);
     for i in 0..=DIV {
         let frac = i as f64 / DIV as f64;
@@ -367,10 +413,17 @@ fn draw_axes(ctx: &cairo::Context, w: f64, h: f64, x_min: f64, x_max: f64, y_min
 /// Two-entry legend in the top-right (series 1 = blue, series 2 = green).
 fn draw_legend(ctx: &cairo::Context, w: f64, source: Option<&str>) {
     let entries = [
-        (crate::theme_css::current().blue, source.unwrap_or("series 1")),
+        (
+            crate::theme_css::current().blue,
+            source.unwrap_or("series 1"),
+        ),
         (crate::theme_css::current().green, "series 2"),
     ];
-    ctx.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+    ctx.select_font_face(
+        "sans-serif",
+        cairo::FontSlant::Normal,
+        cairo::FontWeight::Normal,
+    );
     ctx.set_font_size(10.0);
     let x = w - MARGIN - 92.0;
     let mut y = MARGIN + 6.0;
@@ -385,7 +438,13 @@ fn draw_legend(ctx: &cairo::Context, w: f64, source: Option<&str>) {
     }
 }
 
-fn draw_line(ctx: &cairo::Context, xs: &[f64], ys: &[f64], map: &impl Fn(f64, f64) -> (f64, f64), color: Rgb) {
+fn draw_line(
+    ctx: &cairo::Context,
+    xs: &[f64],
+    ys: &[f64],
+    map: &impl Fn(f64, f64) -> (f64, f64),
+    color: Rgb,
+) {
     set_color(ctx, color);
     ctx.set_line_width(1.8);
     for (i, (&x, &y)) in xs.iter().zip(ys).enumerate() {
@@ -399,7 +458,13 @@ fn draw_line(ctx: &cairo::Context, xs: &[f64], ys: &[f64], map: &impl Fn(f64, f6
     ctx.stroke().ok();
 }
 
-fn draw_scatter(ctx: &cairo::Context, xs: &[f64], ys: &[f64], map: &impl Fn(f64, f64) -> (f64, f64), color: Rgb) {
+fn draw_scatter(
+    ctx: &cairo::Context,
+    xs: &[f64],
+    ys: &[f64],
+    map: &impl Fn(f64, f64) -> (f64, f64),
+    color: Rgb,
+) {
     set_color(ctx, color);
     for (&x, &y) in xs.iter().zip(ys) {
         let (px, py) = map(x, y);
@@ -408,7 +473,14 @@ fn draw_scatter(ctx: &cairo::Context, xs: &[f64], ys: &[f64], map: &impl Fn(f64,
     }
 }
 
-fn draw_bars(ctx: &cairo::Context, ys: &[f64], _x_min: f64, _x_max: f64, map: &impl Fn(f64, f64) -> (f64, f64), plot_w: f64) {
+fn draw_bars(
+    ctx: &cairo::Context,
+    ys: &[f64],
+    _x_min: f64,
+    _x_max: f64,
+    map: &impl Fn(f64, f64) -> (f64, f64),
+    plot_w: f64,
+) {
     set_color(ctx, crate::theme_css::current().cyan);
     let n = ys.len().max(1);
     let bw = (plot_w / n as f64) * 0.7;
@@ -422,7 +494,13 @@ fn draw_bars(ctx: &cairo::Context, ys: &[f64], _x_min: f64, _x_max: f64, map: &i
     }
 }
 
-fn draw_area(ctx: &cairo::Context, xs: &[f64], ys: &[f64], map: &impl Fn(f64, f64) -> (f64, f64), h: f64) {
+fn draw_area(
+    ctx: &cairo::Context,
+    xs: &[f64],
+    ys: &[f64],
+    map: &impl Fn(f64, f64) -> (f64, f64),
+    h: f64,
+) {
     ctx.set_source_rgba(
         rgb_unit(crate::theme_css::current().magenta).0,
         rgb_unit(crate::theme_css::current().magenta).1,
@@ -453,7 +531,11 @@ fn draw_area(ctx: &cairo::Context, xs: &[f64], ys: &[f64], map: &impl Fn(f64, f6
 pub fn draw_empty(ctx: &cairo::Context, w: f64, h: f64) {
     fill(ctx, crate::theme_css::current().editor_bg, 0.0, 0.0, w, h);
     set_color(ctx, crate::theme_css::current().text_muted);
-    ctx.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+    ctx.select_font_face(
+        "sans-serif",
+        cairo::FontSlant::Normal,
+        cairo::FontWeight::Normal,
+    );
     ctx.set_font_size(12.0);
     let msg = "No figures yet.";
     let ext = ctx.text_extents(msg).map(|e| e.width()).unwrap_or(0.0);
@@ -471,17 +553,31 @@ pub fn draw_heatmap(ctx: &cairo::Context, w: f64, h: f64, m: &MatrixView) {
     if m.rows == 0 || m.cols == 0 {
         return;
     }
-    let Some((lo, hi)) = m.value_range() else { return };
+    let Some((lo, hi)) = m.value_range() else {
+        return;
+    };
     let bar_w = 14.0;
     let grid_w = (w - bar_w - 12.0).max(1.0);
     let cw = grid_w / m.cols as f64;
     let ch = (h / m.rows as f64).max(1.0);
-    let (cold, hot) = (crate::theme_css::current().blue, crate::theme_css::current().red);
+    let (cold, hot) = (
+        crate::theme_css::current().blue,
+        crate::theme_css::current().red,
+    );
     for (r, row) in m.cells.iter().enumerate() {
         for (c, &v) in row.iter().enumerate() {
-            let t = if (hi - lo).abs() < 1e-12 { 0.5 } else { (v - lo) / (hi - lo) };
+            let t = if (hi - lo).abs() < 1e-12 {
+                0.5
+            } else {
+                (v - lo) / (hi - lo)
+            };
             set_color(ctx, cold.blend(hot, t));
-            ctx.rectangle(c as f64 * cw, r as f64 * ch, (cw - 1.0).max(1.0), (ch - 1.0).max(1.0));
+            ctx.rectangle(
+                c as f64 * cw,
+                r as f64 * ch,
+                (cw - 1.0).max(1.0),
+                (ch - 1.0).max(1.0),
+            );
             ctx.fill().ok();
         }
     }
@@ -510,7 +606,9 @@ pub fn draw_png_frame(ctx: &cairo::Context, w: f64, h: f64, png: &[u8]) {
 /// Decode PNG bytes with GDK and paint them centered + scaled to fit.
 fn blit_png(ctx: &cairo::Context, w: f64, h: f64, png: &[u8]) -> bool {
     let bytes = gtk::glib::Bytes::from(png);
-    let Ok(texture) = gtk::gdk::Texture::from_bytes(&bytes) else { return false };
+    let Ok(texture) = gtk::gdk::Texture::from_bytes(&bytes) else {
+        return false;
+    };
     let (iw, ih) = (texture.width(), texture.height());
     if iw <= 0 || ih <= 0 {
         return false;
@@ -590,7 +688,12 @@ mod tests {
 
     #[test]
     fn data_at_pixel_inverts_forward_map() {
-        let view = PlotView { x_min: -2.0, x_max: 6.0, y_min: 1.0, y_max: 9.0 };
+        let view = PlotView {
+            x_min: -2.0,
+            x_max: 6.0,
+            y_min: 1.0,
+            y_max: 9.0,
+        };
         let (w, h) = (800.0, 500.0);
         for &(dx, dy) in &[(-2.0, 1.0), (0.0, 5.0), (3.5, 7.25), (6.0, 9.0)] {
             let (px, py) = forward(view, w, h, dx, dy);
@@ -640,7 +743,12 @@ mod tests {
     fn draw_figure_paints_each_2d_kind() {
         let xs: Vec<f64> = (0..24).map(|i| i as f64).collect();
         let ys: Vec<f64> = xs.iter().map(|x| (x * 0.3).sin()).collect();
-        for kind in [PlotKind::Line2D, PlotKind::Scatter, PlotKind::Bar, PlotKind::Spectrum] {
+        for kind in [
+            PlotKind::Line2D,
+            PlotKind::Scatter,
+            PlotKind::Bar,
+            PlotKind::Spectrum,
+        ] {
             let fig = PlotFigure::series(1, "t", kind, xs.clone(), ys.clone());
             assert!(
                 rendered_has_content(|ctx, w, h| draw_figure(ctx, w, h, &fig, None, None, None)),
@@ -655,17 +763,34 @@ mod tests {
         let ys: Vec<f64> = xs.iter().map(|x| (x * 0.3).sin()).collect();
         let fig = PlotFigure::series(1, "t", PlotKind::Line2D, xs, ys);
         // Reveal only the first 5 points (animation/trace-reveal path).
-        assert!(rendered_has_content(|ctx, w, h| draw_figure(ctx, w, h, &fig, None, None, Some(5))));
+        assert!(rendered_has_content(|ctx, w, h| draw_figure(
+            ctx,
+            w,
+            h,
+            &fig,
+            None,
+            None,
+            Some(5)
+        )));
     }
 
     #[test]
     fn draw_surface_and_heatmap_paint() {
-        let grid: Vec<Vec<f64>> =
-            (0..8).map(|r| (0..8).map(|c| ((r * c) as f64).sin()).collect()).collect();
+        let grid: Vec<Vec<f64>> = (0..8)
+            .map(|r| (0..8).map(|c| ((r * c) as f64).sin()).collect())
+            .collect();
         let fig = PlotFigure::surface(1, "s", grid);
-        assert!(rendered_has_content(|ctx, w, h| draw_surface(ctx, w, h, &fig, SurfaceCamera::default())));
+        assert!(rendered_has_content(|ctx, w, h| draw_surface(
+            ctx,
+            w,
+            h,
+            &fig,
+            SurfaceCamera::default()
+        )));
 
         let m = MatrixView::new("m", vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0]]);
-        assert!(rendered_has_content(|ctx, w, h| draw_heatmap(ctx, w, h, &m)));
+        assert!(rendered_has_content(|ctx, w, h| draw_heatmap(
+            ctx, w, h, &m
+        )));
     }
 }

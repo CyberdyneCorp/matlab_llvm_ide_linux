@@ -29,7 +29,11 @@ impl Rgb {
 
     /// Channels as 0.0..=1.0 floats for Cairo (`set_source_rgb`).
     pub fn to_unit(self) -> (f64, f64, f64) {
-        (self.r as f64 / 255.0, self.g as f64 / 255.0, self.b as f64 / 255.0)
+        (
+            self.r as f64 / 255.0,
+            self.g as f64 / 255.0,
+            self.b as f64 / 255.0,
+        )
     }
 
     /// WCAG relative luminance (0.0 black … 1.0 white).
@@ -57,7 +61,11 @@ impl Rgb {
     pub fn blend(self, other: Rgb, t: f64) -> Rgb {
         let t = t.clamp(0.0, 1.0);
         let lerp = |a: u8, b: u8| (a as f64 + (b as f64 - a as f64) * t).round() as u8;
-        Rgb { r: lerp(self.r, other.r), g: lerp(self.g, other.g), b: lerp(self.b, other.b) }
+        Rgb {
+            r: lerp(self.r, other.r),
+            g: lerp(self.g, other.g),
+            b: lerp(self.b, other.b),
+        }
     }
 }
 
@@ -121,8 +129,12 @@ pub enum ThemeId {
 }
 
 impl ThemeId {
-    pub const ALL: [ThemeId; 4] =
-        [ThemeId::Midnight, ThemeId::Daylight, ThemeId::HighContrast, ThemeId::Matrix];
+    pub const ALL: [ThemeId; 4] = [
+        ThemeId::Midnight,
+        ThemeId::Daylight,
+        ThemeId::HighContrast,
+        ThemeId::Matrix,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -166,8 +178,14 @@ pub enum Accent {
 }
 
 impl Accent {
-    pub const ALL: [Accent; 6] =
-        [Accent::Amber, Accent::Blue, Accent::Green, Accent::Violet, Accent::Cyan, Accent::Red];
+    pub const ALL: [Accent; 6] = [
+        Accent::Amber,
+        Accent::Blue,
+        Accent::Green,
+        Accent::Violet,
+        Accent::Cyan,
+        Accent::Red,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {

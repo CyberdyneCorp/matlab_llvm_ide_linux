@@ -220,10 +220,16 @@ fn parse_statement(stmt: &str, nodes: &mut Vec<Node>, edges: &mut Vec<Edge>) {
     let mut pending: Option<String> = None;
 
     while i < n {
-        let Some((node, ni)) = read_node(&chars, i) else { break };
+        let Some((node, ni)) = read_node(&chars, i) else {
+            break;
+        };
         let idx = intern(nodes, node);
         if let Some(p) = prev {
-            edges.push(Edge { from: p, to: idx, label: pending.take() });
+            edges.push(Edge {
+                from: p,
+                to: idx,
+                label: pending.take(),
+            });
         }
         i = skip_ws(&chars, ni);
         match read_link(&chars, i) {
@@ -283,7 +289,14 @@ fn read_node(s: &[char], i: usize) -> Option<(Node, usize)> {
             return Some((Node { id, label, shape }, end + close.len()));
         }
     }
-    Some((Node { id: id.clone(), label: id, shape: Shape::Rect }, j))
+    Some((
+        Node {
+            id: id.clone(),
+            label: id,
+            shape: Shape::Rect,
+        },
+        j,
+    ))
 }
 
 /// Match a node shape opener at `i`, returning (open delim, close delim, shape).
@@ -427,7 +440,14 @@ pub fn layout(g: &Graph) -> Scene {
     // Place nodes. `reverse` flips the main axis for Up/Left flows.
     let reverse = matches!(g.dir, Dir::Up | Dir::Left);
     let mut nodes: Vec<SceneNode> = vec![
-        SceneNode { label: String::new(), shape: Shape::Rect, x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
+        SceneNode {
+            label: String::new(),
+            shape: Shape::Rect,
+            x: 0.0,
+            y: 0.0,
+            w: 0.0,
+            h: 0.0
+        };
         n
     ];
     for (l, ids) in by_layer.iter().enumerate() {
@@ -472,11 +492,21 @@ pub fn layout(g: &Graph) -> Scene {
             let from = clip_to_border(a, b.center());
             let to = clip_to_border(b, a.center());
             let label_pos = ((from.0 + to.0) / 2.0, (from.1 + to.1) / 2.0);
-            SceneEdge { from, to, label: e.label.clone(), label_pos }
+            SceneEdge {
+                from,
+                to,
+                label: e.label.clone(),
+                label_pos,
+            }
         })
         .collect();
 
-    Scene { width, height, nodes, edges }
+    Scene {
+        width,
+        height,
+        nodes,
+        edges,
+    }
 }
 
 /// Longest-path layering: `layer[v] = max(layer[u]) + 1` over edges `u -> v`,
@@ -555,8 +585,16 @@ fn clip_to_border(node: &SceneNode, target: (f64, f64)) -> (f64, f64) {
     }
     let hw = node.w / 2.0;
     let hh = node.h / 2.0;
-    let tx = if dx != 0.0 { hw / dx.abs() } else { f64::INFINITY };
-    let ty = if dy != 0.0 { hh / dy.abs() } else { f64::INFINITY };
+    let tx = if dx != 0.0 {
+        hw / dx.abs()
+    } else {
+        f64::INFINITY
+    };
+    let ty = if dy != 0.0 {
+        hh / dy.abs()
+    } else {
+        f64::INFINITY
+    };
     let t = tx.min(ty);
     (cx + dx * t, cy + dy * t)
 }
@@ -671,7 +709,9 @@ fn parse_sequence(src: &str) -> Option<Sequence> {
             i
         } else {
             ids.push(id.to_string());
-            parts.push(Participant { label: id.to_string() });
+            parts.push(Participant {
+                label: id.to_string(),
+            });
             ids.len() - 1
         }
     };
@@ -696,7 +736,9 @@ fn parse_sequence(src: &str) -> Option<Sequence> {
 
         // Notes: `Note over A,B: text`, `Note left of A: text`, `Note right of A: text`.
         if first == "Note" || first == "note" {
-            if let Some((span, label)) = parse_note(&line[first.len()..], &mut ids, &mut participants, &intern) {
+            if let Some((span, label)) =
+                parse_note(&line[first.len()..], &mut ids, &mut participants, &intern)
+            {
                 events.push(SeqEvent::Note { span, label });
             }
             continue;
@@ -705,8 +747,19 @@ fn parse_sequence(src: &str) -> Option<Sequence> {
         // Block keywords we don't lay out yet — skip without breaking the diagram.
         if matches!(
             first,
-            "loop" | "alt" | "opt" | "par" | "and" | "else" | "end" | "rect"
-                | "activate" | "deactivate" | "autonumber" | "critical" | "break"
+            "loop"
+                | "alt"
+                | "opt"
+                | "par"
+                | "and"
+                | "else"
+                | "end"
+                | "rect"
+                | "activate"
+                | "deactivate"
+                | "autonumber"
+                | "critical"
+                | "break"
         ) {
             continue;
         }
@@ -715,14 +768,23 @@ fn parse_sequence(src: &str) -> Option<Sequence> {
         if let Some((from, to, arrow, dashed, label)) =
             parse_message(line, &mut ids, &mut participants, &intern)
         {
-            events.push(SeqEvent::Message { from, to, label, arrow, dashed });
+            events.push(SeqEvent::Message {
+                from,
+                to,
+                label,
+                arrow,
+                dashed,
+            });
         }
     }
 
     if participants.is_empty() {
         return None;
     }
-    Some(Sequence { participants, events })
+    Some(Sequence {
+        participants,
+        events,
+    })
 }
 
 type Intern<'a> = dyn Fn(&mut Vec<String>, &mut Vec<Participant>, &str) -> usize + 'a;
@@ -744,10 +806,9 @@ fn parse_note(
         Some((NoteSpan::Over(a, b), label))
     } else if let Some(rest) = spec.strip_prefix("left of ") {
         Some((NoteSpan::LeftOf(intern(ids, parts, rest.trim())), label))
-    } else if let Some(rest) = spec.strip_prefix("right of ") {
-        Some((NoteSpan::RightOf(intern(ids, parts, rest.trim())), label))
     } else {
-        None
+        spec.strip_prefix("right of ")
+            .map(|rest| (NoteSpan::RightOf(intern(ids, parts, rest.trim())), label))
     }
 }
 
@@ -834,7 +895,13 @@ pub fn layout_sequence(seq: &Sequence) -> SeqScene {
     let mut y = body_top;
     for ev in &seq.events {
         match ev {
-            SeqEvent::Message { from, to, label, arrow, dashed } => {
+            SeqEvent::Message {
+                from,
+                to,
+                label,
+                arrow,
+                dashed,
+            } => {
                 if from == to {
                     let lx = centers[*from];
                     messages.push(SeqMessage {
@@ -1003,7 +1070,11 @@ pub struct ClassScene {
 
 /// Parse a `classDiagram`. Returns `None` if it declares no classes.
 fn parse_class(src: &str) -> Option<ClassDiagram> {
-    let lines: Vec<&str> = src.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let lines: Vec<&str> = src
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
     let mut names: Vec<String> = Vec::new();
     let mut classes: Vec<Class> = Vec::new();
     let mut relations: Vec<Relation> = Vec::new();
@@ -1035,7 +1106,14 @@ fn parse_class(src: &str) -> Option<ClassDiagram> {
         if let Some((from, to, left, right, dashed, label)) = parse_relation(line) {
             let f = intern_class(&mut names, &mut classes, &from);
             let t = intern_class(&mut names, &mut classes, &to);
-            relations.push(Relation { from: f, to: t, left, right, dashed, label });
+            relations.push(Relation {
+                from: f,
+                to: t,
+                left,
+                right,
+                dashed,
+                label,
+            });
             continue;
         }
 
@@ -1063,7 +1141,11 @@ fn intern_class(names: &mut Vec<String>, classes: &mut Vec<Class>, name: &str) -
         i
     } else {
         names.push(name.to_string());
-        classes.push(Class { name: name.to_string(), fields: Vec::new(), methods: Vec::new() });
+        classes.push(Class {
+            name: name.to_string(),
+            fields: Vec::new(),
+            methods: Vec::new(),
+        });
         names.len() - 1
     }
 }
@@ -1104,13 +1186,16 @@ fn parse_relation(line: &str) -> Option<(String, String, Marker, Marker, bool, O
     // Strip quoted cardinality tokens like "1" / "*".
     let stripped = strip_quoted(line);
     // Find the operator (longest first).
-    let (pos, op, left, right, dashed) = REL_OPS.iter().find_map(|&(op, l, r, d)| {
-        stripped.find(op).map(|p| (p, op, l, r, d))
-    })?;
-    let from = stripped[..pos].trim().split_whitespace().last()?.to_string();
+    let (pos, op, left, right, dashed) = REL_OPS
+        .iter()
+        .find_map(|&(op, l, r, d)| stripped.find(op).map(|p| (p, op, l, r, d)))?;
+    let from = stripped[..pos].split_whitespace().last()?.to_string();
     let after = stripped[pos + op.len()..].trim();
     let (to_part, label) = match after.split_once(':') {
-        Some((t, lbl)) => (t.trim(), Some(lbl.trim().to_string()).filter(|s| !s.is_empty())),
+        Some((t, lbl)) => (
+            t.trim(),
+            Some(lbl.trim().to_string()).filter(|s| !s.is_empty()),
+        ),
         None => (after, None),
     };
     let to = to_part.split_whitespace().next()?.to_string();
@@ -1147,7 +1232,11 @@ fn class_box_size(c: &Class) -> (f64, f64) {
         .unwrap_or(0);
     let w = (widest as f64 * CLASS_CHAR_W + 2.0 * CLASS_PAD_X).max(96.0);
     let members = (c.fields.len() + c.methods.len()) as f64;
-    let body = if members > 0.0 { members * CLASS_LINE_H + 10.0 } else { 0.0 };
+    let body = if members > 0.0 {
+        members * CLASS_LINE_H + 10.0
+    } else {
+        0.0
+    };
     (w, CLASS_TITLE_H + body)
 }
 
@@ -1161,7 +1250,11 @@ pub fn layout_class(cd: &ClassDiagram) -> ClassScene {
     let edges: Vec<Edge> = cd
         .relations
         .iter()
-        .map(|r| Edge { from: r.from, to: r.to, label: None })
+        .map(|r| Edge {
+            from: r.from,
+            to: r.to,
+            label: None,
+        })
         .collect();
     let layer = longest_path_layers(n, &edges);
     let max_layer = layer.iter().copied().max().unwrap_or(0);
@@ -1182,7 +1275,15 @@ pub fn layout_class(cd: &ClassDiagram) -> ClassScene {
     let canvas_w = row_w.iter().cloned().fold(0.0, f64::max);
 
     let mut boxes = vec![
-        ClassBox { name: String::new(), fields: vec![], methods: vec![], x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
+        ClassBox {
+            name: String::new(),
+            fields: vec![],
+            methods: vec![],
+            x: 0.0,
+            y: 0.0,
+            w: 0.0,
+            h: 0.0
+        };
         n
     ];
     let mut y = MARGIN;
@@ -1225,7 +1326,12 @@ pub fn layout_class(cd: &ClassDiagram) -> ClassScene {
         })
         .collect();
 
-    ClassScene { width: (canvas_w + 2.0 * MARGIN).max(MARGIN * 2.0), height, boxes, edges }
+    ClassScene {
+        width: (canvas_w + 2.0 * MARGIN).max(MARGIN * 2.0),
+        height,
+        boxes,
+        edges,
+    }
 }
 
 /// Intersection of the segment from a rect's center toward `target` with its border.
@@ -1235,8 +1341,16 @@ fn clip_rect((x, y, w, h): (f64, f64, f64, f64), target: (f64, f64)) -> (f64, f6
     if dx == 0.0 && dy == 0.0 {
         return (cx, cy);
     }
-    let tx = if dx != 0.0 { (w / 2.0) / dx.abs() } else { f64::INFINITY };
-    let ty = if dy != 0.0 { (h / 2.0) / dy.abs() } else { f64::INFINITY };
+    let tx = if dx != 0.0 {
+        (w / 2.0) / dx.abs()
+    } else {
+        f64::INFINITY
+    };
+    let ty = if dy != 0.0 {
+        (h / 2.0) / dy.abs()
+    } else {
+        f64::INFINITY
+    };
     let t = tx.min(ty);
     (cx + dx * t, cy + dy * t)
 }
@@ -1310,7 +1424,11 @@ pub struct StateScene {
 
 /// Parse a `stateDiagram` / `stateDiagram-v2`. Returns `None` if it has no states.
 fn parse_state(src: &str) -> Option<StateMachine> {
-    let lines: Vec<&str> = src.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let lines: Vec<&str> = src
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
     let mut dir = Dir::Down;
     let mut ids: Vec<String> = Vec::new();
     let mut states: Vec<State> = Vec::new();
@@ -1335,7 +1453,10 @@ fn parse_state(src: &str) -> Option<StateMachine> {
             let from_tok = line[..pos].trim();
             let after = line[pos + 3..].trim();
             let (to_tok, label) = match after.split_once(':') {
-                Some((t, l)) => (t.trim(), Some(l.trim().to_string()).filter(|s| !s.is_empty())),
+                Some((t, l)) => (
+                    t.trim(),
+                    Some(l.trim().to_string()).filter(|s| !s.is_empty()),
+                ),
                 None => (after, None),
             };
             let from = intern_state(&mut ids, &mut states, from_tok, true);
@@ -1368,7 +1489,11 @@ fn parse_state(src: &str) -> Option<StateMachine> {
     if states.is_empty() {
         return None;
     }
-    Some(StateMachine { dir, states, transitions })
+    Some(StateMachine {
+        dir,
+        states,
+        transitions,
+    })
 }
 
 /// Parse the text after `state `: `"desc" as id`, `id <<choice>>`, `id {`, `id`.
@@ -1386,7 +1511,11 @@ fn parse_state_decl(rest: &str, ids: &mut Vec<String>, states: &mut Vec<State>) 
     let id = rest.trim_end_matches('{').trim();
     let (id, kind) = if let Some(p) = id.find("<<") {
         let stereo = &id[p..];
-        let kind = if stereo.contains("choice") { StateKind::Choice } else { StateKind::Normal };
+        let kind = if stereo.contains("choice") {
+            StateKind::Choice
+        } else {
+            StateKind::Normal
+        };
         (id[..p].trim(), kind)
     } else {
         (id, StateKind::Normal)
@@ -1401,7 +1530,12 @@ fn parse_state_decl(rest: &str, ids: &mut Vec<String>, states: &mut Vec<State>) 
 
 /// Intern a state by token. `[*]` maps to a single Start node when it is the
 /// source of a transition, or a single End node when it is the target.
-fn intern_state(ids: &mut Vec<String>, states: &mut Vec<State>, tok: &str, is_source: bool) -> usize {
+fn intern_state(
+    ids: &mut Vec<String>,
+    states: &mut Vec<State>,
+    tok: &str,
+    is_source: bool,
+) -> usize {
     let (key, label, kind) = if tok == "[*]" {
         if is_source {
             ("\u{1}start", String::new(), StateKind::Start)
@@ -1415,7 +1549,11 @@ fn intern_state(ids: &mut Vec<String>, states: &mut Vec<State>, tok: &str, is_so
         i
     } else {
         ids.push(key.to_string());
-        states.push(State { id: key.to_string(), label, kind });
+        states.push(State {
+            id: key.to_string(),
+            label,
+            kind,
+        });
         ids.len() - 1
     }
 }
@@ -1439,7 +1577,11 @@ pub fn layout_state(sm: &StateMachine) -> StateScene {
     let edges_g: Vec<Edge> = sm
         .transitions
         .iter()
-        .map(|t| Edge { from: t.from, to: t.to, label: None })
+        .map(|t| Edge {
+            from: t.from,
+            to: t.to,
+            label: None,
+        })
         .collect();
     let layer = longest_path_layers(n, &edges_g);
     let max_layer = layer.iter().copied().max().unwrap_or(0);
@@ -1463,7 +1605,14 @@ pub fn layout_state(sm: &StateMachine) -> StateScene {
     let cross_canvas = layer_cross.iter().cloned().fold(0.0, f64::max);
 
     let mut nodes = vec![
-        StateNode { label: String::new(), kind: StateKind::Normal, x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
+        StateNode {
+            label: String::new(),
+            kind: StateKind::Normal,
+            x: 0.0,
+            y: 0.0,
+            w: 0.0,
+            h: 0.0
+        };
         n
     ];
     let mut acc = MARGIN;
@@ -1474,7 +1623,11 @@ pub fn layout_state(sm: &StateMachine) -> StateScene {
             let (w, h) = sizes[id];
             // Center each node within its layer's main extent.
             let main_off = acc + (layer_main - main(id)) / 2.0;
-            let (x, y) = if horizontal { (main_off, c) } else { (c, main_off) };
+            let (x, y) = if horizontal {
+                (main_off, c)
+            } else {
+                (c, main_off)
+            };
             nodes[id] = StateNode {
                 label: sm.states[id].label.clone(),
                 kind: sm.states[id].kind,
@@ -1513,7 +1666,12 @@ pub fn layout_state(sm: &StateMachine) -> StateScene {
         })
         .collect();
 
-    StateScene { width: width.max(MARGIN * 2.0), height, nodes, edges }
+    StateScene {
+        width: width.max(MARGIN * 2.0),
+        height,
+        nodes,
+        edges,
+    }
 }
 
 #[cfg(test)]
@@ -1670,7 +1828,11 @@ mod tests {
     #[test]
     fn sequence_notes_and_self_message() {
         let s = seq("sequenceDiagram\nA->>A: think\nNote over A,B: hmm\nNote right of A: ok");
-        let notes = s.events.iter().filter(|e| matches!(e, SeqEvent::Note { .. })).count();
+        let notes = s
+            .events
+            .iter()
+            .filter(|e| matches!(e, SeqEvent::Note { .. }))
+            .count();
         assert_eq!(notes, 2);
         // The self-message and the note's `B` both create participants.
         assert_eq!(s.participant_count(), 2);

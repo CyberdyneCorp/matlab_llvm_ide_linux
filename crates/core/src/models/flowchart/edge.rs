@@ -25,7 +25,15 @@ pub struct FlowEdge {
 
 impl FlowEdge {
     pub fn new(id: &str, kind: EdgeKind, from: EdgeEndpoint, to: EdgeEndpoint) -> FlowEdge {
-        FlowEdge { id: id.to_string(), kind, from, to, label: None, waypoints: None, data: None }
+        FlowEdge {
+            id: id.to_string(),
+            kind,
+            from,
+            to,
+            label: None,
+            waypoints: None,
+            data: None,
+        }
     }
 }
 
@@ -52,7 +60,10 @@ pub struct EdgeEndpoint {
 
 impl EdgeEndpoint {
     pub fn new(node: &str, port: &str) -> EdgeEndpoint {
-        EdgeEndpoint { node: node.to_string(), port: port.to_string() }
+        EdgeEndpoint {
+            node: node.to_string(),
+            port: port.to_string(),
+        }
     }
 }
 
@@ -71,7 +82,10 @@ mod tests {
 
     #[test]
     fn edge_kind_serde_lowercase() {
-        assert_eq!(serde_json::to_string(&EdgeKind::Control).unwrap(), "\"control\"");
+        assert_eq!(
+            serde_json::to_string(&EdgeKind::Control).unwrap(),
+            "\"control\""
+        );
         assert_eq!(
             serde_json::from_str::<EdgeKind>("\"transition\"").unwrap(),
             EdgeKind::Transition
@@ -80,7 +94,12 @@ mod tests {
 
     #[test]
     fn edge_omits_none_fields() {
-        let e = FlowEdge::new("e1", EdgeKind::Control, EdgeEndpoint::new("a", "out"), EdgeEndpoint::new("b", "in"));
+        let e = FlowEdge::new(
+            "e1",
+            EdgeKind::Control,
+            EdgeEndpoint::new("a", "out"),
+            EdgeEndpoint::new("b", "in"),
+        );
         let json = serde_json::to_string(&e).unwrap();
         assert!(!json.contains("label"));
         assert!(!json.contains("waypoints"));

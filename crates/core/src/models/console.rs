@@ -37,7 +37,12 @@ pub struct ConsoleMessage {
 
 impl ConsoleMessage {
     pub fn new(level: ConsoleLevel, text: impl Into<String>) -> ConsoleMessage {
-        ConsoleMessage { id: next_id(), timestamp: String::new(), level, text: text.into() }
+        ConsoleMessage {
+            id: next_id(),
+            timestamp: String::new(),
+            level,
+            text: text.into(),
+        }
     }
 
     pub fn with_timestamp(mut self, ts: impl Into<String>) -> ConsoleMessage {
