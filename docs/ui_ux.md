@@ -195,3 +195,18 @@ tested [`StateChartViewModel`](../crates/core/src/viewmodels/statechart.rs):
 * **Event log** (bottom-right): one row per chart event prefixed with its
   super-step index (`[i] → enter S`), clickable to reveal the state on the canvas,
   with a **⭳ CSV** export (`step,kind,detail`) written beside the model file.
+
+## mflowLink scope
+
+Simulating a signal-flow model (`▶ Simulate`) opens a window
+([`mflowlink_window`](../crates/app/src/mflowlink_window.rs)) with the model
+canvas beside a production **overlay scope** backed by the streamed `SimTrace`:
+
+* **Overlay + legend** — every logged signal shares one set of axes with a
+  legend and stable per-signal colors (`services/scope.rs`).
+* **Crosshair** — hovering shows a dashed crosshair and a readout box with the
+  cursor time and each signal's nearest-sample value.
+* **Box-zoom / pan / scale** — left-drag a box to zoom, middle-drag to pan,
+  **Auto** to autoscale, or pin a manual **Y min / Y max**.
+* **Export** — **CSV** writes the *visible* trace (the pinned time window) and
+  **PNG** writes the rendered scope, both beside the model file.

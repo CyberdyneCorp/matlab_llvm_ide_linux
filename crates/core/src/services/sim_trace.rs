@@ -103,10 +103,23 @@ impl SimTrace {
     /// Mirrors the simulator's column layout, so the export re-imports cleanly
     /// through [`feed_line`](Self::feed_line).
     pub fn to_csv(&self) -> String {
+        self.to_csv_window(None)
+    }
+
+    /// CSV restricted to rows whose time (column 0) lies within `window`
+    /// (inclusive) — i.e. the *visible* trace when a scope is zoomed. `None`
+    /// exports the whole trace.
+    pub fn to_csv_window(&self, window: Option<(f64, f64)>) -> String {
         let mut out = String::new();
         out.push_str(&self.columns.join(","));
         out.push('\n');
         for row in &self.rows {
+            if let Some((x0, x1)) = window {
+                let t = row.first().copied().unwrap_or(f64::NAN);
+                if !(x0..=x1).contains(&t) {
+                    continue;
+                }
+            }
             for (i, v) in row.iter().enumerate() {
                 if i > 0 {
                     out.push(',');
@@ -169,6 +182,23 @@ mod tests {
         assert!(t.feed_line("0.0,1.0,2.0"));
         assert_eq!(t.columns, ["t", "y1", "y2"]);
         assert_eq!(t.rows.len(), 1);
+    }
+
+    #[test]
+    fn csv_window_keeps_only_visible_rows() {
+        let mut t = SimTrace::new();
+        t.feed_line("t,a");
+        for i in 0..5 {
+            t.feed_line(&format!("{}.0,{}.0", i, i * 10));
+        }
+        // Full export keeps every row; the window drops out-of-range times.
+        assert_eq!(t.to_csv().lines().count(), 6); // header + 5
+        let windowed = t.to_csv_window(Some((1.0, 3.0)));
+        assert_eq!(windowed.lines().count(), 4); // header + t=1,2,3
+        assert!(windowed.contains("1,10"));
+        assert!(windowed.contains("3,30"));
+        assert!(!windowed.contains("0,0"));
+        assert!(!windowed.contains("4,40"));
     }
 
     #[test]

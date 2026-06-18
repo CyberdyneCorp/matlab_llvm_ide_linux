@@ -28,6 +28,7 @@ mod palette;
 mod plot_render;
 mod process;
 mod runner;
+mod scope_render;
 mod services_impl;
 mod settings_view;
 mod statechart_window;

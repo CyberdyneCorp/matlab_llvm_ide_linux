@@ -12,10 +12,12 @@ use gtk::{Box as GtkBox, Button, DrawingArea, Label, Orientation, ScrolledWindow
 use serde_json::json;
 
 use matforge_core::models::flowchart::FlowchartDocument;
-use matforge_core::models::{PlotFigure, PlotKind};
 use matforge_core::services::dap::{parse_message, DapMessage};
+use matforge_core::services::scope::{signal_color, ScopeView};
 use matforge_core::services::sim_dap::{self, SimRequest};
 use matforge_core::viewmodels::{MflowLinkViewModel, SimState};
+
+use crate::scope_render::ScopeSeries;
 
 use crate::app_state::AppState;
 use crate::flow_render::{self, Viewport};
@@ -24,6 +26,12 @@ use crate::process::{DapSession, SimHandle};
 /// A live `matlabc -simulate --sim-dap` session, when the transport is in live
 /// mode (vs the one-shot CSV path).
 type LiveSession = Rc<RefCell<Option<DapSession>>>;
+
+/// `(name, rgb color, (time, value) points)` for one logged signal.
+type SignalSeries = (String, (f64, f64, f64), Vec<(f64, f64)>);
+
+/// In-progress box-zoom rectangle in widget pixels `(x0, y0, x1, y1)`.
+type DragCell = Rc<std::cell::Cell<Option<(f64, f64, f64, f64)>>>;
 
 /// Open a simulation window for a signal-flow document. `autostart` immediately
 /// runs the simulation (used by the `MATFORGE_SIMULATE` demo hook).
@@ -731,164 +739,347 @@ fn fit_viewport(bounds: Option<(f64, f64, f64, f64)>, w: f64, h: f64) -> Viewpor
     }
 }
 
-/// The scope tiles: one line plot per logged signal, rebuilt when the signal
-/// set changes and redrawn as samples stream in.
+/// `(time, value)` points for every logged signal, truncated to the playback
+/// cursor in one-shot replay (live mode shows every streamed sample).
+fn collect_points(vm: &Rc<MflowLinkViewModel>) -> Vec<SignalSeries> {
+    let n = vm.signal_count();
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        let (xs, ys) = vm.scope_series(i);
+        let cut = if vm.live.get() {
+            xs.len()
+        } else {
+            vm.cursor.get().min(xs.len())
+        };
+        let pts: Vec<(f64, f64)> = xs
+            .iter()
+            .zip(&ys)
+            .take(cut)
+            .map(|(&x, &y)| (x, y))
+            .collect();
+        let name = vm.scope_name(i).unwrap_or_else(|| "signal".to_string());
+        out.push((name, signal_color(i), pts));
+    }
+    out
+}
+
+/// The resolved data window for the current view (autoscale or pinned).
+fn resolve_window(vm: &Rc<MflowLinkViewModel>, view: ScopeView) -> (f64, f64, f64, f64) {
+    let points: Vec<Vec<(f64, f64)>> = collect_points(vm).into_iter().map(|d| d.2).collect();
+    view.resolve(&points)
+}
+
+/// Draw the overlay scope into `ctx` for the given view + interaction state.
+fn draw_scope(
+    ctx: &gtk::cairo::Context,
+    w: f64,
+    h: f64,
+    vm: &Rc<MflowLinkViewModel>,
+    view: ScopeView,
+    hover: Option<(f64, f64)>,
+    drag: Option<(f64, f64, f64, f64)>,
+) {
+    let data = collect_points(vm);
+    let points: Vec<Vec<(f64, f64)>> = data.iter().map(|d| d.2.clone()).collect();
+    let window = view.resolve(&points);
+    let series: Vec<ScopeSeries> = data
+        .iter()
+        .map(|(name, color, pts)| ScopeSeries {
+            name,
+            color: *color,
+            points: pts,
+        })
+        .collect();
+    crate::scope_render::draw_overlay(ctx, w, h, &series, window, hover, drag);
+}
+
+/// Render the current scope to a PNG beside the model (`<model>.scope.png`).
+fn export_scope_png(
+    app: &Rc<AppState>,
+    da: &DrawingArea,
+    vm: &Rc<MflowLinkViewModel>,
+    view: ScopeView,
+    path: Option<&Path>,
+) {
+    let (w, h) = (da.width(), da.height());
+    if w == 0 || h == 0 {
+        app.vm
+            .toast
+            .show("Resize the window before exporting a PNG");
+        return;
+    }
+    let surface = match gtk::cairo::ImageSurface::create(gtk::cairo::Format::ARgb32, w, h) {
+        Ok(s) => s,
+        Err(e) => {
+            app.vm.toast.show(format!("PNG export failed: {e}"));
+            return;
+        }
+    };
+    if let Ok(ctx) = gtk::cairo::Context::new(&surface) {
+        draw_scope(&ctx, w as f64, h as f64, vm, view, None, None);
+    }
+    let dest = match path {
+        Some(p) => p.with_extension("scope.png"),
+        None => std::env::temp_dir().join("mflowlink_scope.png"),
+    };
+    let result = std::fs::File::create(&dest)
+        .map_err(|e| e.to_string())
+        .and_then(|mut f| surface.write_to_png(&mut f).map_err(|e| e.to_string()));
+    match result {
+        Ok(()) => app
+            .vm
+            .toast
+            .show(format!("Saved scope to {}", dest.display())),
+        Err(e) => app.vm.toast.show(format!("PNG export failed: {e}")),
+    }
+}
+
+/// The production overlay scope: every logged signal on one set of axes with a
+/// legend + stable colors, a hover crosshair value/time readout, box-zoom (drag)
+/// and pan (middle-drag), autoscale / manual-Y, and CSV (visible) + PNG export.
+/// Driven entirely by the `SimTrace` — no compiler involvement.
 fn build_scopes(app: &Rc<AppState>, vm: &Rc<MflowLinkViewModel>, path: Option<PathBuf>) -> GtkBox {
     let panel = GtkBox::new(Orientation::Vertical, 0);
     panel.add_css_class("mf-panel");
     panel.add_css_class("mf-border-left");
-    panel.set_size_request(420, -1);
+    panel.set_size_request(440, -1);
 
-    // Header row: title + an Export-CSV action for the collected trace.
-    let header_row = GtkBox::new(Orientation::Horizontal, 6);
-    header_row.set_margin_start(8);
-    header_row.set_margin_end(8);
-    header_row.set_margin_top(6);
+    let view: Rc<RefCell<ScopeView>> = Rc::new(RefCell::new(ScopeView::default()));
+    let hover: Rc<std::cell::Cell<Option<(f64, f64)>>> = Rc::new(std::cell::Cell::new(None));
+    let drag: DragCell = Rc::new(std::cell::Cell::new(None));
+
+    let da = DrawingArea::new();
+    da.set_vexpand(true);
+    da.set_hexpand(true);
+    da.set_size_request(-1, 260);
+    da.add_css_class("mf-thumb");
+    {
+        let vm = vm.clone();
+        let view = view.clone();
+        let hover = hover.clone();
+        let drag = drag.clone();
+        da.set_draw_func(move |_a, ctx, w, h| {
+            draw_scope(
+                ctx,
+                w as f64,
+                h as f64,
+                &vm,
+                *view.borrow(),
+                hover.get(),
+                drag.get(),
+            );
+        });
+    }
+
+    panel.append(&build_scope_controls(app, vm, &da, &view, path));
+    let scroll = ScrolledWindow::new();
+    scroll.set_vexpand(true);
+    scroll.set_child(Some(&da));
+    panel.append(&scroll);
+
+    // Hover → crosshair readout.
+    let motion = gtk::EventControllerMotion::new();
+    {
+        let hover = hover.clone();
+        let da2 = da.clone();
+        motion.connect_motion(move |_m, x, y| {
+            hover.set(Some((x, y)));
+            da2.queue_draw();
+        });
+    }
+    {
+        let hover = hover.clone();
+        let da2 = da.clone();
+        motion.connect_leave(move |_m| {
+            hover.set(None);
+            da2.queue_draw();
+        });
+    }
+    da.add_controller(motion);
+
+    // Left-drag → box-zoom.
+    let zoom = gtk::GestureDrag::new();
+    zoom.set_button(gtk::gdk::BUTTON_PRIMARY);
+    {
+        let drag = drag.clone();
+        let da2 = da.clone();
+        zoom.connect_drag_begin(move |_g, x, y| {
+            drag.set(Some((x, y, x, y)));
+            da2.queue_draw();
+        });
+    }
+    {
+        let drag = drag.clone();
+        let da2 = da.clone();
+        zoom.connect_drag_update(move |_g, dx, dy| {
+            if let Some((sx, sy, _, _)) = drag.get() {
+                drag.set(Some((sx, sy, sx + dx, sy + dy)));
+                da2.queue_draw();
+            }
+        });
+    }
+    {
+        let drag = drag.clone();
+        let da2 = da.clone();
+        let vm = vm.clone();
+        let view = view.clone();
+        zoom.connect_drag_end(move |_g, dx, dy| {
+            if let Some((sx, sy, _, _)) = drag.take() {
+                let (w, h) = (da2.width() as f64, da2.height() as f64);
+                let window = resolve_window(&vm, *view.borrow());
+                let plot = crate::scope_render::plot_rect(w, h);
+                let next = view
+                    .borrow()
+                    .zoom_to_box(window, plot, (sx, sy, sx + dx, sy + dy));
+                *view.borrow_mut() = next;
+                da2.queue_draw();
+            }
+        });
+    }
+    da.add_controller(zoom);
+
+    // Middle-drag → pan (relative to the window at drag start).
+    let pan = gtk::GestureDrag::new();
+    pan.set_button(gtk::gdk::BUTTON_MIDDLE);
+    let pan_start: Rc<std::cell::Cell<(f64, f64, f64, f64)>> =
+        Rc::new(std::cell::Cell::new((0.0, 1.0, 0.0, 1.0)));
+    {
+        let pan_start = pan_start.clone();
+        let vm = vm.clone();
+        let view = view.clone();
+        pan.connect_drag_begin(move |_g, _x, _y| {
+            pan_start.set(resolve_window(&vm, *view.borrow()));
+        });
+    }
+    {
+        let pan_start = pan_start.clone();
+        let da2 = da.clone();
+        let view = view.clone();
+        pan.connect_drag_update(move |_g, dx, dy| {
+            let win = pan_start.get();
+            let (_, _, pw, ph) =
+                crate::scope_render::plot_rect(da2.width() as f64, da2.height() as f64);
+            let (x0, x1, y0, y1) = win;
+            let ddx = -dx / pw * (x1 - x0);
+            let ddy = dy / ph * (y1 - y0);
+            *view.borrow_mut() = ScopeView::panned(win, ddx, ddy);
+            da2.queue_draw();
+        });
+    }
+    da.add_controller(pan);
+
+    // Redraw as samples stream in and as the playback cursor moves.
+    {
+        let da2 = da.clone();
+        vm.sample_count.subscribe(move |_| da2.queue_draw());
+    }
+    {
+        let da2 = da.clone();
+        vm.cursor.subscribe(move |_| da2.queue_draw());
+    }
+    panel
+}
+
+/// The scope's control row: autoscale reset, manual Y range, and CSV / PNG export.
+fn build_scope_controls(
+    app: &Rc<AppState>,
+    vm: &Rc<MflowLinkViewModel>,
+    da: &DrawingArea,
+    view: &Rc<RefCell<ScopeView>>,
+    path: Option<PathBuf>,
+) -> GtkBox {
+    let row = GtkBox::new(Orientation::Horizontal, 6);
+    row.set_margin_start(8);
+    row.set_margin_end(8);
+    row.set_margin_top(6);
     let header = Label::new(Some("SCOPES"));
     header.add_css_class("mf-panel-header");
     header.set_halign(gtk::Align::Start);
     header.set_hexpand(true);
-    header_row.append(&header);
-    let export = Button::with_label("Export CSV");
-    export.add_css_class("mf-tool");
-    export.set_tooltip_text(Some("Save the collected trace as CSV"));
+    row.append(&header);
+
+    let auto = Button::with_label("Auto");
+    auto.add_css_class("mf-tool");
+    auto.set_tooltip_text(Some("Autoscale (reset zoom / Y range)"));
+    {
+        let view = view.clone();
+        let da = da.clone();
+        auto.connect_clicked(move |_| {
+            *view.borrow_mut() = ScopeView::default();
+            da.queue_draw();
+        });
+    }
+    row.append(&auto);
+
+    let y_min = gtk::Entry::new();
+    y_min.set_placeholder_text(Some("Y min"));
+    y_min.set_width_chars(6);
+    let y_max = gtk::Entry::new();
+    y_max.set_placeholder_text(Some("Y max"));
+    y_max.set_width_chars(6);
+    let set_y = Button::with_label("Set Y");
+    set_y.add_css_class("mf-tool");
+    set_y.set_tooltip_text(Some("Pin the Y range"));
+    {
+        let view = view.clone();
+        let da = da.clone();
+        let app = app.clone();
+        let (y_min, y_max) = (y_min.clone(), y_max.clone());
+        set_y.connect_clicked(move |_| {
+            match (
+                y_min.text().trim().parse::<f64>(),
+                y_max.text().trim().parse::<f64>(),
+            ) {
+                (Ok(lo), Ok(hi)) if hi > lo => {
+                    view.borrow_mut().y = Some((lo, hi));
+                    da.queue_draw();
+                }
+                _ => app.vm.toast.show("Enter a valid Y min < Y max"),
+            }
+        });
+    }
+    row.append(&y_min);
+    row.append(&y_max);
+    row.append(&set_y);
+
+    let csv = Button::with_label("CSV");
+    csv.add_css_class("mf-tool");
+    csv.set_tooltip_text(Some("Export the visible trace as CSV"));
     {
         let app = app.clone();
         let vm = vm.clone();
-        export.connect_clicked(move |_| export_trace_csv(&app, &vm, path.as_deref()));
+        let view = view.clone();
+        let path = path.clone();
+        csv.connect_clicked(move |_| {
+            export_trace_csv(&app, &vm, path.as_deref(), view.borrow().x);
+        });
     }
-    header_row.append(&export);
-    panel.append(&header_row);
+    row.append(&csv);
 
-    let tiles = GtkBox::new(Orientation::Vertical, 6);
-    tiles.set_margin_start(6);
-    tiles.set_margin_end(6);
-    tiles.set_margin_top(4);
-    let scroll = ScrolledWindow::new();
-    scroll.set_vexpand(true);
-    scroll.set_child(Some(&tiles));
-    panel.append(&scroll);
-
-    let empty = Label::new(Some("Press Play to run the simulation."));
-    empty.add_css_class("mf-text-muted");
-    empty.set_margin_top(12);
-    tiles.append(&empty);
-
-    // Rebuild the tile list when the signal count changes; otherwise just
-    // redraw existing tiles. `tile_count` caches the current tile arity.
-    let tile_count = Rc::new(RefCell::new(0usize));
-    let draws: Rc<RefCell<Vec<DrawingArea>>> = Rc::new(RefCell::new(Vec::new()));
+    let png = Button::with_label("PNG");
+    png.add_css_class("mf-tool");
+    png.set_tooltip_text(Some("Export the scope as PNG"));
     {
+        let app = app.clone();
         let vm = vm.clone();
-        let tiles = tiles.clone();
-        let tile_count = tile_count.clone();
-        let draws = draws.clone();
-        let sc = vm.sample_count.clone();
-        sc.subscribe(move |_| {
-            let n = vm.signal_count();
-            if n != *tile_count.borrow() {
-                *tile_count.borrow_mut() = n;
-                while let Some(c) = tiles.first_child() {
-                    tiles.remove(&c);
-                }
-                draws.borrow_mut().clear();
-                if n == 0 {
-                    return;
-                }
-                for i in 0..n {
-                    let name = vm.scope_name(i).unwrap_or_else(|| "signal".to_string());
-                    tiles.append(&scope_label(&name));
-                    let da = DrawingArea::new();
-                    da.set_size_request(-1, 130);
-                    da.add_css_class("mf-thumb");
-                    // Cursor pixel for the crosshair value-readout (None = no hover).
-                    let hover: Rc<std::cell::Cell<Option<(f64, f64)>>> =
-                        Rc::new(std::cell::Cell::new(None));
-                    let vm2 = vm.clone();
-                    let idx = i;
-                    let title = name.clone();
-                    let hover_draw = hover.clone();
-                    da.set_draw_func(move |_a, ctx, w, h| {
-                        let (mut xs, mut ys) = vm2.scope_series(idx);
-                        // Live mode shows every streamed sample; one-shot CSV
-                        // replay draws only up to the scrubbable playback cursor.
-                        let n = if vm2.live.get() {
-                            xs.len()
-                        } else {
-                            vm2.cursor.get().min(xs.len())
-                        };
-                        xs.truncate(n);
-                        ys.truncate(n);
-                        let fig = PlotFigure::series(
-                            idx as i32 + 1,
-                            title.clone(),
-                            PlotKind::Line2D,
-                            xs,
-                            ys,
-                        );
-                        crate::plot_render::draw_figure(
-                            ctx,
-                            w as f64,
-                            h as f64,
-                            &fig,
-                            None,
-                            hover_draw.get(),
-                            None,
-                        );
-                    });
-                    // Hovering a tile shows a crosshair + nearest-sample readout.
-                    let motion = gtk::EventControllerMotion::new();
-                    {
-                        let hover = hover.clone();
-                        let da2 = da.clone();
-                        motion.connect_motion(move |_m, x, y| {
-                            hover.set(Some((x, y)));
-                            da2.queue_draw();
-                        });
-                    }
-                    {
-                        let hover = hover.clone();
-                        let da2 = da.clone();
-                        motion.connect_leave(move |_m| {
-                            hover.set(None);
-                            da2.queue_draw();
-                        });
-                    }
-                    da.add_controller(motion);
-                    tiles.append(&da);
-                    draws.borrow_mut().push(da);
-                }
-            } else {
-                for da in draws.borrow().iter() {
-                    da.queue_draw();
-                }
-            }
+        let view = view.clone();
+        let da = da.clone();
+        png.connect_clicked(move |_| {
+            export_scope_png(&app, &da, &vm, *view.borrow(), path.as_deref());
         });
     }
-    // Redraw the scopes whenever the playback cursor moves (play / step / scrub).
-    {
-        let draws = draws.clone();
-        let cur = vm.cursor.clone();
-        cur.subscribe(move |_| {
-            for da in draws.borrow().iter() {
-                da.queue_draw();
-            }
-        });
-    }
-
-    panel
+    row.append(&png);
+    row
 }
-
-fn scope_label(name: &str) -> Label {
-    let l = Label::new(Some(name));
-    l.add_css_class("mf-col-title");
-    l.set_halign(gtk::Align::Start);
-    l
-}
-
-/// Write the collected trace as CSV beside the model (`<model>.trace.csv`), or
-/// to a temp file for an untitled model, and toast the result.
-fn export_trace_csv(app: &Rc<AppState>, vm: &Rc<MflowLinkViewModel>, path: Option<&Path>) {
+/// Write the trace as CSV beside the model (`<model>.trace.csv`), or to a temp
+/// file for an untitled model, and toast the result. `window` restricts the
+/// export to the visible time range (the scope's pinned X), or `None` for all.
+fn export_trace_csv(
+    app: &Rc<AppState>,
+    vm: &Rc<MflowLinkViewModel>,
+    path: Option<&Path>,
+    window: Option<(f64, f64)>,
+) {
     if vm.total_samples() == 0 {
         app.vm
             .toast
@@ -899,7 +1090,7 @@ fn export_trace_csv(app: &Rc<AppState>, vm: &Rc<MflowLinkViewModel>, path: Optio
         Some(p) => p.with_extension("trace.csv"),
         None => std::env::temp_dir().join("mflowlink_trace.csv"),
     };
-    let csv = vm.trace.with(|t| t.to_csv());
+    let csv = vm.trace.with(|t| t.to_csv_window(window));
     match std::fs::write(&dest, csv) {
         Ok(()) => app
             .vm

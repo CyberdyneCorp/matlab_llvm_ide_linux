@@ -19,6 +19,7 @@ pub mod mermaid;
 pub mod parsers;
 pub mod preferences;
 pub mod run;
+pub mod scope;
 pub mod sentinels;
 pub mod settings;
 pub mod sim_dap;
