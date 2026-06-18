@@ -437,7 +437,7 @@ pub fn build_flowchart_view(
 
     // The block inspector lives in the shared right-side panel: install it when
     // this flowchart tab is shown, remove it when hidden.
-    let inspector: gtk::Widget = build_inspector_body(&fc).upcast();
+    let inspector: gtk::Widget = build_inspector_body(app, &fc).upcast();
     {
         let inspector = inspector.clone();
         let fc = fc.clone();
@@ -723,7 +723,48 @@ fn fit_view(fc: &Rc<FlowchartViewModel>, cw: f64, ch: f64) {
 /// Build the block-property editor body. It lives in the shared right-side
 /// BLOCK INSPECTOR tab (installed/removed as the flowchart tab is shown/hidden),
 /// so the diagram canvas keeps the full editor width.
-fn build_inspector_body(fc: &Rc<FlowchartViewModel>) -> ScrolledWindow {
+/// Compute Bode / step / Nyquist for a transfer-function block and add them as
+/// figures in the Plots panel. Bode magnitude/phase use `log10(ω)` on the x
+/// axis so the curve reads as a conventional Bode plot.
+fn analyze_block(app: &Rc<AppState>, node: &FlowNode) {
+    use matforge_core::models::{PlotFigure, PlotKind};
+    use matforge_core::services::control_analysis::TransferFunction;
+    let Some(tf) = TransferFunction::from_node(node) else {
+        return;
+    };
+    let name = if node.label.is_empty() {
+        node.kind.display_name().to_string()
+    } else {
+        node.label.clone()
+    };
+
+    let fr = tf.frequency_response(0.01, 1000.0, 400);
+    let log_w: Vec<f64> = fr.iter().map(|p| p.w.log10()).collect();
+    let mag: Vec<f64> = fr.iter().map(|p| p.mag_db).collect();
+    let phase: Vec<f64> = fr.iter().map(|p| p.phase_deg).collect();
+    let re: Vec<f64> = fr.iter().map(|p| p.re).collect();
+    let im: Vec<f64> = fr.iter().map(|p| p.im).collect();
+    let (st, sy): (Vec<f64>, Vec<f64>) = tf.step_response(10.0, 0.02).into_iter().unzip();
+
+    let mut idx = app.vm.plots.figures.with(|f| f.len() as i32);
+    let mut add = |title: String, xs: Vec<f64>, ys: Vec<f64>| {
+        idx += 1;
+        app.vm
+            .plots
+            .add(PlotFigure::series(idx, title, PlotKind::Line2D, xs, ys));
+    };
+    add(format!("{name} — Step response"), st, sy);
+    add(
+        format!("{name} — Bode magnitude dB (x=log10 ω)"),
+        log_w.clone(),
+        mag,
+    );
+    add(format!("{name} — Bode phase deg (x=log10 ω)"), log_w, phase);
+    add(format!("{name} — Nyquist (Re vs Im)"), re, im);
+    app.vm.toast.show("Added Bode / step / Nyquist to Plots");
+}
+
+fn build_inspector_body(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>) -> ScrolledWindow {
     let body = GtkBox::new(Orientation::Vertical, 8);
     body.set_margin_start(10);
     body.set_margin_end(10);
@@ -734,6 +775,7 @@ fn build_inspector_body(fc: &Rc<FlowchartViewModel>) -> ScrolledWindow {
 
     let rebuild = {
         let fc = fc.clone();
+        let app = app.clone();
         let body = body.clone();
         move || {
             while let Some(child) = body.first_child() {
@@ -815,6 +857,19 @@ fn build_inspector_body(fc: &Rc<FlowchartViewModel>) -> ScrolledWindow {
                     fc2.toggle_breakpoint(&id2);
                 });
                 body.append(&bp);
+            }
+
+            // Linear analysis for blocks with a transfer function (Transfer
+            // Fcn today): plots Bode / step / Nyquist into the Plots panel.
+            if matforge_core::services::control_analysis::TransferFunction::from_node(&node)
+                .is_some()
+            {
+                let analyze = Button::with_label("Analyze (Bode / Step / Nyquist)");
+                analyze.add_css_class("mf-tool");
+                let app2 = app.clone();
+                let node2 = node.clone();
+                analyze.connect_clicked(move |_| analyze_block(&app2, &node2));
+                body.append(&analyze);
             }
         }
     };
