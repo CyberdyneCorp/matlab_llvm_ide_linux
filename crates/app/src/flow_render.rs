@@ -4,7 +4,7 @@
 //! world → screen. Geometry reads the tested core model (`NodeKind` shapes,
 //! ports, anchors); this only paints.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use gtk::cairo;
 
@@ -23,7 +23,12 @@ pub struct Viewport {
 
 fn node_rect(node: &FlowNode) -> (f64, f64, f64, f64) {
     let size = node.ui.size.unwrap_or_else(|| node.kind.default_size());
-    (node.ui.position.x, node.ui.position.y, size.width, size.height)
+    (
+        node.ui.position.x,
+        node.ui.position.y,
+        size.width,
+        size.height,
+    )
 }
 
 fn port_point(node: &FlowNode, port: &str) -> (f64, f64) {
@@ -38,6 +43,7 @@ fn port_point(node: &FlowNode, port: &str) -> (f64, f64) {
 }
 
 /// Draw the whole document.
+#[allow(clippy::too_many_arguments)]
 pub fn draw_document(
     ctx: &cairo::Context,
     w: f64,
@@ -47,6 +53,7 @@ pub fn draw_document(
     selected: Option<&str>,
     breakpoints: &BTreeMap<String, BreakpointConfig>,
     exec_node: Option<&str>,
+    algebraic: &BTreeSet<String>,
 ) {
     set_rgb(ctx, crate::theme_css::current().editor_bg);
     ctx.rectangle(0.0, 0.0, w, h);
@@ -64,8 +71,10 @@ pub fn draw_document(
 
     // Edges first (under nodes).
     for edge in &flow.edges {
-        let (Some(from), Some(to)) = (by_id.get(edge.from.node.as_str()), by_id.get(edge.to.node.as_str()))
-        else {
+        let (Some(from), Some(to)) = (
+            by_id.get(edge.from.node.as_str()),
+            by_id.get(edge.to.node.as_str()),
+        ) else {
             continue;
         };
         let start = port_point(from, &edge.from.port);
@@ -85,7 +94,14 @@ pub fn draw_document(
         set_rgb(ctx, crate::theme_css::current().card);
         ctx.fill_preserve().ok();
         ctx.set_line_width(if is_sel { 2.5 } else { 1.3 });
-        set_rgb(ctx, if is_sel { crate::theme_css::current().blue } else { accent });
+        set_rgb(
+            ctx,
+            if is_sel {
+                crate::theme_css::current().blue
+            } else {
+                accent
+            },
+        );
         ctx.stroke().ok();
 
         if is_exec {
@@ -93,6 +109,18 @@ pub fn draw_document(
             set_rgb(ctx, crate::theme_css::current().yellow);
             ctx.set_line_width(2.0);
             ctx.stroke().ok();
+        }
+
+        // Algebraic-loop warning: an amber dashed halo on every block whose
+        // output feeds back into its own input without a state block to break
+        // the loop.
+        if algebraic.contains(&node.id) {
+            draw_shape(ctx, node.kind.shape(), x - 3.0, y - 3.0, nw + 6.0, nh + 6.0);
+            set_rgb(ctx, crate::theme_css::current().amber);
+            ctx.set_line_width(2.0);
+            ctx.set_dash(&[4.0, 3.0], 0.0);
+            ctx.stroke().ok();
+            ctx.set_dash(&[], 0.0);
         }
 
         // Port markers — small dots at each port so they're visible targets
@@ -112,7 +140,11 @@ pub fn draw_document(
 
         // Label.
         set_rgb(ctx, crate::theme_css::current().text_primary);
-        ctx.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+        ctx.select_font_face(
+            "sans-serif",
+            cairo::FontSlant::Normal,
+            cairo::FontWeight::Normal,
+        );
         ctx.set_font_size(12.0);
         let label = node_label(node);
         let ext = ctx.text_extents(&label).map(|e| e.width()).unwrap_or(0.0);
@@ -130,11 +162,19 @@ pub fn draw_document(
     ctx.restore().ok();
 }
 
-fn draw_edge(ctx: &cairo::Context, from_anchor: Option<PortAnchor>, start: (f64, f64), end: (f64, f64)) {
+fn draw_edge(
+    ctx: &cairo::Context,
+    from_anchor: Option<PortAnchor>,
+    start: (f64, f64),
+    end: (f64, f64),
+) {
     set_rgb(ctx, crate::theme_css::current().text_secondary);
     ctx.set_line_width(1.4);
     ctx.move_to(start.0, start.1);
-    let horizontal = matches!(from_anchor, Some(PortAnchor::Left) | Some(PortAnchor::Right));
+    let horizontal = matches!(
+        from_anchor,
+        Some(PortAnchor::Left) | Some(PortAnchor::Right)
+    );
     if horizontal {
         let mid_x = (start.0 + end.0) / 2.0;
         ctx.line_to(mid_x, start.1);
@@ -205,7 +245,10 @@ fn rounded_rect(ctx: &cairo::Context, x: f64, y: f64, w: f64, h: f64, r: f64) {
 
 /// World-space point for a screen click under the viewport transform.
 pub fn screen_to_world(vp: Viewport, sx: f64, sy: f64) -> FlowPosition {
-    FlowPosition { x: (sx - vp.pan.0) / vp.zoom, y: (sy - vp.pan.1) / vp.zoom }
+    FlowPosition {
+        x: (sx - vp.pan.0) / vp.zoom,
+        y: (sy - vp.pan.1) / vp.zoom,
+    }
 }
 
 /// Topmost node id containing the world point, if any.
@@ -236,9 +279,15 @@ fn node_label(node: &FlowNode) -> String {
             (Some(l), Some(r)) => format!("{l} = {r}"),
             _ => node.kind.display_name().to_string(),
         },
-        Expression | Display => some(&d.expression).unwrap_or_else(|| node.kind.display_name().to_string()),
-        Constant | Variable => some(&d.name).unwrap_or_else(|| node.kind.display_name().to_string()),
-        IfBlock | WhileLoop => some(&d.cond).unwrap_or_else(|| node.kind.display_name().to_string()),
+        Expression | Display => {
+            some(&d.expression).unwrap_or_else(|| node.kind.display_name().to_string())
+        }
+        Constant | Variable => {
+            some(&d.name).unwrap_or_else(|| node.kind.display_name().to_string())
+        }
+        IfBlock | WhileLoop => {
+            some(&d.cond).unwrap_or_else(|| node.kind.display_name().to_string())
+        }
         FunctionCall => some(&d.callee).unwrap_or_else(|| node.kind.display_name().to_string()),
         _ => node.kind.display_name().to_string(),
     }
@@ -292,7 +341,11 @@ pub fn output_port_hit(
 
 /// Input port of `node_id` closest to `world` (the drop target's landing port).
 /// Falls back to `"in"` when the node declares no input ports.
-pub fn nearest_input_port(doc: &FlowchartDocument, node_id: &str, world: FlowPosition) -> Option<String> {
+pub fn nearest_input_port(
+    doc: &FlowchartDocument,
+    node_id: &str,
+    world: FlowPosition,
+) -> Option<String> {
     let flow = doc.flows.first()?;
     let node = flow.nodes.iter().find(|n| n.id == node_id)?;
     if node.ports.inputs.is_empty() {

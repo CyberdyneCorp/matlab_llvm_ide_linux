@@ -220,7 +220,10 @@ impl FlowchartViewModel {
         }
         self.document.with(|d| {
             d.flows.first().is_some_and(|flow| {
-                !flow.edges.iter().any(|e| e.to.node == to_node && e.to.port == to_port)
+                !flow
+                    .edges
+                    .iter()
+                    .any(|e| e.to.node == to_node && e.to.port == to_port)
             })
         })
     }
