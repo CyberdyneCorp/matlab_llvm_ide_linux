@@ -68,7 +68,9 @@ pub fn build(window: &ApplicationWindow, app: Rc<AppState>) {
     outer.set_shrink_start_child(false);
     // Restore the persisted sidebar width (the workspace|plots split is restored
     // inside build_right_column); both are saved back on exit.
-    let sidebar_width = matforge_core::services::preferences::Preferences::load().layout.sidebar_width;
+    let sidebar_width = matforge_core::services::preferences::Preferences::load()
+        .layout
+        .sidebar_width;
     outer.set_position(sidebar_width.clamp(160, 600));
     middle.append(&outer);
     LAYOUT_PANES.with(|p| *p.borrow_mut() = Some((outer.clone(), right.clone())));
@@ -121,7 +123,9 @@ pub fn build(window: &ApplicationWindow, app: Rc<AppState>) {
             Rc::new(std::cell::RefCell::new(None));
         let revision = app.vm.toast.revision.clone();
         revision.subscribe(move |_| {
-            let Some(msg) = app.vm.toast.message.get() else { return };
+            let Some(msg) = app.vm.toast.message.get() else {
+                return;
+            };
             toast.set_text(&msg);
             toast.set_visible(true);
             if let Some(id) = hide.borrow_mut().take() {
@@ -129,10 +133,13 @@ pub fn build(window: &ApplicationWindow, app: Rc<AppState>) {
             }
             let toast2 = toast.clone();
             let hide2 = hide.clone();
-            let id = gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(2200), move || {
-                toast2.set_visible(false);
-                *hide2.borrow_mut() = None;
-            });
+            let id = gtk::glib::timeout_add_local_once(
+                std::time::Duration::from_millis(2200),
+                move || {
+                    toast2.set_visible(false);
+                    *hide2.borrow_mut() = None;
+                },
+            );
             *hide.borrow_mut() = Some(id);
         });
     }
@@ -143,7 +150,9 @@ pub fn build(window: &ApplicationWindow, app: Rc<AppState>) {
     {
         let app = app.clone();
         scroll.connect_scroll(move |c, _dx, dy| {
-            if c.current_event_state().contains(gtk::gdk::ModifierType::CONTROL_MASK) {
+            if c.current_event_state()
+                .contains(gtk::gdk::ModifierType::CONTROL_MASK)
+            {
                 if dy < 0.0 {
                     app.vm.appearance.zoom_in();
                 } else if dy > 0.0 {
@@ -206,11 +215,17 @@ fn build_menu_bar(window: &ApplicationWindow, app: &Rc<AppState>) -> gtk::Popove
     }
     {
         let a = app.clone();
-        register("toggle-sidebar", Rc::new(move || a.vm.layout.toggle_sidebar()));
+        register(
+            "toggle-sidebar",
+            Rc::new(move || a.vm.layout.toggle_sidebar()),
+        );
     }
     {
         let a = app.clone();
-        register("toggle-workspace", Rc::new(move || a.vm.layout.toggle_workspace()));
+        register(
+            "toggle-workspace",
+            Rc::new(move || a.vm.layout.toggle_workspace()),
+        );
     }
     {
         let a = app.clone();
@@ -262,7 +277,10 @@ fn build_menu_bar(window: &ApplicationWindow, app: &Rc<AppState>) -> gtk::Popove
     {
         let a = app.clone();
         let w2 = w.clone();
-        register("preferences", Rc::new(move || crate::settings_view::open(&a, Some(&w2))));
+        register(
+            "preferences",
+            Rc::new(move || crate::settings_view::open(&a, Some(&w2))),
+        );
     }
     {
         let a = app.clone();
@@ -279,12 +297,18 @@ fn build_menu_bar(window: &ApplicationWindow, app: &Rc<AppState>) -> gtk::Popove
     {
         let a = app.clone();
         let w2 = w.clone();
-        register("command-palette", Rc::new(move || crate::palette::open_command_palette(&a, &w2)));
+        register(
+            "command-palette",
+            Rc::new(move || crate::palette::open_command_palette(&a, &w2)),
+        );
     }
     {
         let a = app.clone();
         let w2 = w.clone();
-        register("quick-open", Rc::new(move || crate::palette::open_quick_open(&a, &w2)));
+        register(
+            "quick-open",
+            Rc::new(move || crate::palette::open_quick_open(&a, &w2)),
+        );
     }
     register("find-in-editor", Rc::new(show_find_bar));
     {
@@ -333,7 +357,10 @@ fn build_menu_bar(window: &ApplicationWindow, app: &Rc<AppState>) -> gtk::Popove
     }
 
     // Keyboard accelerators (shown automatically in the menu by GTK).
-    if let Some(gapp) = window.application().and_then(|a| a.downcast::<gtk::Application>().ok()) {
+    if let Some(gapp) = window
+        .application()
+        .and_then(|a| a.downcast::<gtk::Application>().ok())
+    {
         for (action, accels) in [
             ("win.new", &["<Ctrl>n"][..]),
             ("win.open", &["<Ctrl>o"]),
@@ -357,7 +384,10 @@ fn build_menu_bar(window: &ApplicationWindow, app: &Rc<AppState>) -> gtk::Popove
             ("win.dbg-step-in", &["F11"]),
             ("win.dbg-step-out", &["<Shift>F11"]),
             ("win.preferences", &["<Ctrl>comma"]),
-            ("win.zoom-in", &["<Ctrl>equal", "<Ctrl>plus", "<Ctrl>KP_Add"]),
+            (
+                "win.zoom-in",
+                &["<Ctrl>equal", "<Ctrl>plus", "<Ctrl>KP_Add"],
+            ),
             ("win.zoom-out", &["<Ctrl>minus", "<Ctrl>KP_Subtract"]),
             ("win.zoom-reset", &["<Ctrl>0"]),
         ] {
@@ -561,11 +591,18 @@ fn build_toolbar(window: &ApplicationWindow, app: &Rc<AppState>) -> GtkBox {
 
     // Target + Compile.
     row.append(&field_label("Target:"));
-    let target_dd = DropDown::from_strings(&CompilerTarget::ALL.iter().map(|t| t.label()).collect::<Vec<_>>());
+    let target_dd = DropDown::from_strings(
+        &CompilerTarget::ALL
+            .iter()
+            .map(|t| t.label())
+            .collect::<Vec<_>>(),
+    );
     {
         let app = app.clone();
         target_dd.connect_selected_notify(move |dd| {
-            app.vm.toolbar.set_target(CompilerTarget::ALL[dd.selected() as usize]);
+            app.vm
+                .toolbar
+                .set_target(CompilerTarget::ALL[dd.selected() as usize]);
         });
     }
     row.append(&target_dd);
@@ -580,7 +617,10 @@ fn build_toolbar(window: &ApplicationWindow, app: &Rc<AppState>) -> GtkBox {
     // Optimization + Numeric Mode (stacked labeled dropdowns).
     let opt_col = labeled_dropdown(
         "Optimization:",
-        &OptimizationProfile::ALL.iter().map(|o| o.label()).collect::<Vec<_>>(),
+        &OptimizationProfile::ALL
+            .iter()
+            .map(|o| o.label())
+            .collect::<Vec<_>>(),
         {
             let app = app.clone();
             move |i| app.vm.toolbar.set_optimization(OptimizationProfile::ALL[i])
@@ -588,7 +628,10 @@ fn build_toolbar(window: &ApplicationWindow, app: &Rc<AppState>) -> GtkBox {
     );
     let num_col = labeled_dropdown(
         "Numeric Mode:",
-        &NumericMode::ALL.iter().map(|n| n.label()).collect::<Vec<_>>(),
+        &NumericMode::ALL
+            .iter()
+            .map(|n| n.label())
+            .collect::<Vec<_>>(),
         {
             let app = app.clone();
             move |i| app.vm.toolbar.set_numeric_mode(NumericMode::ALL[i])
@@ -733,7 +776,12 @@ fn new_untitled(app: &Rc<AppState>) {
 }
 
 /// A notebook tab label: file-kind icon + name + close button.
-fn tab_label(content: &impl IsA<gtk::Widget>, name: &str, app: &Rc<AppState>, id: Option<u64>) -> GtkBox {
+fn tab_label(
+    content: &impl IsA<gtk::Widget>,
+    name: &str,
+    app: &Rc<AppState>,
+    id: Option<u64>,
+) -> GtkBox {
     let row = GtkBox::new(Orientation::Horizontal, 5);
     row.add_css_class("mf-tab-label");
     let icon = Image::from_icon_name(tab_icon(name));
@@ -845,7 +893,11 @@ fn build_explorer(app: &Rc<AppState>) -> GtkBox {
     folder_lbl.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
     let fl = folder_lbl.clone();
     app.vm.project.root_url.bind(move |url| {
-        fl.set_text(&url.as_ref().map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|| "—".into()));
+        fl.set_text(
+            &url.as_ref()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "—".into()),
+        );
     });
     panel.append(&folder_lbl);
 
@@ -931,7 +983,10 @@ fn build_run_panel(app: &Rc<AppState>) -> GtkBox {
         let update = move |_: &Option<u64>| match appc.vm.editor.active_tab() {
             Some(t) => match t.url {
                 Some(url) => {
-                    let dir = url.parent().map(|p| p.display().to_string()).unwrap_or_default();
+                    let dir = url
+                        .parent()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default();
                     program.set_text(&format!("{}\n{}", t.name, dir));
                 }
                 None => program.set_text(&format!("{} — unsaved (Save to run / debug)", t.name)),
@@ -985,8 +1040,13 @@ fn build_run_panel(app: &Rc<AppState>) -> GtkBox {
     // BINARIES — the resolved toolchain paths with existence checks.
     body.append(&sub_header("BINARIES"));
     body.append(&binary_row("matlabc", &app.settings.matlabc_path));
-    body.append(&binary_row("libMatlabRuntime.a", &app.settings.runtime_archive));
-    let note = Label::new(Some("Set $MATLABC_PATH or ~/.config/matforge/config.toml to override."));
+    body.append(&binary_row(
+        "libMatlabRuntime.a",
+        &app.settings.runtime_archive,
+    ));
+    let note = Label::new(Some(
+        "Set $MATLABC_PATH or ~/.config/matforge/config.toml to override.",
+    ));
     note.add_css_class("mf-text-muted");
     note.set_halign(gtk::Align::Start);
     note.set_wrap(true);
@@ -1006,7 +1066,11 @@ fn binary_row(name: &str, path: &Path) -> GtkBox {
     let exists = path.exists();
     let head = Label::new(Some(&format!("{} {name}", if exists { "✓" } else { "✗" })));
     head.set_halign(gtk::Align::Start);
-    head.add_css_class(if exists { "mf-badge-ok" } else { "mf-badge-fail" });
+    head.add_css_class(if exists {
+        "mf-badge-ok"
+    } else {
+        "mf-badge-fail"
+    });
     let p = Label::new(Some(&path.display().to_string()));
     p.add_css_class("mf-text-muted");
     p.add_css_class("mf-mono");
@@ -1087,7 +1151,9 @@ fn build_hdl_panel(app: &Rc<AppState>) -> GtkBox {
         });
     }
     body.append(&va);
-    let va_note = Label::new(Some("Runs the script; writeVerilogA(...) calls emit .va files."));
+    let va_note = Label::new(Some(
+        "Runs the script; writeVerilogA(...) calls emit .va files.",
+    ));
     va_note.add_css_class("mf-text-muted");
     va_note.set_halign(gtk::Align::Start);
     va_note.set_wrap(true);
@@ -1116,7 +1182,10 @@ fn build_hdl_panel(app: &Rc<AppState>) -> GtkBox {
                     format!("— no {name} yet")
                 }
             };
-            sv_state.set_text(&mark(arts.contains_key(&ConsoleTab::SystemVerilog), "SystemVerilog"));
+            sv_state.set_text(&mark(
+                arts.contains_key(&ConsoleTab::SystemVerilog),
+                "SystemVerilog",
+            ));
             va_state.set_text(&mark(arts.contains_key(&ConsoleTab::VerilogA), "Verilog-A"));
         });
     }
@@ -1160,7 +1229,11 @@ fn build_docs_panel(app: &Rc<AppState>) -> GtkBox {
             return;
         }
         for path in md.iter().take(300) {
-            let rel = path.strip_prefix(root).unwrap_or(path).to_string_lossy().into_owned();
+            let rel = path
+                .strip_prefix(root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .into_owned();
             let btn = Button::with_label(&rel);
             btn.set_has_frame(false);
             btn.set_halign(gtk::Align::Start);
@@ -1177,10 +1250,15 @@ fn build_docs_panel(app: &Rc<AppState>) -> GtkBox {
 
 /// Recursively collect `.md` files under `dir` (depth-limited, skips dot-dirs).
 fn collect_markdown(dir: &Path, depth: usize, out: &mut Vec<std::path::PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
-        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         if name.starts_with('.') {
             continue;
         }
@@ -1219,8 +1297,18 @@ fn build_search(app: &Rc<AppState>) -> GtkBox {
     panel.append(&entry);
 
     // Match-mode selector.
-    let mode_dd = DropDown::from_strings(&SearchMode::ALL.iter().map(|m| m.label()).collect::<Vec<_>>());
-    mode_dd.set_selected(SearchMode::ALL.iter().position(|m| *m == SearchMode::Both).unwrap_or(0) as u32);
+    let mode_dd = DropDown::from_strings(
+        &SearchMode::ALL
+            .iter()
+            .map(|m| m.label())
+            .collect::<Vec<_>>(),
+    );
+    mode_dd.set_selected(
+        SearchMode::ALL
+            .iter()
+            .position(|m| *m == SearchMode::Both)
+            .unwrap_or(0) as u32,
+    );
     mode_dd.set_margin_start(8);
     mode_dd.set_margin_end(8);
     mode_dd.set_margin_top(4);
@@ -1252,7 +1340,9 @@ fn build_search(app: &Rc<AppState>) -> GtkBox {
         let app = app.clone();
         let run = run_search.clone();
         mode_dd.connect_selected_notify(move |dd| {
-            app.vm.search.set_mode(SearchMode::ALL[dd.selected() as usize]);
+            app.vm
+                .search
+                .set_mode(SearchMode::ALL[dd.selected() as usize]);
             run();
         });
     }
@@ -1286,8 +1376,15 @@ fn build_search(app: &Rc<AppState>) -> GtkBox {
 }
 
 /// One clickable find-in-files result: `file:line` over a trimmed preview.
-fn search_result_row(app: &Rc<AppState>, result: &matforge_core::viewmodels::search::SearchResult) -> Button {
-    let name = result.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+fn search_result_row(
+    app: &Rc<AppState>,
+    result: &matforge_core::viewmodels::search::SearchResult,
+) -> Button {
+    let name = result
+        .path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let location = match result.line {
         Some(line) => format!("{name}:{line}"),
         None => name,
@@ -1356,7 +1453,12 @@ fn build_compiler_panel(app: &Rc<AppState>) -> GtkBox {
                 }
             };
             badge.set_text(text);
-            for c in ["mf-badge-busy", "mf-badge-ok", "mf-badge-fail", "mf-badge-idle"] {
+            for c in [
+                "mf-badge-busy",
+                "mf-badge-ok",
+                "mf-badge-fail",
+                "mf-badge-idle",
+            ] {
                 badge.remove_css_class(c);
             }
             badge.add_css_class(class);
@@ -1401,7 +1503,12 @@ fn build_compiler_panel(app: &Rc<AppState>) -> GtkBox {
 
     // TARGET — language picker + the matlabc emit flag it maps to.
     body.append(&sub_header("TARGET"));
-    let target_dd = DropDown::from_strings(&CompilerTarget::ALL.iter().map(|t| t.label()).collect::<Vec<_>>());
+    let target_dd = DropDown::from_strings(
+        &CompilerTarget::ALL
+            .iter()
+            .map(|t| t.label())
+            .collect::<Vec<_>>(),
+    );
     target_dd.set_margin_start(8);
     target_dd.set_margin_end(8);
     body.append(&target_dd);
@@ -1415,7 +1522,9 @@ fn build_compiler_panel(app: &Rc<AppState>) -> GtkBox {
     {
         let app = app.clone();
         target_dd.connect_selected_notify(move |dd| {
-            app.vm.toolbar.set_target(CompilerTarget::ALL[dd.selected() as usize]);
+            app.vm
+                .toolbar
+                .set_target(CompilerTarget::ALL[dd.selected() as usize]);
         });
     }
     {
@@ -1431,7 +1540,12 @@ fn build_compiler_panel(app: &Rc<AppState>) -> GtkBox {
 
     // OPTIONS — optimization + numeric mode (same state as the toolbar).
     body.append(&sub_header("OPTIONS"));
-    let opt_dd = DropDown::from_strings(&OptimizationProfile::ALL.iter().map(|o| o.label()).collect::<Vec<_>>());
+    let opt_dd = DropDown::from_strings(
+        &OptimizationProfile::ALL
+            .iter()
+            .map(|o| o.label())
+            .collect::<Vec<_>>(),
+    );
     opt_dd.set_margin_start(8);
     opt_dd.set_margin_end(8);
     opt_dd.set_margin_top(2);
@@ -1439,7 +1553,9 @@ fn build_compiler_panel(app: &Rc<AppState>) -> GtkBox {
     {
         let app = app.clone();
         opt_dd.connect_selected_notify(move |dd| {
-            app.vm.toolbar.set_optimization(OptimizationProfile::ALL[dd.selected() as usize]);
+            app.vm
+                .toolbar
+                .set_optimization(OptimizationProfile::ALL[dd.selected() as usize]);
         });
     }
     {
@@ -1450,7 +1566,12 @@ fn build_compiler_panel(app: &Rc<AppState>) -> GtkBox {
             }
         });
     }
-    let num_dd = DropDown::from_strings(&NumericMode::ALL.iter().map(|n| n.label()).collect::<Vec<_>>());
+    let num_dd = DropDown::from_strings(
+        &NumericMode::ALL
+            .iter()
+            .map(|n| n.label())
+            .collect::<Vec<_>>(),
+    );
     num_dd.set_margin_start(8);
     num_dd.set_margin_end(8);
     num_dd.set_margin_top(4);
@@ -1458,7 +1579,9 @@ fn build_compiler_panel(app: &Rc<AppState>) -> GtkBox {
     {
         let app = app.clone();
         num_dd.connect_selected_notify(move |dd| {
-            app.vm.toolbar.set_numeric_mode(NumericMode::ALL[dd.selected() as usize]);
+            app.vm
+                .toolbar
+                .set_numeric_mode(NumericMode::ALL[dd.selected() as usize]);
         });
     }
     {
@@ -1659,7 +1782,9 @@ fn build_debug_panel(app: &Rc<AppState>) -> ScrolledWindow {
         let app = app.clone();
         let filter = f.filter.clone();
         cb.connect_toggled(move |c| {
-            app.vm.breakpoints.set_exception_enabled(&filter, c.is_active());
+            app.vm
+                .breakpoints
+                .set_exception_enabled(&filter, c.is_active());
             app.send_exception_breakpoints();
         });
         panel.append(&cb);
@@ -1752,7 +1877,11 @@ fn build_debug_panel(app: &Rc<AppState>) -> ScrolledWindow {
     app.vm.debug.locals.bind(move |locals| {
         clear_list(&locals_list);
         for v in locals {
-            let ty = v.type_hint.as_deref().map(|t| format!("  [{t}]")).unwrap_or_default();
+            let ty = v
+                .type_hint
+                .as_deref()
+                .map(|t| format!("  [{t}]"))
+                .unwrap_or_default();
             locals_list.append(&row_label(&format!("{} = {}{}", v.name, v.value, ty)));
         }
     });
@@ -1814,7 +1943,11 @@ thread_local! {
 /// Current divider positions `(sidebar_width, workspace_split)` for persistence,
 /// or `None` before the window is built.
 pub fn layout_pane_positions() -> Option<(i32, i32)> {
-    LAYOUT_PANES.with(|p| p.borrow().as_ref().map(|(outer, right)| (outer.position(), right.position())))
+    LAYOUT_PANES.with(|p| {
+        p.borrow()
+            .as_ref()
+            .map(|(outer, right)| (outer.position(), right.position()))
+    })
 }
 
 /// Mark `fc` as the visible flowchart (its tab just mapped). Used by Run.
@@ -1862,7 +1995,9 @@ fn show_find_bar() {
 
 /// A small "Go to line" prompt; jumps the active editor tab on Enter.
 fn goto_line_prompt(app: &Rc<AppState>, parent: &ApplicationWindow) {
-    let Some(tab) = app.vm.editor.active_tab() else { return };
+    let Some(tab) = app.vm.editor.active_tab() else {
+        return;
+    };
     let win = gtk::Window::builder()
         .transient_for(parent)
         .modal(true)
@@ -1944,7 +2079,9 @@ fn build_find_bar() -> gtk::Revealer {
     let search = {
         let count = count.clone();
         move |query: &str, forward: bool, reset: bool| {
-            let Some(view) = editor_view::active_view() else { return };
+            let Some(view) = editor_view::active_view() else {
+                return;
+            };
             let buffer = view.buffer();
             if query.is_empty() {
                 count.set_text("");
@@ -2227,10 +2364,15 @@ fn open_file_in_editor(app: &Rc<AppState>, path: &Path) {
         return;
     }
     let Ok(id) = app.vm.open_file(path) else {
-        app.vm.console.log(ConsoleLevel::Error, format!("could not open {}", path.display()));
+        app.vm.console.log(
+            ConsoleLevel::Error,
+            format!("could not open {}", path.display()),
+        );
         return;
     };
-    let Some(tab) = app.vm.editor.active_tab() else { return };
+    let Some(tab) = app.vm.editor.active_tab() else {
+        return;
+    };
     EDITOR_NB.with(|nb| {
         let nb = nb.borrow();
         let Some(nb) = nb.as_ref() else { return };
@@ -2245,7 +2387,11 @@ fn open_file_in_editor(app: &Rc<AppState>, path: &Path) {
 /// Open a fresh demo flowchart (used for demos / verification).
 pub fn open_demo_flowchart(app: &Rc<AppState>, signal: bool) {
     use matforge_core::models::flowchart::{NodeKind, SchemaKind};
-    let kind = if signal { SchemaKind::SignalFlow } else { SchemaKind::ControlFlow };
+    let kind = if signal {
+        SchemaKind::SignalFlow
+    } else {
+        SchemaKind::ControlFlow
+    };
     let fc = Rc::new(FlowchartViewModel::empty("Demo", kind));
     if signal {
         let c = fc.add_node(NodeKind::SignalConstant, 80.0, 120.0);
@@ -2326,7 +2472,11 @@ fn new_document_dialog(app: &Rc<AppState>) {
 
     let script = new_doc_option(ic::FILE, "MATLAB Script", "A blank .m script");
     let mflow = new_doc_option(ic::FLOWCHART, "mFlow Diagram", "Control-flow flowchart");
-    let mflink = new_doc_option(ic::FLOWCHART, "mFlowLink Model", "Signal-flow model you can simulate");
+    let mflink = new_doc_option(
+        ic::FLOWCHART,
+        "mFlowLink Model",
+        "Signal-flow model you can simulate",
+    );
     bar.append(&script);
     bar.append(&mflow);
     bar.append(&mflink);
@@ -2406,18 +2556,25 @@ fn open_flowchart(app: &Rc<AppState>, path: &Path) {
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) => {
-            app.vm.console.log(ConsoleLevel::Error, format!("open {}: {e}", path.display()));
+            app.vm
+                .console
+                .log(ConsoleLevel::Error, format!("open {}: {e}", path.display()));
             return;
         }
     };
     let doc = match matforge_core::services::flowchart_codec::decode_str(&text) {
         Ok(d) => d,
         Err(e) => {
-            app.vm.console.log(ConsoleLevel::Error, format!("invalid .mflow: {e}"));
+            app.vm
+                .console
+                .log(ConsoleLevel::Error, format!("invalid .mflow: {e}"));
             return;
         }
     };
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let fc = Rc::new(FlowchartViewModel::from_document(doc));
     let view = crate::flowchart_view::build_flowchart_view(app, fc, Some(path.to_path_buf()));
     EDITOR_NB.with(|nb| {
@@ -2432,7 +2589,9 @@ fn open_flowchart(app: &Rc<AppState>, path: &Path) {
 }
 
 fn save_active(app: &Rc<AppState>) {
-    let Some(tab) = app.vm.editor.active_tab() else { return };
+    let Some(tab) = app.vm.editor.active_tab() else {
+        return;
+    };
     match tab.url {
         Some(url) => write_tab(app, tab.id, &url, &tab.contents),
         None => save_as_dialog(app, tab.id, &tab.name, &tab.contents),
@@ -2454,11 +2613,19 @@ fn save_as_dialog(app: &Rc<AppState>, id: u64, suggested: &str, contents: &str) 
                 if std::fs::write(&path, &contents).is_ok() {
                     app.vm.editor.save_as(id, &path);
                     rename_tab_label(id, &path);
-                    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                    app.vm.status_bar.set_message(format!("Saved {}", path.display()));
+                    let name = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    app.vm
+                        .status_bar
+                        .set_message(format!("Saved {}", path.display()));
                     app.vm.toast.show(format!("Saved {name}"));
                 } else {
-                    app.vm.console.log(ConsoleLevel::Error, format!("save failed: {}", path.display()));
+                    app.vm.console.log(
+                        ConsoleLevel::Error,
+                        format!("save failed: {}", path.display()),
+                    );
                 }
             }
         }
@@ -2469,23 +2636,39 @@ fn write_tab(app: &Rc<AppState>, id: u64, url: &Path, contents: &str) {
     match std::fs::write(url, contents) {
         Ok(()) => {
             app.vm.editor.mark_saved(id);
-            let name = url.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            app.vm.status_bar.set_message(format!("Saved {}", url.display()));
+            let name = url
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            app.vm
+                .status_bar
+                .set_message(format!("Saved {}", url.display()));
             app.vm.toast.show(format!("Saved {name}"));
         }
-        Err(e) => app.vm.console.log(ConsoleLevel::Error, format!("save failed: {e}")),
+        Err(e) => app
+            .vm
+            .console
+            .log(ConsoleLevel::Error, format!("save failed: {e}")),
     }
 }
 
 /// Update the visible notebook tab label after a Save As (icon + name).
 fn rename_tab_label(id: u64, path: &Path) {
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     EDITOR_NB.with(|nb| {
         let nb = nb.borrow();
         let Some(nb) = nb.as_ref() else { return };
         let Some(p) = nb.current_page() else { return };
-        let Some(page) = nb.nth_page(Some(p)) else { return };
-        let Some(label_box) = nb.tab_label(&page).and_then(|w| w.downcast::<GtkBox>().ok()) else {
+        let Some(page) = nb.nth_page(Some(p)) else {
+            return;
+        };
+        let Some(label_box) = nb
+            .tab_label(&page)
+            .and_then(|w| w.downcast::<GtkBox>().ok())
+        else {
             return;
         };
         let mut child = label_box.first_child();
@@ -2712,16 +2895,21 @@ fn build_console(app: &Rc<AppState>) -> GtkBox {
         let view = console_view.clone();
         let app = app.clone();
         click.connect_released(move |_g, _n, x, y| {
-            let (bx, by) = view.window_to_buffer_coords(gtk::TextWindowType::Widget, x as i32, y as i32);
-            let Some(iter) = view.iter_at_location(bx, by) else { return };
+            let (bx, by) =
+                view.window_to_buffer_coords(gtk::TextWindowType::Widget, x as i32, y as i32);
+            let Some(iter) = view.iter_at_location(bx, by) else {
+                return;
+            };
             let buf = view.buffer();
-            let Some(tag) = buf.tag_table().lookup("link") else { return };
+            let Some(tag) = buf.tag_table().lookup("link") else {
+                return;
+            };
             if !iter.has_tag(&tag) {
                 return;
             }
             // Re-parse the clicked line for the reference and jump to it.
-            let mut ls = buf.iter_at_line(iter.line()).unwrap_or_else(|| iter.clone());
-            let mut le = ls.clone();
+            let mut ls = buf.iter_at_line(iter.line()).unwrap_or(iter);
+            let mut le = ls;
             le.forward_to_line_end();
             let line_text = buf.text(&ls, &le, false).to_string();
             ls.set_line_offset(0);
@@ -2764,7 +2952,10 @@ fn build_console(app: &Rc<AppState>) -> GtkBox {
                     .file_name()
                     .map(|f| f.to_string_lossy().into_owned())
                     .unwrap_or_else(|| d.file.clone());
-                let btn = Button::with_label(&format!("{icon}  {file}:{}:{}   {}", d.line, d.column, d.message));
+                let btn = Button::with_label(&format!(
+                    "{icon}  {file}:{}:{}   {}",
+                    d.line, d.column, d.message
+                ));
                 btn.set_has_frame(false);
                 btn.set_halign(gtk::Align::Start);
                 btn.add_css_class("mf-row");
@@ -2855,7 +3046,10 @@ fn build_console(app: &Rc<AppState>) -> GtkBox {
             let nb = nb.clone();
             let count = count.clone();
             move |query: &str, forward: bool, reset: bool| match current_tab_view(&nb) {
-                Some(view) => count.set_text(&search_count_text(query, output_search(&view, query, forward, reset))),
+                Some(view) => count.set_text(&search_count_text(
+                    query,
+                    output_search(&view, query, forward, reset),
+                )),
                 None => count.set_text(""),
             }
         };
@@ -2893,7 +3087,12 @@ fn build_console(app: &Rc<AppState>) -> GtkBox {
 /// Replace the editable command (from `input_start` to the buffer end) with
 /// `text`, used by ↑/↓ history recall. Marked programmatic so the read-only
 /// guard does not veto the edit.
-fn replace_input(cbuf: &gtk::TextBuffer, prog: &Rc<Cell<bool>>, input_start: &gtk::TextMark, text: &str) {
+fn replace_input(
+    cbuf: &gtk::TextBuffer,
+    prog: &Rc<Cell<bool>>,
+    input_start: &gtk::TextMark,
+    text: &str,
+) {
     prog.set(true);
     let mut start = cbuf.iter_at_mark(input_start);
     let mut end = cbuf.end_iter();
@@ -3053,7 +3252,9 @@ fn level_tag(level: ConsoleLevel) -> &'static str {
 /// signature matrix-retro greens (bright inks that pop on near-black); light
 /// themes derive readable dark inks from the theme so the console reads like a
 /// classic white MATLAB Command Window.
-fn console_tag_colors(t: &matforge_core::theme::ThemeTokens) -> [(&'static str, matforge_core::theme::Rgb); 7] {
+fn console_tag_colors(
+    t: &matforge_core::theme::ThemeTokens,
+) -> [(&'static str, matforge_core::theme::Rgb); 7] {
     use matforge_core::theme::Rgb;
     if t.dark {
         [
@@ -3099,7 +3300,10 @@ fn refresh_console_tags(buf: &gtk::TextBuffer, tokens: &matforge_core::theme::Th
         None => {
             buf.create_tag(
                 Some("link"),
-                &[("foreground", &link), ("underline", &gtk::pango::Underline::Single)],
+                &[
+                    ("foreground", &link),
+                    ("underline", &gtk::pango::Underline::Single),
+                ],
             );
         }
     }
@@ -3126,15 +3330,101 @@ fn console_insert_line(
 /// Common MATLAB functions/keywords offered by Tab-completion, alongside live
 /// workspace variables and command history.
 const MATLAB_BUILTINS: &[&str] = &[
-    "abs", "acos", "all", "angle", "any", "asin", "atan", "atan2", "axis", "bar", "cat", "ceil",
-    "cell", "clc", "clear", "close", "cos", "cumsum", "det", "diag", "diff", "disp", "dot", "eig",
-    "else", "elseif", "end", "error", "exp", "eye", "fft", "figure", "find", "fix", "fliplr",
-    "flipud", "floor", "for", "fprintf", "function", "grid", "hold", "if", "imag", "inv",
-    "isempty", "isnan", "kron", "legend", "length", "linspace", "load", "log", "log10", "magic",
-    "max", "mean", "median", "min", "mod", "norm", "numel", "ones", "plot", "plot3", "prod",
-    "rand", "randn", "real", "repmat", "reshape", "return", "round", "save", "scatter", "sign",
-    "sin", "size", "sort", "sprintf", "sqrt", "subplot", "sum", "surf", "tan", "title",
-    "transpose", "trace", "while", "who", "whos", "xlabel", "ylabel", "zeros", "zlabel",
+    "abs",
+    "acos",
+    "all",
+    "angle",
+    "any",
+    "asin",
+    "atan",
+    "atan2",
+    "axis",
+    "bar",
+    "cat",
+    "ceil",
+    "cell",
+    "clc",
+    "clear",
+    "close",
+    "cos",
+    "cumsum",
+    "det",
+    "diag",
+    "diff",
+    "disp",
+    "dot",
+    "eig",
+    "else",
+    "elseif",
+    "end",
+    "error",
+    "exp",
+    "eye",
+    "fft",
+    "figure",
+    "find",
+    "fix",
+    "fliplr",
+    "flipud",
+    "floor",
+    "for",
+    "fprintf",
+    "function",
+    "grid",
+    "hold",
+    "if",
+    "imag",
+    "inv",
+    "isempty",
+    "isnan",
+    "kron",
+    "legend",
+    "length",
+    "linspace",
+    "load",
+    "log",
+    "log10",
+    "magic",
+    "max",
+    "mean",
+    "median",
+    "min",
+    "mod",
+    "norm",
+    "numel",
+    "ones",
+    "plot",
+    "plot3",
+    "prod",
+    "rand",
+    "randn",
+    "real",
+    "repmat",
+    "reshape",
+    "return",
+    "round",
+    "save",
+    "scatter",
+    "sign",
+    "sin",
+    "size",
+    "sort",
+    "sprintf",
+    "sqrt",
+    "subplot",
+    "sum",
+    "surf",
+    "tan",
+    "title",
+    "transpose",
+    "trace",
+    "while",
+    "who",
+    "whos",
+    "xlabel",
+    "ylabel",
+    "zeros",
+    "zlabel",
 ];
 
 /// Tab-complete the identifier left of the caret in the console input. Completes
@@ -3146,14 +3436,24 @@ fn tab_complete(app: &Rc<AppState>, cbuf: &gtk::TextBuffer, input_start: &gtk::T
     if caret < is_off {
         return;
     }
-    let before = cbuf.text(&cbuf.iter_at_offset(is_off), &cbuf.iter_at_offset(caret), false).to_string();
-    let word_start = before.rfind(|c: char| !(c.is_alphanumeric() || c == '_')).map_or(0, |i| i + 1);
+    let before = cbuf
+        .text(
+            &cbuf.iter_at_offset(is_off),
+            &cbuf.iter_at_offset(caret),
+            false,
+        )
+        .to_string();
+    let word_start = before
+        .rfind(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .map_or(0, |i| i + 1);
     let word = &before[word_start..];
     if word.is_empty() {
         return;
     }
     let cands = completion_candidates(app, word);
-    let Some(common) = longest_common_prefix(&cands) else { return };
+    let Some(common) = longest_common_prefix(&cands) else {
+        return;
+    };
     if common.len() > word.len() {
         cbuf.insert_at_cursor(&common[word.len()..]);
     } else if cands.len() > 1 {
@@ -3233,12 +3533,11 @@ fn find_source_link(line: &str) -> Option<(usize, usize, String, usize)> {
 fn goto_problem(app: &Rc<AppState>, file: &str, line: usize) {
     let path = std::path::Path::new(file);
     open_file_in_editor(app, path);
-    if let Some(id) = app
-        .vm
-        .editor
-        .tabs
-        .with(|ts| ts.iter().find(|t| t.url.as_deref() == Some(path)).map(|t| t.id))
-    {
+    if let Some(id) = app.vm.editor.tabs.with(|ts| {
+        ts.iter()
+            .find(|t| t.url.as_deref() == Some(path))
+            .map(|t| t.id)
+    }) {
         app.vm.editor.request_goto(id, line);
     }
 }
@@ -3248,10 +3547,16 @@ fn goto_problem(app: &Rc<AppState>, file: &str, line: usize) {
 fn export_selected_figure(app: &Rc<AppState>) {
     use matforge_core::models::PlotFigure;
     let Some(id) = app.vm.plots.selected_id.get() else {
-        app.vm.status_bar.set_message("No figure selected to export");
+        app.vm
+            .status_bar
+            .set_message("No figure selected to export");
         return;
     };
-    let Some(figure) = app.vm.plots.figures.with(|f| f.iter().find(|fig| fig.id == id).cloned())
+    let Some(figure) = app
+        .vm
+        .plots
+        .figures
+        .with(|f| f.iter().find(|fig| fig.id == id).cloned())
     else {
         return;
     };
@@ -3283,15 +3588,26 @@ fn export_selected_figure(app: &Rc<AppState>) {
         Some(texture.save_to_png_bytes().to_vec())
     };
     let Some(png) = render_png(&figure) else {
-        app.vm.console.log(ConsoleLevel::Error, "could not render figure to PNG");
+        app.vm
+            .console
+            .log(ConsoleLevel::Error, "could not render figure to PNG");
         return;
     };
 
     let suggested = format!(
         "{}.png",
-        figure.title.split(['·', ' ']).next().unwrap_or("figure").trim().replace(' ', "_")
+        figure
+            .title
+            .split(['·', ' '])
+            .next()
+            .unwrap_or("figure")
+            .trim()
+            .replace(' ', "_")
     );
-    let dialog = gtk::FileDialog::builder().title("Export Figure").initial_name(suggested).build();
+    let dialog = gtk::FileDialog::builder()
+        .title("Export Figure")
+        .initial_name(suggested)
+        .build();
     let parent = MAIN_WINDOW.with(|w| w.borrow().clone());
     let app = app.clone();
     dialog.save(parent.as_ref(), gio::Cancellable::NONE, move |result| {
@@ -3299,10 +3615,15 @@ fn export_selected_figure(app: &Rc<AppState>) {
             if let Some(path) = file.path() {
                 match std::fs::write(&path, &png) {
                     Ok(()) => {
-                        app.vm.status_bar.set_message(format!("Exported {}", path.display()));
+                        app.vm
+                            .status_bar
+                            .set_message(format!("Exported {}", path.display()));
                         app.vm.toast.show("Figure exported");
                     }
-                    Err(e) => app.vm.console.log(ConsoleLevel::Error, format!("export failed: {e}")),
+                    Err(e) => app
+                        .vm
+                        .console
+                        .log(ConsoleLevel::Error, format!("export failed: {e}")),
                 }
             }
         }
@@ -3331,16 +3652,24 @@ fn build_right_column(app: &Rc<AppState>) -> Paned {
     paned.set_resize_end_child(true);
     // Restore the persisted workspace|plots split (kept within the fixed 470px
     // right column so it can't starve the workspace and re-clip it).
-    let split = matforge_core::services::preferences::Preferences::load().layout.workspace_split;
+    let split = matforge_core::services::preferences::Preferences::load()
+        .layout
+        .workspace_split;
     paned.set_position(split.clamp(200, 360));
 
     {
         let workspace = workspace.clone();
-        app.vm.layout.workspace_visible.bind(move |v| workspace.set_visible(*v));
+        app.vm
+            .layout
+            .workspace_visible
+            .bind(move |v| workspace.set_visible(*v));
     }
     {
         let plots = plots.clone();
-        app.vm.layout.plots_visible.bind(move |v| plots.set_visible(*v));
+        app.vm
+            .layout
+            .plots_visible
+            .bind(move |v| plots.set_visible(*v));
     }
     // A new figure re-opens the Plots panel if it was closed.
     {
@@ -3409,7 +3738,11 @@ fn build_workspace(app: &Rc<AppState>) -> GtkBox {
             let (col, asc) = sort.get();
             for (i, l) in header_lbls.iter().enumerate() {
                 if i == col {
-                    l.set_text(&format!("{} {}", WS_COLS[i].title, if asc { "▲" } else { "▼" }));
+                    l.set_text(&format!(
+                        "{} {}",
+                        WS_COLS[i].title,
+                        if asc { "▲" } else { "▼" }
+                    ));
                 } else {
                     l.set_text(WS_COLS[i].title);
                 }
@@ -3508,7 +3841,10 @@ fn build_workspace(app: &Rc<AppState>) -> GtkBox {
     // workspace's column slot and clips the whole panel. Scrolling tabs lets it
     // shrink to the available width instead.
     insp.set_scrollable(true);
-    insp.append_page(&build_variable_inspector(app), Some(&Label::new(Some("VARIABLE"))));
+    insp.append_page(
+        &build_variable_inspector(app),
+        Some(&Label::new(Some("VARIABLE"))),
+    );
     insp.append_page(&build_matrix_viewer(app), Some(&Label::new(Some("MATRIX"))));
     insp.append_page(&build_table_viewer(app), Some(&Label::new(Some("TABLE"))));
 
@@ -3679,7 +4015,9 @@ fn attach_var_menu(btn: &Button, app: &Rc<AppState>, name: &str) {
         let pop = pop.clone();
         save.connect_clicked(move |_| {
             app.repl_send(&format!("save('{name}.mat', '{name}')"));
-            app.vm.toast.show(format!("Saved {name}.mat to the working folder"));
+            app.vm
+                .toast
+                .show(format!("Saved {name}.mat to the working folder"));
             pop.popdown();
         });
     }
@@ -3726,7 +4064,11 @@ fn attach_var_menu(btn: &Button, app: &Rc<AppState>, name: &str) {
 /// A small modal text-entry dialog (Enter confirms, Esc cancels), parented to the
 /// main window. Used for one-off inputs like renaming a workspace variable.
 fn text_prompt(title: &str, initial: &str, on_ok: impl Fn(String) + 'static) {
-    let win = gtk::Window::builder().modal(true).decorated(false).default_width(280).build();
+    let win = gtk::Window::builder()
+        .modal(true)
+        .decorated(false)
+        .default_width(280)
+        .build();
     if let Some(p) = main_window() {
         win.set_transient_for(Some(&p));
     }
@@ -3786,10 +4128,34 @@ struct WsCol {
 }
 
 const WS_COLS: [WsCol; 4] = [
-    WsCol { title: "NAME", min_chars: 4, expand: true, xalign: 0.0, dim: false },
-    WsCol { title: "VALUE", min_chars: 6, expand: false, xalign: 0.0, dim: true },
-    WsCol { title: "TYPE", min_chars: 7, expand: false, xalign: 0.0, dim: true },
-    WsCol { title: "SIZE", min_chars: 7, expand: false, xalign: 1.0, dim: true },
+    WsCol {
+        title: "NAME",
+        min_chars: 4,
+        expand: true,
+        xalign: 0.0,
+        dim: false,
+    },
+    WsCol {
+        title: "VALUE",
+        min_chars: 6,
+        expand: false,
+        xalign: 0.0,
+        dim: true,
+    },
+    WsCol {
+        title: "TYPE",
+        min_chars: 7,
+        expand: false,
+        xalign: 0.0,
+        dim: true,
+    },
+    WsCol {
+        title: "SIZE",
+        min_chars: 7,
+        expand: false,
+        xalign: 1.0,
+        dim: true,
+    },
 ];
 
 /// Order two workspace variables by column: 0=name, 1=value preview, 2=type,
@@ -3810,7 +4176,10 @@ fn ws_cmp(
 /// The element count implied by a size string like "10x10" or "1×5"; 0 if it has
 /// no parseable dimensions, so non-array entries sort first.
 fn ws_size_magnitude(size: &str) -> u64 {
-    let dims: Vec<u64> = size.split(['x', '×', 'X']).filter_map(|p| p.trim().parse().ok()).collect();
+    let dims: Vec<u64> = size
+        .split(['x', '×', 'X'])
+        .filter_map(|p| p.trim().parse().ok())
+        .collect();
     if dims.is_empty() {
         0
     } else {
@@ -3823,8 +4192,17 @@ fn ws_variable_row(v: &matforge_core::models::WorkspaceVariable) -> Button {
     btn.set_has_frame(false);
     btn.add_css_class("mf-row");
     let row = GtkBox::new(Orientation::Horizontal, 4);
-    let preview = if v.preview.is_empty() { "—".into() } else { v.preview.clone() };
-    let texts = [v.name.clone(), preview.clone(), v.dtype.display_name().to_string(), v.size.clone()];
+    let preview = if v.preview.is_empty() {
+        "—".into()
+    } else {
+        v.preview.clone()
+    };
+    let texts = [
+        v.name.clone(),
+        preview.clone(),
+        v.dtype.display_name().to_string(),
+        v.size.clone(),
+    ];
     for (c, text) in WS_COLS.iter().zip(texts) {
         let l = Label::new(Some(&text));
         l.set_xalign(c.xalign);
@@ -3850,7 +4228,11 @@ fn ws_variable_row(v: &matforge_core::models::WorkspaceVariable) -> Button {
 
 fn build_variable_inspector(app: &Rc<AppState>) -> GtkBox {
     let v = GtkBox::new(Orientation::Vertical, 4);
-    let placeholder = empty_state(ic::COMPILE, "", "Select a variable in the table above to inspect its value.");
+    let placeholder = empty_state(
+        ic::COMPILE,
+        "",
+        "Select a variable in the table above to inspect its value.",
+    );
     let label = Label::new(None);
     label.set_halign(gtk::Align::Start);
     label.set_margin_start(8);
@@ -3862,7 +4244,9 @@ fn build_variable_inspector(app: &Rc<AppState>) -> GtkBox {
     let placeholder2 = placeholder.clone();
     app.vm.workspace.selected_name.bind(move |sel| match sel {
         Some(name) => {
-            label2.set_text(&format!("{name}\n\nMetadata inspection drills in via DAP when debugging."));
+            label2.set_text(&format!(
+                "{name}\n\nMetadata inspection drills in via DAP when debugging."
+            ));
             placeholder2.set_visible(false);
             label2.set_visible(true);
         }
@@ -3882,15 +4266,19 @@ fn build_matrix_viewer(app: &Rc<AppState>) -> GtkBox {
     {
         let app = app.clone();
         canvas.set_draw_func(move |_a, ctx, w, h| {
-            app.vm.workspace.inspected_matrix.with(|m| match m {
-                Some(matrix) => crate::plot_render::draw_heatmap(ctx, w as f64, h as f64, matrix),
-                None => {}
+            app.vm.workspace.inspected_matrix.with(|m| {
+                if let Some(matrix) = m {
+                    crate::plot_render::draw_heatmap(ctx, w as f64, h as f64, matrix)
+                }
             });
         });
     }
     {
         let canvas = canvas.clone();
-        app.vm.workspace.inspected_matrix.subscribe(move |_| canvas.queue_draw());
+        app.vm
+            .workspace
+            .inspected_matrix
+            .subscribe(move |_| canvas.queue_draw());
     }
     v.append(&canvas);
     v
@@ -3931,13 +4319,36 @@ fn build_table_viewer(app: &Rc<AppState>) -> GtkBox {
             let corner = table_cell("", true);
             grid.attach(&corner, 0, 0, 1, 1);
             for c in 0..max_c {
-                grid.attach(&table_cell(&format!("{}", c + 1), true), c as i32 + 1, 0, 1, 1);
+                grid.attach(
+                    &table_cell(&format!("{}", c + 1), true),
+                    c as i32 + 1,
+                    0,
+                    1,
+                    1,
+                );
             }
             for r in 0..max_r {
-                grid.attach(&table_cell(&format!("{}", r + 1), true), 0, r as i32 + 1, 1, 1);
+                grid.attach(
+                    &table_cell(&format!("{}", r + 1), true),
+                    0,
+                    r as i32 + 1,
+                    1,
+                    1,
+                );
                 for c in 0..max_c {
-                    let val = m.cells.get(r).and_then(|row| row.get(c)).copied().unwrap_or(0.0);
-                    grid.attach(&table_cell(&fmt_cell(val), false), c as i32 + 1, r as i32 + 1, 1, 1);
+                    let val = m
+                        .cells
+                        .get(r)
+                        .and_then(|row| row.get(c))
+                        .copied()
+                        .unwrap_or(0.0);
+                    grid.attach(
+                        &table_cell(&fmt_cell(val), false),
+                        c as i32 + 1,
+                        r as i32 + 1,
+                        1,
+                        1,
+                    );
                 }
             }
             if m.rows > max_r || m.cols > max_c {
@@ -3957,7 +4368,11 @@ fn build_table_viewer(app: &Rc<AppState>) -> GtkBox {
 
 fn table_cell(text: &str, header: bool) -> Label {
     let l = Label::new(Some(text));
-    l.add_css_class(if header { "mf-table-head" } else { "mf-table-cell" });
+    l.add_css_class(if header {
+        "mf-table-head"
+    } else {
+        "mf-table-cell"
+    });
     l.set_xalign(if header { 0.5 } else { 1.0 });
     l.set_width_chars(if header { 4 } else { 9 });
     l
@@ -4010,7 +4425,10 @@ fn build_plots(app: &Rc<AppState>) -> GtkBox {
         let app = app.clone();
         close.connect_clicked(move |_| app.vm.layout.plots_visible.set(false));
     }
-    panel.append(&panel_header("PLOTS", &[add, refresh, export, trash, clear, close]));
+    panel.append(&panel_header(
+        "PLOTS",
+        &[add, refresh, export, trash, clear, close],
+    ));
 
     let list = ListBox::new();
     let list_scroll = ScrolledWindow::new();
@@ -4028,7 +4446,8 @@ fn build_plots(app: &Rc<AppState>) -> GtkBox {
     let view: Rc<Cell<Option<(u64, matforge_core::models::PlotView)>>> = Rc::new(Cell::new(None));
     let hover: Rc<Cell<Option<(f64, f64)>>> = Rc::new(Cell::new(None));
     // Orbit camera for 3-D surface figures, tagged with its figure id.
-    let cam: Rc<Cell<Option<(u64, matforge_core::models::SurfaceCamera)>>> = Rc::new(Cell::new(None));
+    let cam: Rc<Cell<Option<(u64, matforge_core::models::SurfaceCamera)>>> =
+        Rc::new(Cell::new(None));
 
     // Playback state. `play_idx` is the current animation step (runtime frame, or
     // revealed-point count for a 2-D series); `playing` drives the tick loop;
@@ -4045,18 +4464,19 @@ fn build_plots(app: &Rc<AppState>) -> GtkBox {
         move || {
             let figs = app.vm.plots.figures.get();
             let sel = app.vm.plots.selected_id.get();
-            figs.iter().find(|f| Some(f.id) == sel).or_else(|| figs.last()).cloned()
+            figs.iter()
+                .find(|f| Some(f.id) == sel)
+                .or_else(|| figs.last())
+                .cloned()
         }
     };
     // The effective view for `fig`: the stored window if it's for this figure,
     // else the auto-fit window.
     let eff_view = {
         let view = view.clone();
-        move |fig: &matforge_core::models::PlotFigure| {
-            match view.get() {
-                Some((id, v)) if id == fig.id => Some(v),
-                _ => fig.auto_view(),
-            }
+        move |fig: &matforge_core::models::PlotFigure| match view.get() {
+            Some((id, v)) if id == fig.id => Some(v),
+            _ => fig.auto_view(),
         }
     };
     // The effective camera for `fig`: the stored one if it's for this figure,
@@ -4078,7 +4498,13 @@ fn build_plots(app: &Rc<AppState>) -> GtkBox {
         let play_active = play_active.clone();
         canvas.set_draw_func(move |_a, ctx, w, h| match current_fig() {
             Some(figure) if figure.is_surface() => {
-                crate::plot_render::draw_surface(ctx, w as f64, h as f64, &figure, eff_cam(&figure));
+                crate::plot_render::draw_surface(
+                    ctx,
+                    w as f64,
+                    h as f64,
+                    &figure,
+                    eff_cam(&figure),
+                );
             }
             // Runtime animation: show the scrubbed frame.
             Some(figure) if figure.is_animated() => {
@@ -4087,7 +4513,11 @@ fn build_plots(app: &Rc<AppState>) -> GtkBox {
             }
             Some(figure) => {
                 let v = eff_view(&figure);
-                let hov = if figure.is_interactive() { hover.get() } else { None };
+                let hov = if figure.is_interactive() {
+                    hover.get()
+                } else {
+                    None
+                };
                 // Trace reveal only while the series animation is engaged.
                 let reveal = if play_active.get() && figure.animation_len() > 1 {
                     Some(play_idx.get() + 1)
@@ -4273,7 +4703,11 @@ fn build_plots(app: &Rc<AppState>) -> GtkBox {
             play_btn.set_icon_name(ic::RUN);
             // Pin to the newest frame of the now-current figure.
             let fig = current_fig();
-            play_idx.set(fig.as_ref().map(|f| f.animation_len().saturating_sub(1)).unwrap_or(0));
+            play_idx.set(
+                fig.as_ref()
+                    .map(|f| f.animation_len().saturating_sub(1))
+                    .unwrap_or(0),
+            );
             update_bar(&fig);
             canvas.queue_draw();
         });
@@ -4308,7 +4742,9 @@ fn build_plots(app: &Rc<AppState>) -> GtkBox {
         let hover = hover.clone();
         let canvas2 = canvas.clone();
         scroll.connect_scroll(move |_c, _dx, dy| {
-            let Some(fig) = current_fig() else { return gtk::glib::Propagation::Proceed };
+            let Some(fig) = current_fig() else {
+                return gtk::glib::Propagation::Proceed;
+            };
             // 3-D surface: scroll scales the orbit camera.
             if fig.is_surface() {
                 let factor = if dy < 0.0 { 1.1 } else { 1.0 / 1.1 };
@@ -4316,7 +4752,9 @@ fn build_plots(app: &Rc<AppState>) -> GtkBox {
                 canvas2.queue_draw();
                 return gtk::glib::Propagation::Stop;
             }
-            let Some(v) = eff_view(&fig) else { return gtk::glib::Propagation::Proceed };
+            let Some(v) = eff_view(&fig) else {
+                return gtk::glib::Propagation::Proceed;
+            };
             let (w, h) = (canvas2.width() as f64, canvas2.height() as f64);
             let (cx, cy) = hover.get().unwrap_or((w / 2.0, h / 2.0));
             let (zx, zy) = crate::plot_render::data_at_pixel(v, w, h, cx, cy);
@@ -4332,8 +4770,10 @@ fn build_plots(app: &Rc<AppState>) -> GtkBox {
     {
         let drag = gtk::GestureDrag::new();
         drag.set_button(gtk::gdk::BUTTON_PRIMARY);
-        let start_view: Rc<Cell<Option<(u64, matforge_core::models::PlotView)>>> = Rc::new(Cell::new(None));
-        let start_cam: Rc<Cell<Option<(u64, matforge_core::models::SurfaceCamera)>>> = Rc::new(Cell::new(None));
+        let start_view: Rc<Cell<Option<(u64, matforge_core::models::PlotView)>>> =
+            Rc::new(Cell::new(None));
+        let start_cam: Rc<Cell<Option<(u64, matforge_core::models::SurfaceCamera)>>> =
+            Rc::new(Cell::new(None));
         {
             let current_fig = current_fig.clone();
             let eff_view = eff_view.clone();
@@ -4367,8 +4807,12 @@ fn build_plots(app: &Rc<AppState>) -> GtkBox {
                     canvas2.queue_draw();
                     return;
                 }
-                let Some((id, sv)) = start_view.get() else { return };
-                let Some((sx, sy)) = g.start_point() else { return };
+                let Some((id, sv)) = start_view.get() else {
+                    return;
+                };
+                let Some((sx, sy)) = g.start_point() else {
+                    return;
+                };
                 let (w, h) = (canvas2.width() as f64, canvas2.height() as f64);
                 let a = crate::plot_render::data_at_pixel(sv, w, h, sx, sy);
                 let b = crate::plot_render::data_at_pixel(sv, w, h, sx + dx, sy + dy);
@@ -4618,13 +5062,22 @@ mod completion_tests {
 
     #[test]
     fn single_candidate_completes_fully() {
-        assert_eq!(longest_common_prefix(&v(&["zeros"])).as_deref(), Some("zeros"));
+        assert_eq!(
+            longest_common_prefix(&v(&["zeros"])).as_deref(),
+            Some("zeros")
+        );
     }
 
     #[test]
     fn many_candidates_yield_common_prefix() {
-        assert_eq!(longest_common_prefix(&v(&["plot", "plot3", "plotyy"])).as_deref(), Some("plot"));
-        assert_eq!(longest_common_prefix(&v(&["sin", "size", "sign"])).as_deref(), Some("si"));
+        assert_eq!(
+            longest_common_prefix(&v(&["plot", "plot3", "plotyy"])).as_deref(),
+            Some("plot")
+        );
+        assert_eq!(
+            longest_common_prefix(&v(&["sin", "size", "sign"])).as_deref(),
+            Some("si")
+        );
     }
 
     #[test]

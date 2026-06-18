@@ -33,7 +33,11 @@ fn set_rgb(ctx: &cairo::Context, c: Rgb) {
 
 fn draw(ctx: &cairo::Context, scene: &Scene) {
     let t = crate::theme_css::current();
-    ctx.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+    ctx.select_font_face(
+        "sans-serif",
+        cairo::FontSlant::Normal,
+        cairo::FontWeight::Normal,
+    );
     ctx.set_font_size(FONT);
 
     // Edges first so node fills sit on top of the line ends.
@@ -140,7 +144,9 @@ fn label_chip(
     pos: (f64, f64),
     t: &matforge_core::theme::ThemeTokens,
 ) {
-    let Ok(ext) = ctx.text_extents(label) else { return };
+    let Ok(ext) = ctx.text_extents(label) else {
+        return;
+    };
     let pad = 3.0;
     let (bw, bh) = (ext.width() + 2.0 * pad, FONT + 2.0 * pad);
     let (bx, by) = (pos.0 - bw / 2.0, pos.1 - bh / 2.0);
@@ -148,7 +154,10 @@ fn label_chip(
     set_rgb(ctx, t.panel);
     ctx.fill().ok();
     set_rgb(ctx, t.text_secondary);
-    ctx.move_to(pos.0 - ext.width() / 2.0 - ext.x_bearing(), pos.1 + FONT / 2.0 - 2.0);
+    ctx.move_to(
+        pos.0 - ext.width() / 2.0 - ext.x_bearing(),
+        pos.1 + FONT / 2.0 - 2.0,
+    );
     ctx.show_text(label).ok();
 }
 
@@ -169,7 +178,11 @@ pub fn drawing_area_seq(scene: SeqScene) -> DrawingArea {
 
 fn draw_seq(ctx: &cairo::Context, scene: &SeqScene) {
     let t = crate::theme_css::current();
-    ctx.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+    ctx.select_font_face(
+        "sans-serif",
+        cairo::FontSlant::Normal,
+        cairo::FontWeight::Normal,
+    );
     ctx.set_font_size(FONT);
 
     // Dashed lifelines first, behind everything.
@@ -239,7 +252,10 @@ fn draw_self_loop(
     if !m.label.is_empty() {
         set_rgb(ctx, t.text_primary);
         if let Ok(ext) = ctx.text_extents(&m.label) {
-            ctx.move_to(rx + 6.0, (y1 + y2) / 2.0 + FONT / 2.0 - 3.0 - ext.y_bearing() / 2.0);
+            ctx.move_to(
+                rx + 6.0,
+                (y1 + y2) / 2.0 + FONT / 2.0 - 3.0 - ext.y_bearing() / 2.0,
+            );
             ctx.show_text(&m.label).ok();
         }
     }
@@ -294,7 +310,10 @@ fn cross_head(ctx: &cairo::Context, to: (f64, f64), color: Rgb) {
 /// Draw `label` centered on `(cx, cy)`.
 fn centered_text(ctx: &cairo::Context, label: &str, cx: f64, cy: f64) {
     if let Ok(ext) = ctx.text_extents(label) {
-        ctx.move_to(cx - ext.width() / 2.0 - ext.x_bearing(), cy - ext.height() / 2.0 - ext.y_bearing());
+        ctx.move_to(
+            cx - ext.width() / 2.0 - ext.x_bearing(),
+            cy - ext.height() / 2.0 - ext.y_bearing(),
+        );
         ctx.show_text(label).ok();
     }
 }
@@ -350,13 +369,21 @@ fn draw_class(ctx: &cairo::Context, scene: &ClassScene) {
         set_rgb(ctx, t.panel_alt);
         ctx.rectangle(b.x + 1.0, b.y + 1.0, b.w - 2.0, CLASS_TITLE_H - 1.0);
         ctx.fill().ok();
-        ctx.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Bold);
+        ctx.select_font_face(
+            "sans-serif",
+            cairo::FontSlant::Normal,
+            cairo::FontWeight::Bold,
+        );
         ctx.set_font_size(FONT);
         set_rgb(ctx, t.text_primary);
         centered_text(ctx, &b.name, b.x + b.w / 2.0, b.y + CLASS_TITLE_H / 2.0);
 
         // Member compartments (fields then methods), left-aligned monospace.
-        ctx.select_font_face("monospace", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+        ctx.select_font_face(
+            "monospace",
+            cairo::FontSlant::Normal,
+            cairo::FontWeight::Normal,
+        );
         ctx.set_font_size(FONT - 1.0);
         let mut y = b.y + CLASS_TITLE_H;
         set_rgb(ctx, t.border);
@@ -455,7 +482,11 @@ pub fn drawing_area_state(scene: StateScene) -> DrawingArea {
 
 fn draw_state(ctx: &cairo::Context, scene: &StateScene) {
     let t = crate::theme_css::current();
-    ctx.select_font_face("sans-serif", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+    ctx.select_font_face(
+        "sans-serif",
+        cairo::FontSlant::Normal,
+        cairo::FontWeight::Normal,
+    );
     ctx.set_font_size(FONT);
 
     // Transitions first, with arrowheads and labels.

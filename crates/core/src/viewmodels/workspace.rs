@@ -42,7 +42,11 @@ impl WorkspaceViewModel {
         let vars = locals
             .iter()
             .map(|v| {
-                let dtype = v.type_hint.as_deref().map(DType::from_class).unwrap_or(DType::Double);
+                let dtype = v
+                    .type_hint
+                    .as_deref()
+                    .map(DType::from_class)
+                    .unwrap_or(DType::Double);
                 let size = match (v.indexed_variables, v.named_variables) {
                     (Some(n), _) if n > 0 => format!("{n} elems"),
                     (_, Some(n)) if n > 0 => format!("{n} fields"),
@@ -67,7 +71,8 @@ impl WorkspaceViewModel {
     /// Build the heatmap matrix for `name` from a captured `disp` block.
     pub fn set_matrix_from_disp(&self, name: impl Into<String>, text: &str) {
         let (_, _, cells) = parsers::parse_matrix(text);
-        self.inspected_matrix.set(Some(MatrixView::new(name, cells)));
+        self.inspected_matrix
+            .set(Some(MatrixView::new(name, cells)));
     }
 
     pub fn clear(&self) {
