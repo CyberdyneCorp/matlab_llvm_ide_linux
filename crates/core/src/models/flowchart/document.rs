@@ -54,6 +54,21 @@ impl FlowchartDocument {
             .unwrap_or_default()
     }
 
+    /// `(id, name)` of every `kind: library` flow — the reusable blocks that can
+    /// be instantiated as masked nodes.
+    pub fn library_flows(&self) -> Vec<(String, String)> {
+        self.flows
+            .iter()
+            .filter(|f| f.kind == FlowKind::Library)
+            .map(|f| (f.id.clone(), f.name.clone()))
+            .collect()
+    }
+
+    /// The flow with the given id, if any.
+    pub fn flow_by_id(&self, id: &str) -> Option<&Flow> {
+        self.flows.iter().find(|f| f.id == id)
+    }
+
     /// Fresh empty document for the given dialect.
     pub fn empty(name: &str, kind: SchemaKind) -> FlowchartDocument {
         match kind {

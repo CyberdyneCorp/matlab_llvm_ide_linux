@@ -156,6 +156,11 @@ through the tested [`FlowchartViewModel`](../crates/core/src/viewmodels/flowchar
   matter for its kind (assignment target/expression, `if`/`while` condition, `for`
   loop variable/iterable, signal-flow block parameters, state actions, …) and a
   **Toggle breakpoint** action for executable blocks.
+* **Library ▾** (signal flow) lists the document's `kind: library` flows; picking
+  one inserts a **masked block** — a subsystem node linked to the library
+  (`library_id`) whose `${name}` mask parameters appear in the inspector. The
+  inspector's **Mask parameters** section edits those values and shows a live
+  `${name}` → value **expansion preview** of the library flow.
 * **Save** writes the `.mflow` back to disk; **Compile** lowers the chart to MATLAB
   via `matlabc -emit-matlab`, writes the generated `.m` beside it, and opens it in
   the editor.
