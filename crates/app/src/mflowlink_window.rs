@@ -9,19 +9,28 @@ use std::rc::Rc;
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, DrawingArea, Label, Orientation, ScrolledWindow, Window};
 
+use serde_json::json;
+
 use matforge_core::models::flowchart::FlowchartDocument;
 use matforge_core::models::{PlotFigure, PlotKind};
+use matforge_core::services::dap::{parse_message, DapMessage};
+use matforge_core::services::sim_dap::{self, SimRequest};
 use matforge_core::viewmodels::{MflowLinkViewModel, SimState};
 
 use crate::app_state::AppState;
 use crate::flow_render::{self, Viewport};
-use crate::process::SimHandle;
+use crate::process::{DapSession, SimHandle};
+
+/// A live `matlabc -simulate --sim-dap` session, when the transport is in live
+/// mode (vs the one-shot CSV path).
+type LiveSession = Rc<RefCell<Option<DapSession>>>;
 
 /// Open a simulation window for a signal-flow document. `autostart` immediately
 /// runs the simulation (used by the `MATFORGE_SIMULATE` demo hook).
 pub fn open(app: &Rc<AppState>, document: FlowchartDocument, path: Option<PathBuf>, autostart: bool) {
     let vm = Rc::new(MflowLinkViewModel::new(document));
     let sim: Rc<RefCell<Option<SimHandle>>> = Rc::new(RefCell::new(None));
+    let dap: LiveSession = Rc::new(RefCell::new(None));
 
     // Publish state for end-to-end tests (no-op unless $MATFORGE_E2E_STATE set).
     {
@@ -48,7 +57,7 @@ pub fn open(app: &Rc<AppState>, document: FlowchartDocument, path: Option<PathBu
 
     let root = GtkBox::new(Orientation::Vertical, 0);
     root.add_css_class("mf-window");
-    root.append(&build_transport(app, &vm, &sim, path.clone()));
+    root.append(&build_transport(app, &vm, &sim, &dap, path.clone()));
 
     let split = gtk::Paned::new(Orientation::Horizontal);
     split.set_wide_handle(true);
@@ -63,9 +72,11 @@ pub fn open(app: &Rc<AppState>, document: FlowchartDocument, path: Option<PathBu
     // Kill the simulation if the window is closed.
     {
         let sim = sim.clone();
+        let dap = dap.clone();
         let vm = vm.clone();
         window.connect_close_request(move |_| {
             *sim.borrow_mut() = None; // drops SimHandle -> kills process
+            *dap.borrow_mut() = None; // drops the live --sim-dap session
             vm.reset();
             crate::e2e::clear_mflowlink_probe();
             glib_proceed()
@@ -86,6 +97,7 @@ fn build_transport(
     app: &Rc<AppState>,
     vm: &Rc<MflowLinkViewModel>,
     sim: &Rc<RefCell<Option<SimHandle>>>,
+    dap: &LiveSession,
     path: Option<PathBuf>,
 ) -> GtkBox {
     let bar = GtkBox::new(Orientation::Horizontal, 6);
@@ -102,6 +114,9 @@ fn build_transport(
     pause.add_css_class("mf-tool");
     let step = Button::with_label("⏭ Step");
     step.add_css_class("mf-tool");
+    let back = Button::with_label("⏮ Back");
+    back.add_css_class("mf-tool");
+    back.set_tooltip_text(Some("Step back one major step (live --sim-dap)"));
     let stop = Button::with_label("⏹ Stop");
     stop.add_css_class("mf-tool");
     stop.add_css_class("mf-stop");
@@ -122,12 +137,19 @@ fn build_transport(
     {
         let app = app.clone();
         let vm = vm.clone();
-        let sim = sim.clone();
+        let dap = dap.clone();
         let timer = timer.clone();
         play.connect_clicked(move |_| match vm.state.get() {
-            // First Play collects the trace live (the cursor follows the edge).
-            SimState::Idle => start_simulation(&app, &vm, &sim, path.as_deref()),
-            // Afterwards, Play animates the cursor through the collected trace.
+            // First Play boots a live --sim-dap session (paused at entry).
+            SimState::Idle => start_live_simulation(&app, &vm, &dap, path.as_deref()),
+            // Paused live session → resume free-running.
+            SimState::Paused if vm.live.get() => {
+                send_sim(&dap, &SimRequest::Continue);
+                vm.resume();
+            }
+            // Already running live → ignore.
+            _ if vm.live.get() => {}
+            // One-shot CSV replay: animate the cursor through the trace.
             _ => {
                 if vm.at_end() {
                     vm.rewind();
@@ -154,44 +176,71 @@ fn build_transport(
     }
     {
         let vm = vm.clone();
+        let dap = dap.clone();
         let stop_timer = stop_timer.clone();
         pause.connect_clicked(move |_| {
             stop_timer();
-            vm.pause();
+            if vm.live.get() {
+                send_sim(&dap, &SimRequest::Pause);
+            } else {
+                vm.pause();
+            }
         });
     }
     {
         let vm = vm.clone();
+        let dap = dap.clone();
         let stop_timer = stop_timer.clone();
         step.connect_clicked(move |_| {
             stop_timer();
-            vm.step();
+            if vm.live.get() {
+                send_sim(&dap, &SimRequest::StepMajor);
+            } else {
+                vm.step();
+            }
+        });
+    }
+    {
+        let vm = vm.clone();
+        let dap = dap.clone();
+        back.connect_clicked(move |_| {
+            if vm.live.get() {
+                send_sim(&dap, &SimRequest::StepBackMajor);
+            }
         });
     }
     {
         let vm = vm.clone();
         let sim = sim.clone();
+        let dap = dap.clone();
         let stop_timer = stop_timer.clone();
         stop.connect_clicked(move |_| {
             stop_timer();
-            *sim.borrow_mut() = None; // kill the simulator
+            *sim.borrow_mut() = None; // kill the one-shot simulator
+            *dap.borrow_mut() = None; // kill the live session
             vm.finish();
         });
     }
     {
         let vm = vm.clone();
         let sim = sim.clone();
+        let dap = dap.clone();
         let stop_timer = stop_timer.clone();
         reset.connect_clicked(move |_| {
             stop_timer();
-            *sim.borrow_mut() = None;
-            vm.finish(); // stop collecting, then rewind playback to the start
-            vm.rewind();
+            if vm.live.get() {
+                send_sim(&dap, &SimRequest::ResetSimulation);
+            } else {
+                *sim.borrow_mut() = None;
+                vm.finish(); // stop collecting, then rewind playback to the start
+                vm.rewind();
+            }
         });
     }
     bar.append(&play);
     bar.append(&pause);
     bar.append(&step);
+    bar.append(&back);
     bar.append(&stop);
     bar.append(&reset);
 
@@ -237,8 +286,110 @@ fn build_transport(
             clock.set_text(&format!("t = {t:.3} s"));
         });
     }
+    // In live mode the clock + step counter follow the streamed simulation time.
+    {
+        let clock = clock.clone();
+        let pos = pos.clone();
+        let vm2 = vm.clone();
+        vm.sim_time.bind(move |t| {
+            if vm2.live.get() {
+                clock.set_text(&format!("t = {t:.3} s"));
+                pos.set_text(&format!("step {}", vm2.major_step.get()));
+            }
+        });
+    }
 
     bar
+}
+
+/// Send a generic DAP request (handshake verbs) to the live session.
+fn send_dap(dap: &LiveSession, command: &str, args: Option<serde_json::Value>) {
+    if let Some(s) = dap.borrow_mut().as_mut() {
+        let frame = s.client.request(command, args);
+        let _ = s.write_frame(&frame);
+    }
+}
+
+/// Send a simulation-control request to the live session.
+fn send_sim(dap: &LiveSession, req: &SimRequest) {
+    if let Some(s) = dap.borrow_mut().as_mut() {
+        let frame = sim_dap::build_request(&mut s.client, req);
+        let _ = s.write_frame(&frame);
+    }
+}
+
+/// Persist the current model to disk for the simulator to read; returns the
+/// written path, or `None` (after logging) if encoding/writing/matlabc fails.
+fn write_model_to(
+    app: &Rc<AppState>,
+    vm: &Rc<MflowLinkViewModel>,
+    path: Option<&Path>,
+) -> Option<PathBuf> {
+    let file =
+        path.map(Path::to_path_buf).unwrap_or_else(|| std::env::temp_dir().join("matforge_sim.mflow"));
+    let json = match vm.document.with(matforge_core::services::flowchart_codec::encode_string) {
+        Ok(j) => j,
+        Err(e) => {
+            app.vm.console.log(matforge_core::models::ConsoleLevel::Error, format!("encode: {e}"));
+            return None;
+        }
+    };
+    if std::fs::write(&file, json).is_err() {
+        app.vm.console.log(matforge_core::models::ConsoleLevel::Error, "could not write model");
+        return None;
+    }
+    if !app.settings.matlabc_path.exists() {
+        app.vm.console.log(matforge_core::models::ConsoleLevel::Error, "matlabc not found");
+        return None;
+    }
+    Some(file)
+}
+
+/// Boot a live `matlabc -simulate --sim-dap` session: handshake, then fold the
+/// streamed simulation events into the view model. The transport row drives it
+/// with [`SimRequest`]s.
+fn start_live_simulation(
+    app: &Rc<AppState>,
+    vm: &Rc<MflowLinkViewModel>,
+    dap: &LiveSession,
+    path: Option<&Path>,
+) {
+    let Some(file) = write_model_to(app, vm, path) else { return };
+    vm.start_live();
+    let vm2 = vm.clone();
+    let dap2 = dap.clone();
+    let program = file.to_string_lossy().into_owned();
+    let started = DapSession::start_simulate(&app.settings.matlabc_path, &file, move |body| {
+        if body == crate::process::DAP_EXIT {
+            vm2.finish();
+            return;
+        }
+        let Some(msg) = parse_message(&body) else { return };
+        match &msg {
+            // Handshake: initialize → launch → (initialized) → configurationDone.
+            DapMessage::Response { command, .. } if command.as_str() == "initialize" => {
+                send_dap(&dap2, "launch", Some(json!({ "program": program, "stopOnEntry": true })));
+            }
+            DapMessage::Event { event, .. } if event.as_str() == "initialized" => {
+                send_dap(&dap2, "configurationDone", None);
+            }
+            _ => {
+                if let Some(ev) = sim_dap::parse_sim_event(&msg) {
+                    vm2.on_sim_event(&ev);
+                }
+            }
+        }
+    });
+    match started {
+        Ok(session) => {
+            *dap.borrow_mut() = Some(session);
+            send_dap(dap, "initialize", Some(json!({ "clientID": "matforge", "adapterID": "matlabc" })));
+        }
+        Err(e) => {
+            app.vm.console.log(matforge_core::models::ConsoleLevel::Error, format!("sim-dap: {e}"));
+            vm.reset();
+        }
+    }
 }
 
 /// Start (or restart) `matlabc -simulate`, routing each line into the VM.

@@ -5,6 +5,7 @@
 
 use crate::models::flowchart::FlowchartDocument;
 use crate::observable::Property;
+use crate::services::sim_dap::SimEvent;
 use crate::services::sim_trace::SimTrace;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -24,6 +25,14 @@ pub struct MflowLinkViewModel {
     /// Playback position: how many samples the scopes currently show. Follows
     /// the live trace while running; afterwards Play/Step/Rewind scrub it.
     pub cursor: Property<usize>,
+    /// True while driven by a live `--sim-dap` session (vs one-shot CSV replay).
+    pub live: Property<bool>,
+    /// Latest simulation clock (live mode), from `simulationTime` events.
+    pub sim_time: Property<f64>,
+    /// Latest major-step index (live mode).
+    pub major_step: Property<i64>,
+    /// The block currently being evaluated (drives the active-block halo).
+    pub active_block: Property<Option<String>>,
 }
 
 impl MflowLinkViewModel {
@@ -34,6 +43,41 @@ impl MflowLinkViewModel {
             state: Property::new(SimState::Idle),
             sample_count: Property::new(0),
             cursor: Property::new(0),
+            live: Property::new(false),
+            sim_time: Property::new(0.0),
+            major_step: Property::new(0),
+            active_block: Property::new(None),
+        }
+    }
+
+    /// Begin a live `--sim-dap` session: clears any prior trace and arms the
+    /// transport. Events arrive via [`on_sim_event`](Self::on_sim_event).
+    pub fn start_live(&self) {
+        self.reset();
+        self.live.set(true);
+        self.state.set(SimState::Running);
+    }
+
+    /// Fold one live simulation event into the transport/inspection state.
+    pub fn on_sim_event(&self, ev: &SimEvent) {
+        match ev {
+            SimEvent::Time { t, major_step } => {
+                self.sim_time.set(*t);
+                self.major_step.set(*major_step);
+            }
+            SimEvent::ActiveBlock { node_id } => {
+                self.active_block.set(Some(node_id.clone()));
+            }
+            SimEvent::Stopped { .. } => {
+                // The runtime paused (entry / breakpoint / step / pause /
+                // crossing). Settle into Paused unless we never started.
+                if self.state.get() != SimState::Idle {
+                    self.state.set(SimState::Paused);
+                }
+            }
+            // Signal samples feed the live scopes (#53); zero-crossings and
+            // snapshots are surfaced by later slices.
+            SimEvent::Signal { .. } | SimEvent::ZeroCrossing { .. } | SimEvent::Snapshot { .. } => {}
         }
     }
 
@@ -111,6 +155,10 @@ impl MflowLinkViewModel {
         self.sample_count.set(0);
         self.cursor.set(0);
         self.state.set(SimState::Idle);
+        self.live.set(false);
+        self.sim_time.set(0.0);
+        self.major_step.set(0);
+        self.active_block.set(None);
     }
 
     pub fn signal_count(&self) -> usize {
@@ -212,5 +260,39 @@ mod tests {
         assert!(vm.at_end());
         vm.set_cursor(99);
         assert_eq!(vm.cursor.get(), 3);
+    }
+
+    #[test]
+    fn live_session_folds_events_into_state() {
+        use crate::services::sim_dap::SimEvent;
+        let vm = vm();
+        vm.start_live();
+        assert!(vm.live.get());
+        assert_eq!(vm.state.get(), SimState::Running);
+
+        vm.on_sim_event(&SimEvent::Time { t: 1.25, major_step: 7 });
+        assert_eq!(vm.sim_time.get(), 1.25);
+        assert_eq!(vm.major_step.get(), 7);
+
+        vm.on_sim_event(&SimEvent::ActiveBlock { node_id: "gain_1".into() });
+        assert_eq!(vm.active_block.get().as_deref(), Some("gain_1"));
+
+        // A stopped event (breakpoint / step / entry) pauses the transport.
+        vm.on_sim_event(&SimEvent::Stopped { reason: "breakpoint".into() });
+        assert_eq!(vm.state.get(), SimState::Paused);
+
+        // Reset clears the live state back to Idle.
+        vm.reset();
+        assert!(!vm.live.get());
+        assert_eq!(vm.sim_time.get(), 0.0);
+        assert!(vm.active_block.get().is_none());
+    }
+
+    #[test]
+    fn stopped_event_ignored_when_idle() {
+        use crate::services::sim_dap::SimEvent;
+        let vm = vm();
+        vm.on_sim_event(&SimEvent::Stopped { reason: "entry".into() });
+        assert_eq!(vm.state.get(), SimState::Idle);
     }
 }

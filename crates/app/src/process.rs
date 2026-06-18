@@ -273,9 +273,31 @@ impl DapSession {
         file: &Path,
         on_message: impl FnMut(String) + 'static,
     ) -> std::io::Result<DapSession> {
-        let mut child = Command::new(matlabc)
-            .arg("-dap")
-            .arg(file)
+        let mut cmd = Command::new(matlabc);
+        cmd.arg("-dap").arg(file);
+        Self::from_command(cmd, on_message)
+    }
+
+    /// Start `matlabc -simulate --sim-dap <file>` — the live mflowLink
+    /// simulation DAP server. Same framed-stdio transport as `start`; the
+    /// caller drives it with [`sim_dap`](matforge_core::services::sim_dap)
+    /// requests and parses the event stream.
+    pub fn start_simulate(
+        matlabc: &Path,
+        file: &Path,
+        on_message: impl FnMut(String) + 'static,
+    ) -> std::io::Result<DapSession> {
+        let mut cmd = Command::new(matlabc);
+        cmd.arg("-simulate").arg("--sim-dap").arg(file);
+        Self::from_command(cmd, on_message)
+    }
+
+    /// Spawn `cmd` with framed stdio and pump decoded bodies to `on_message`.
+    fn from_command(
+        mut cmd: Command,
+        on_message: impl FnMut(String) + 'static,
+    ) -> std::io::Result<DapSession> {
+        let mut child = cmd
             .env("MATLAB_LLVM_IDE_FIGURES", "1")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
