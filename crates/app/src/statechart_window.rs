@@ -378,6 +378,7 @@ fn build_chart_canvas(vm: &Rc<StateChartViewModel>) -> GtkBox {
                 // Charts have no algebraic loops; the live runner doesn't lint.
                 let algebraic = std::collections::BTreeSet::new();
                 let lint = std::collections::BTreeSet::new();
+                let hierarchy_lint = std::collections::BTreeSet::new();
                 flow_render::draw_document(
                     ctx,
                     w as f64,
@@ -389,6 +390,7 @@ fn build_chart_canvas(vm: &Rc<StateChartViewModel>) -> GtkBox {
                     active.as_deref(),
                     &algebraic,
                     &lint,
+                    &hierarchy_lint,
                 );
             });
         });

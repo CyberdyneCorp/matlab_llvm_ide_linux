@@ -7,8 +7,8 @@ use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 
 use crate::models::flowchart::{
-    ChartSymbols, EdgeEndpoint, EdgeKind, FlowEdge, FlowNode, FlowPosition, FlowUi,
-    FlowchartDocument, NodeData, NodeKind, SchemaKind, SolverConfig,
+    self, ChartSymbols, EdgeEndpoint, EdgeKind, FlowEdge, FlowNode, FlowPosition, FlowUi,
+    FlowchartDocument, NodeData, NodeKind, SchemaKind, SolverConfig, StateDecomposition,
 };
 use crate::models::BreakpointConfig;
 use crate::observable::Property;
@@ -166,6 +166,92 @@ impl FlowchartViewModel {
     /// Drives the inspector message and the canvas warning outline.
     pub fn action_lint_nodes(&self) -> std::collections::BTreeMap<String, String> {
         self.document.with(|d| d.action_lint_nodes())
+    }
+
+    /// State nodes flagged by the hierarchy linter (history-on-AND, execution
+    /// order collisions), each mapped to its first error message.
+    pub fn hierarchy_errors(&self) -> std::collections::BTreeMap<String, String> {
+        self.document.with(|d| {
+            d.flows
+                .first()
+                .map(flowchart::hierarchy_errors)
+                .unwrap_or_default()
+        })
+    }
+
+    /// Transitive descendants of a state node.
+    pub fn descendants(&self, id: &str) -> std::collections::BTreeSet<String> {
+        self.document.with(|d| {
+            d.flows
+                .first()
+                .map(|f| flowchart::descendants(f, id))
+                .unwrap_or_default()
+        })
+    }
+
+    /// Reparent `child` under `new_parent` (or to the top level with `None`),
+    /// then re-wrap every compound to fit. Rejected (returns `false`) when the
+    /// move is a no-op or would create a cycle (dropping a state into its own
+    /// descendant). One undo step on success.
+    pub fn reparent(&self, child: &str, new_parent: Option<&str>) -> bool {
+        let current = self.node(child).and_then(|n| n.parent);
+        if current.as_deref() == new_parent {
+            return false;
+        }
+        if let Some(parent) = new_parent {
+            let cyclic = self.document.with(|d| {
+                d.flows
+                    .first()
+                    .is_some_and(|f| flowchart::is_descendant(f, child, parent))
+            });
+            if cyclic {
+                return false;
+            }
+        }
+        self.push_undo();
+        self.document.update(|d| {
+            if let Some(flow) = d.flows.first_mut() {
+                if let Some(node) = flow.nodes.iter_mut().find(|n| n.id == child) {
+                    node.parent = new_parent.map(|s| s.to_string());
+                }
+                flowchart::autosize_compounds(flow);
+            }
+        });
+        self.is_dirty.set(true);
+        true
+    }
+
+    /// Set a compound state's decomposition (OR / AND). One undo step.
+    pub fn set_decomposition(&self, id: &str, decomposition: StateDecomposition) {
+        self.push_undo();
+        self.edit_node(id, |n| n.data.decomposition = Some(decomposition));
+    }
+
+    /// Toggle the history junction on a compound state. One undo step.
+    pub fn toggle_history(&self, id: &str) {
+        let on = self
+            .node(id)
+            .and_then(|n| n.data.has_history)
+            .unwrap_or(false);
+        self.push_undo();
+        self.edit_node(id, |n| n.data.has_history = Some(!on));
+    }
+
+    /// Set (or clear) a state's execution order among AND siblings. Like other
+    /// typed inspector fields this commits without its own undo snapshot.
+    pub fn set_execution_order(&self, id: &str, order: Option<u32>) {
+        self.edit_node(id, |n| n.data.execution_order = order);
+    }
+
+    /// Re-wrap every compound state around its children (a manual "fit").
+    pub fn autosize_compounds(&self) {
+        self.push_undo();
+        self.document.update(|d| {
+            if let Some(flow) = d.flows.first_mut() {
+                flowchart::autosize_compounds(flow);
+            }
+        });
+        self.is_dirty.set(true);
     }
 
     /// The document's solver settings, or the variable-step default if unset.
@@ -898,5 +984,38 @@ mod tests {
         // An all-empty table is stored as None (serializes away).
         vm.set_chart_symbols(ChartSymbols::default());
         assert!(!vm.encode().unwrap().contains("\"symbols\""));
+    }
+
+    #[test]
+    fn reparent_rejects_cycles_and_lints_hierarchy() {
+        let vm = FlowchartViewModel::empty("Chart", SchemaKind::StateChart);
+        let outer = vm.add_node(NodeKind::State, 100.0, 100.0);
+        let inner = vm.add_node(NodeKind::State, 120.0, 140.0);
+
+        // Nest inner under outer; the compound wraps it (origin shifts up/left).
+        assert!(vm.reparent(&inner, Some(&outer)));
+        assert_eq!(
+            vm.node(&inner).unwrap().parent.as_deref(),
+            Some(outer.as_str())
+        );
+        assert!(vm.descendants(&outer).contains(&inner));
+
+        // A cycle (outer into its own descendant) and a no-op are both rejected.
+        assert!(!vm.reparent(&outer, Some(&inner)));
+        assert!(!vm.reparent(&inner, Some(&outer)));
+
+        // Decomposition + history edits round-trip; history-on-AND is linted.
+        vm.set_decomposition(&outer, StateDecomposition::And);
+        assert_eq!(
+            vm.node(&outer).unwrap().data.decomposition,
+            Some(StateDecomposition::And)
+        );
+        vm.toggle_history(&outer);
+        assert!(vm.node(&outer).unwrap().data.has_history.unwrap());
+        assert!(vm.hierarchy_errors().contains_key(&outer));
+
+        // Undo reverses the history toggle.
+        vm.undo();
+        assert!(!vm.node(&outer).unwrap().data.has_history.unwrap_or(false));
     }
 }

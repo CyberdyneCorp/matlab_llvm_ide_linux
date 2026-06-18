@@ -663,6 +663,7 @@ fn build_model_canvas(vm: &Rc<MflowLinkViewModel>) -> GtkBox {
                 let bps = std::collections::BTreeMap::new();
                 let algebraic = doc.algebraic_loop_nodes();
                 let lint = std::collections::BTreeSet::new();
+                let hierarchy_lint = std::collections::BTreeSet::new();
                 flow_render::draw_document(
                     ctx,
                     w as f64,
@@ -674,6 +675,7 @@ fn build_model_canvas(vm: &Rc<MflowLinkViewModel>) -> GtkBox {
                     active.as_deref(),
                     &algebraic,
                     &lint,
+                    &hierarchy_lint,
                 );
             });
         });

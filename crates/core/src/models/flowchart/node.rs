@@ -47,6 +47,18 @@ impl FlowNode {
         }
     }
 
+    /// World-space bounding rect `(x, y, w, h)` from the stored position +
+    /// size, falling back to the kind's default size.
+    pub fn rect(&self) -> (f64, f64, f64, f64) {
+        let size = self.ui.size.unwrap_or_else(|| self.kind.default_size());
+        (
+            self.ui.position.x,
+            self.ui.position.y,
+            size.width,
+            size.height,
+        )
+    }
+
     /// A `params` value as its display string, if present.
     pub fn param_str(&self, key: &str) -> Option<String> {
         self.data
@@ -962,6 +974,34 @@ pub struct NodeData {
         default
     )]
     pub on_event_actions: Option<BTreeMap<String, String>>,
+    /// Compound-state decomposition: `or` (exclusive, default) or `and`
+    /// (parallel). `None` reads as `or`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub decomposition: Option<StateDecomposition>,
+    /// Whether this compound state carries a history junction.
+    #[serde(
+        rename = "hasHistory",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub has_history: Option<bool>,
+    /// 1-based execution order among AND-decomposed siblings.
+    #[serde(
+        rename = "executionOrder",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub execution_order: Option<u32>,
+}
+
+/// How a compound state's substates execute: exclusive (`or` — one active at a
+/// time) or parallel (`and` — all active, with a defined execution order).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StateDecomposition {
+    #[default]
+    Or,
+    And,
 }
 
 /// JSON-flavored scalar union for signal-flow block parameters. Encodes as the

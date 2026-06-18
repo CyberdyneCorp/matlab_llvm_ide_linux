@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use gtk::cairo;
 
 use matforge_core::models::flowchart::{
-    FlowNode, FlowPosition, FlowchartDocument, NodeKind, NodeShape, PortAnchor,
+    FlowNode, FlowPosition, FlowchartDocument, NodeKind, NodeShape, PortAnchor, StateDecomposition,
 };
 use matforge_core::models::BreakpointConfig;
 use matforge_core::theme::Rgb;
@@ -55,6 +55,7 @@ pub fn draw_document(
     exec_node: Option<&str>,
     algebraic: &BTreeSet<String>,
     lint: &BTreeSet<String>,
+    hierarchy_lint: &BTreeSet<String>,
 ) {
     set_rgb(ctx, crate::theme_css::current().editor_bg);
     ctx.rectangle(0.0, 0.0, w, h);
@@ -83,9 +84,43 @@ pub fn draw_document(
         draw_edge(ctx, from.kind.port_anchor(&edge.from.port), start, end);
     }
 
+    // Hierarchy: which states have children, each parent's decomposition, and
+    // each node's nesting depth (so compound containers paint behind children).
+    let has_children: BTreeSet<&str> = flow
+        .nodes
+        .iter()
+        .filter_map(|n| n.parent.as_deref())
+        .collect();
+    let decomp_of = |id: &str| -> StateDecomposition {
+        flow.nodes
+            .iter()
+            .find(|n| n.id == id)
+            .and_then(|n| n.data.decomposition)
+            .unwrap_or_default()
+    };
+    let depth_of = |node: &FlowNode| -> usize {
+        let mut depth = 0;
+        let mut cur = node.parent.clone();
+        while let Some(p) = cur {
+            depth += 1;
+            if depth > flow.nodes.len() {
+                break;
+            }
+            cur = flow
+                .nodes
+                .iter()
+                .find(|n| n.id == p)
+                .and_then(|n| n.parent.clone());
+        }
+        depth
+    };
+    let mut draw_order: Vec<&FlowNode> = flow.nodes.iter().collect();
+    draw_order.sort_by_key(|n| depth_of(n)); // stable: shallowest (containers) first
+
     // Nodes.
-    for node in &flow.nodes {
+    for node in draw_order {
         let (x, y, nw, nh) = node_rect(node);
+        let is_compound = has_children.contains(node.id.as_str());
         let is_sel = selected == Some(node.id.as_str());
         let is_exec = exec_node == Some(node.id.as_str());
         let accent = node.kind.category().accent();
@@ -135,6 +170,61 @@ pub fn draw_document(
             ctx.set_dash(&[], 0.0);
         }
 
+        // Hierarchy lint warning (history-on-AND, exec-order collision): a red
+        // dashed halo, mirroring the algebraic-loop one.
+        if hierarchy_lint.contains(&node.id) {
+            draw_shape(ctx, node.kind.shape(), x - 3.0, y - 3.0, nw + 6.0, nh + 6.0);
+            set_rgb(ctx, crate::theme_css::current().red);
+            ctx.set_line_width(2.0);
+            ctx.set_dash(&[3.0, 3.0], 0.0);
+            ctx.stroke().ok();
+            ctx.set_dash(&[], 0.0);
+        }
+
+        // Compound state: a header divider under the title, an extra dashed
+        // outline when AND-decomposed (parallel), and a history "H" badge.
+        if is_compound {
+            let is_and = decomp_of(&node.id) == StateDecomposition::And;
+            set_rgb(ctx, crate::theme_css::current().border);
+            ctx.set_line_width(1.0);
+            ctx.move_to(x, y + 24.0);
+            ctx.line_to(x + nw, y + 24.0);
+            ctx.stroke().ok();
+            if is_and {
+                draw_shape(ctx, node.kind.shape(), x + 3.0, y + 3.0, nw - 6.0, nh - 6.0);
+                set_rgb(ctx, node.kind.category().accent());
+                ctx.set_line_width(1.0);
+                ctx.set_dash(&[3.0, 3.0], 0.0);
+                ctx.stroke().ok();
+                ctx.set_dash(&[], 0.0);
+            }
+            if node.data.has_history == Some(true) {
+                set_rgb(ctx, crate::theme_css::current().blue);
+                ctx.arc(x + nw - 12.0, y + 12.0, 7.0, 0.0, std::f64::consts::TAU);
+                ctx.stroke().ok();
+                ctx.set_font_size(10.0);
+                ctx.move_to(x + nw - 15.0, y + 15.5);
+                ctx.show_text("H").ok();
+            }
+        }
+
+        // Execution-order badge for an AND parent's child.
+        if node
+            .parent
+            .as_deref()
+            .is_some_and(|p| decomp_of(p) == StateDecomposition::And)
+        {
+            if let Some(order) = node.data.execution_order {
+                set_rgb(ctx, node.kind.category().accent());
+                ctx.arc(x + 10.0, y + 10.0, 8.0, 0.0, std::f64::consts::TAU);
+                ctx.fill().ok();
+                set_rgb(ctx, crate::theme_css::current().card);
+                ctx.set_font_size(10.0);
+                ctx.move_to(x + 7.0, y + 13.5);
+                ctx.show_text(&order.to_string()).ok();
+            }
+        }
+
         // Port markers — small dots at each port so they're visible targets
         // when drawing a wire by drag (inputs muted, outputs accent-colored).
         for port in &node.ports.inputs {
@@ -160,7 +250,13 @@ pub fn draw_document(
         ctx.set_font_size(12.0);
         let label = node_label(node);
         let ext = ctx.text_extents(&label).map(|e| e.width()).unwrap_or(0.0);
-        ctx.move_to(x + (nw - ext) / 2.0, y + nh / 2.0 + 4.0);
+        // Compound containers title in the header band; leaves center the label.
+        let label_y = if is_compound {
+            y + 16.0
+        } else {
+            y + nh / 2.0 + 4.0
+        };
+        ctx.move_to(x + (nw - ext) / 2.0, label_y);
         ctx.show_text(&label).ok();
 
         // Breakpoint dot.

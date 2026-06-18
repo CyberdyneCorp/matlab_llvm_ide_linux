@@ -18,7 +18,9 @@ use gtk::{
 
 use std::cell::Cell;
 
-use matforge_core::models::flowchart::{FlowNode, NodeKind, ParamValue, SignalFlowParamSpec};
+use matforge_core::models::flowchart::{
+    FlowNode, NodeKind, ParamValue, SignalFlowParamSpec, StateDecomposition,
+};
 use matforge_core::models::ConsoleLevel;
 use matforge_core::viewmodels::flowchart::{ZOOM_MAX, ZOOM_MIN};
 use matforge_core::viewmodels::FlowchartViewModel;
@@ -85,6 +87,8 @@ pub fn build_flowchart_view(
             let algebraic = fc.algebraic_loop_nodes();
             let lint: std::collections::BTreeSet<String> =
                 fc.action_lint_nodes().into_keys().collect();
+            let hierarchy_lint: std::collections::BTreeSet<String> =
+                fc.hierarchy_errors().into_keys().collect();
             fc.document.with(|doc| {
                 let sel = fc.selected_id.get();
                 let exec = fc.execution_node.get();
@@ -100,6 +104,7 @@ pub fn build_flowchart_view(
                         exec.as_deref(),
                         &algebraic,
                         &lint,
+                        &hierarchy_lint,
                     );
                 });
             });
@@ -309,10 +314,14 @@ pub fn build_flowchart_view(
         let canvas2 = canvas.clone();
         let app = app.clone();
         drag.connect_drag_end(move |g, dx, dy| {
+            let taken = state.borrow_mut().take();
+            if let Some(DragMode::Move { id, .. }) = &taken {
+                reparent_on_drop(&fc, id);
+            }
             if let Some(DragMode::Edge {
                 from_node,
                 from_port,
-            }) = state.borrow_mut().take()
+            }) = taken
             {
                 if let Some((start_x, start_y)) = g.start_point() {
                     let vp = Viewport {
@@ -1106,6 +1115,132 @@ fn analyze_block(app: &Rc<AppState>, node: &FlowNode) {
     app.vm.toast.show("Added Bode / step / Nyquist to Plots");
 }
 
+/// Hierarchy controls shown in the inspector for a selected state: decomposition
+/// (OR/AND), history-junction toggle, execution-order among AND siblings, a
+/// detach-to-top-level action, and any hierarchy lint message.
+fn append_state_hierarchy_controls(body: &GtkBox, fc: &Rc<FlowchartViewModel>, node: &FlowNode) {
+    let id = node.id.clone();
+
+    let titled = |text: &str, child: &gtk::Widget| -> GtkBox {
+        let row = GtkBox::new(Orientation::Vertical, 2);
+        let lbl = Label::new(Some(text));
+        lbl.add_css_class("mf-col-title");
+        lbl.set_halign(gtk::Align::Start);
+        row.append(&lbl);
+        row.append(child);
+        row
+    };
+
+    // Decomposition (OR exclusive / AND parallel).
+    let dd = gtk::DropDown::from_strings(&["OR (exclusive)", "AND (parallel)"]);
+    dd.set_selected(u32::from(
+        node.data.decomposition == Some(StateDecomposition::And),
+    ));
+    {
+        let fc = fc.clone();
+        let id = id.clone();
+        dd.connect_selected_notify(move |d| {
+            let dec = if d.selected() == 1 {
+                StateDecomposition::And
+            } else {
+                StateDecomposition::Or
+            };
+            fc.set_decomposition(&id, dec);
+        });
+    }
+    body.append(&titled("Decomposition", dd.upcast_ref()));
+
+    // History junction.
+    let hist = gtk::CheckButton::with_label("History junction");
+    hist.set_active(node.data.has_history == Some(true));
+    {
+        let fc = fc.clone();
+        let id = id.clone();
+        hist.connect_toggled(move |_| fc.toggle_history(&id));
+    }
+    body.append(&hist);
+
+    // Execution order (used when nested under an AND state).
+    let order = Entry::new();
+    order.set_text(
+        &node
+            .data
+            .execution_order
+            .map(|o| o.to_string())
+            .unwrap_or_default(),
+    );
+    {
+        let fc = fc.clone();
+        let id = id.clone();
+        order.connect_changed(move |e| {
+            fc.set_execution_order(&id, e.text().trim().parse::<u32>().ok());
+        });
+    }
+    body.append(&titled(
+        "Execution order (AND siblings)",
+        order.upcast_ref(),
+    ));
+
+    // Parent + detach.
+    if node.parent.is_some() {
+        let detach = Button::with_label("Move to top level");
+        detach.add_css_class("mf-tool");
+        let fc2 = fc.clone();
+        let id2 = id.clone();
+        detach.connect_clicked(move |_| {
+            fc2.reparent(&id2, None);
+        });
+        body.append(&detach);
+    }
+
+    // Hierarchy lint for this state.
+    if let Some(msg) = fc.hierarchy_errors().get(&id) {
+        let warn = Label::new(Some(&format!("⚠ {msg}")));
+        warn.add_css_class("mf-field-error-text");
+        warn.set_halign(gtk::Align::Start);
+        warn.set_wrap(true);
+        body.append(&warn);
+    }
+}
+
+/// After a state is dropped, reparent it into the smallest other state whose box
+/// contains its center (or to the top level if dropped on empty canvas). A drop
+/// into the state's own descendant is rejected by `reparent` (no cycles).
+fn reparent_on_drop(fc: &Rc<FlowchartViewModel>, id: &str) {
+    use matforge_core::models::flowchart::SchemaKind;
+    if fc.document.with(|d| d.schema_kind()) != SchemaKind::StateChart {
+        return;
+    }
+    let Some(node) = fc.node(id) else { return };
+    if node.kind != NodeKind::State {
+        return;
+    }
+    let (x, y, w, h) = node.rect();
+    let (cx, cy) = (x + w / 2.0, y + h / 2.0);
+    let mut exclude = fc.descendants(id);
+    exclude.insert(id.to_string());
+
+    let target = fc.document.with(|d| {
+        d.flows.first().and_then(|flow| {
+            flow.nodes
+                .iter()
+                .filter(|n| n.kind == NodeKind::State && !exclude.contains(&n.id))
+                .filter(|n| {
+                    let (nx, ny, nw, nh) = n.rect();
+                    cx >= nx && cx <= nx + nw && cy >= ny && cy <= ny + nh
+                })
+                .min_by(|a, b| {
+                    let (ra, rb) = (a.rect(), b.rect());
+                    (ra.2 * ra.3)
+                        .partial_cmp(&(rb.2 * rb.3))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .map(|n| n.id.clone())
+        })
+    });
+    fc.reparent(id, target.as_deref());
+}
+
 fn build_inspector_body(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>) -> ScrolledWindow {
     let body = GtkBox::new(Orientation::Vertical, 8);
     body.set_margin_start(10);
@@ -1195,6 +1330,10 @@ fn build_inspector_body(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>) -> Scro
                 field.append(&entry);
                 field.append(&err);
                 body.append(&field);
+            }
+
+            if node.kind == NodeKind::State {
+                append_state_hierarchy_controls(&body, &fc, &node);
             }
 
             if node.kind.is_executable() {
