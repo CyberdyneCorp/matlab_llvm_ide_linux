@@ -167,3 +167,17 @@ through the tested [`FlowchartViewModel`](../crates/core/src/viewmodels/flowchar
 * **Save** writes the `.mflow` back to disk; **Compile** lowers the chart to MATLAB
   via `matlabc -emit-matlab`, writes the generated `.m` beside it, and opens it in
   the editor.
+
+## mStateflow runner
+
+Running a state chart (`▶ Run Chart`) opens a live window
+([`statechart_window`](../crates/app/src/statechart_window.rs)) backed by the
+tested [`StateChartViewModel`](../crates/core/src/viewmodels/statechart.rs):
+
+* **Chart canvas** (left): every currently-active state gets a green halo;
+  clicking an event-log row reveals that state with a yellow halo.
+* **Active-state pane** (top-right): the state hierarchy as an indented tree with
+  a live ●/○ active marker and an OR/AND decomposition badge per compound.
+* **Event log** (bottom-right): one row per chart event prefixed with its
+  super-step index (`[i] → enter S`), clickable to reveal the state on the canvas,
+  with a **⭳ CSV** export (`step,kind,detail`) written beside the model file.

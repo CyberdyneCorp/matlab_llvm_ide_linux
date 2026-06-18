@@ -10,7 +10,7 @@ mod palette;
 
 pub use analysis::{
     algebraic_loop_nodes, autosize_compounds, children_ids, descendants, hierarchy_errors,
-    is_descendant,
+    is_descendant, state_tree, StateTreeNode,
 };
 pub use document::{
     AlgebraicLoopMethod, ChartSymbol, ChartSymbols, Flow, FlowKind, FlowLayout, FlowSignature,

@@ -79,6 +79,33 @@ impl ChartEvent {
             _ => None,
         }
     }
+
+    /// The chart node this event points at (for click-to-reveal on the canvas):
+    /// the entered/exited state, or a transition's destination.
+    pub fn reveal_state(&self) -> Option<&str> {
+        match self {
+            ChartEvent::StateEnter { id } | ChartEvent::StateExit { id } => Some(id),
+            ChartEvent::TransitionFired { dst, .. } => Some(dst),
+            _ => None,
+        }
+    }
+
+    /// `(kind, detail)` columns for CSV export.
+    pub fn csv_fields(&self) -> (&'static str, String) {
+        match self {
+            ChartEvent::StateEnter { id } => ("stateEnter", id.clone()),
+            ChartEvent::StateExit { id } => ("stateExit", id.clone()),
+            ChartEvent::TransitionFired { id, src, dst } => {
+                ("transitionFired", format!("{id}:{src}->{dst}"))
+            }
+            ChartEvent::SuperStepBegin { iteration } => ("superStepBegin", iteration.to_string()),
+            ChartEvent::SuperStepEnd {
+                iteration,
+                quiescent,
+            } => ("superStepEnd", format!("{iteration}:quiescent={quiescent}")),
+            ChartEvent::Other { kind } => ("other", kind.clone()),
+        }
+    }
 }
 
 /// Map an event `kind` plus the object carrying its fields to a [`ChartEvent`].

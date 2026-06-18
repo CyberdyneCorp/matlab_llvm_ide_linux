@@ -674,6 +674,7 @@ fn build_model_canvas(vm: &Rc<MflowLinkViewModel>) -> GtkBox {
                     active.as_deref(),
                     &algebraic,
                     &hierarchy_lint,
+                    &std::collections::BTreeSet::new(),
                 );
             });
         });
