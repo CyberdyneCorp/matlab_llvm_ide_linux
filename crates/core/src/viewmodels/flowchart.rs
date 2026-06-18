@@ -205,6 +205,29 @@ impl FlowchartViewModel {
         }
     }
 
+    /// Whether a new wire from `from_node:from_port` to `to_node:to_port` is
+    /// allowed: no self-connection, and the destination input port must be free
+    /// (each input port takes a single source). The source port may fan out.
+    pub fn can_add_edge(
+        &self,
+        from_node: &str,
+        _from_port: &str,
+        to_node: &str,
+        to_port: &str,
+    ) -> bool {
+        if from_node == to_node {
+            return false;
+        }
+        self.document.with(|d| {
+            d.flows.first().is_some_and(|flow| {
+                !flow
+                    .edges
+                    .iter()
+                    .any(|e| e.to.node == to_node && e.to.port == to_port)
+            })
+        })
+    }
+
     /// Connect two ports with a control edge; returns the new edge id.
     pub fn add_edge(
         &self,
@@ -633,6 +656,24 @@ mod tests {
         let b = vm.add_node(NodeKind::SignalScope, 200.0, 0.0);
         vm.add_edge(&a, "out", &b, "in");
         assert_eq!(vm.edge_count(), 1);
+    }
+
+    #[test]
+    fn can_add_edge_rejects_self_loop_and_occupied_input() {
+        let vm = FlowchartViewModel::empty("D", SchemaKind::SignalFlow);
+        let a = vm.add_node(NodeKind::SignalConstant, 0.0, 0.0);
+        let b = vm.add_node(NodeKind::SignalGain, 200.0, 0.0);
+        let sum = vm.add_node(NodeKind::SignalSum, 400.0, 0.0);
+        // A fresh connection is allowed; a self-connection is not.
+        assert!(vm.can_add_edge(&a, "out", &b, "in"));
+        assert!(!vm.can_add_edge(&b, "out", &b, "in"));
+        // Once an input port is wired it won't take a second source…
+        vm.add_edge(&a, "out", &b, "in");
+        assert!(!vm.can_add_edge(&sum, "out", &b, "in"));
+        // …but a different input port on the same block is still free, and a
+        // source may fan out to multiple destinations.
+        assert!(vm.can_add_edge(&a, "out", &sum, "in2"));
+        assert!(vm.can_add_edge(&a, "out", &sum, "in1"));
     }
 
     #[test]

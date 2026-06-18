@@ -123,6 +123,21 @@ pub fn draw_document(
             ctx.set_dash(&[], 0.0);
         }
 
+        // Port markers — small dots at each port so they're visible targets
+        // when drawing a wire by drag (inputs muted, outputs accent-colored).
+        for port in &node.ports.inputs {
+            let (px, py) = port_point(node, &port.id);
+            set_rgb(ctx, crate::theme_css::current().text_secondary);
+            ctx.arc(px, py, 2.5, 0.0, std::f64::consts::TAU);
+            ctx.fill().ok();
+        }
+        for port in &node.ports.outputs {
+            let (px, py) = port_point(node, &port.id);
+            set_rgb(ctx, accent);
+            ctx.arc(px, py, 2.5, 0.0, std::f64::consts::TAU);
+            ctx.fill().ok();
+        }
+
         // Label.
         set_rgb(ctx, crate::theme_css::current().text_primary);
         ctx.select_font_face(

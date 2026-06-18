@@ -302,6 +302,7 @@ pub fn build_flowchart_view(
         let state = drag_state.clone();
         let pending = pending_edge.clone();
         let canvas2 = canvas.clone();
+        let app = app.clone();
         drag.connect_drag_end(move |g, dx, dy| {
             if let Some(DragMode::Edge {
                 from_node,
@@ -316,13 +317,22 @@ pub fn build_flowchart_view(
                     let world = flow_render::screen_to_world(vp, start_x + dx, start_y + dy);
                     let target = fc.document.with(|d| flow_render::hit_test(d, world));
                     if let Some(to_node) = target {
-                        if to_node != from_node {
-                            if let Some(to_port) = fc
-                                .document
-                                .with(|d| flow_render::nearest_input_port(d, &to_node, world))
+                        let to_port = fc
+                            .document
+                            .with(|d| flow_render::nearest_input_port(d, &to_node, world));
+                        match to_port {
+                            Some(to_port)
+                                if fc.can_add_edge(&from_node, &from_port, &to_node, &to_port) =>
                             {
                                 fc.add_edge(&from_node, &from_port, &to_node, &to_port);
                             }
+                            Some(_) if to_node == from_node => {
+                                app.vm.toast.show("Can't wire a block to itself");
+                            }
+                            Some(_) => {
+                                app.vm.toast.show("That input port is already connected");
+                            }
+                            None => {}
                         }
                     }
                 }
