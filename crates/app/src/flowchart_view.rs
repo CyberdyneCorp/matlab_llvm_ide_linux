@@ -545,7 +545,11 @@ fn open_solver_popover(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>, anchor: 
     let numf = |v: Option<f64>, d: f64| entry(format!("{}", v.unwrap_or(d)));
 
     let type_dd = gtk::DropDown::from_strings(&["fixed_step", "variable_step"]);
-    type_dd.set_selected(if cfg.solver_type == Some(T::FixedStep) { 0 } else { 1 });
+    type_dd.set_selected(if cfg.solver_type == Some(T::FixedStep) {
+        0
+    } else {
+        1
+    });
     let algo_dd = gtk::DropDown::from_strings(&["ode45", "ode23", "ode15s", "euler", "heun"]);
     algo_dd.set_selected(match cfg.algorithm {
         Some(A::Ode23) => 1,
@@ -612,10 +616,18 @@ fn open_solver_popover(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>, anchor: 
             let f = |e: &Entry, d: f64| e.text().trim().parse::<f64>().unwrap_or(d);
             let step = |e: &Entry| {
                 let s = e.text().to_string();
-                Some(if s.trim().is_empty() { "auto".to_string() } else { s })
+                Some(if s.trim().is_empty() {
+                    "auto".to_string()
+                } else {
+                    s
+                })
             };
             let cfg = SolverConfig {
-                solver_type: Some(if type_dd.selected() == 0 { T::FixedStep } else { T::VariableStep }),
+                solver_type: Some(if type_dd.selected() == 0 {
+                    T::FixedStep
+                } else {
+                    T::VariableStep
+                }),
                 algorithm: Some(match algo_dd.selected() {
                     1 => A::Ode23,
                     2 => A::Ode15s,
