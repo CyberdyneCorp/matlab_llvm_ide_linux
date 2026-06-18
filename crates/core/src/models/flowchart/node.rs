@@ -261,33 +261,91 @@ pub enum PortAnchor {
 impl NodeKind {
     /// Every kind, for palette enumeration + exhaustive tests.
     pub const ALL: [NodeKind; 85] = [
-        NodeKind::Start, NodeKind::End, NodeKind::Comment, NodeKind::Constant,
-        NodeKind::Variable, NodeKind::Assignment, NodeKind::Expression, NodeKind::Input,
-        NodeKind::Display, NodeKind::FunctionCall, NodeKind::MatrixLiteral, NodeKind::IfBlock,
-        NodeKind::ForLoop, NodeKind::WhileLoop, NodeKind::BreakBlock, NodeKind::ContinueBlock,
-        NodeKind::ReturnBlock, NodeKind::FunctionDefinition, NodeKind::SubflowCall, NodeKind::Custom,
-        NodeKind::SignalConstant, NodeKind::SignalStep, NodeKind::SignalSine, NodeKind::SignalPulse,
-        NodeKind::SignalRamp, NodeKind::SignalClock, NodeKind::SignalChirp, NodeKind::SignalNoise,
-        NodeKind::SignalFunctionCallGenerator, NodeKind::SignalScope, NodeKind::SignalDisplay,
-        NodeKind::SignalToWorkspace, NodeKind::SignalTerminator, NodeKind::SignalIntegrator,
+        NodeKind::Start,
+        NodeKind::End,
+        NodeKind::Comment,
+        NodeKind::Constant,
+        NodeKind::Variable,
+        NodeKind::Assignment,
+        NodeKind::Expression,
+        NodeKind::Input,
+        NodeKind::Display,
+        NodeKind::FunctionCall,
+        NodeKind::MatrixLiteral,
+        NodeKind::IfBlock,
+        NodeKind::ForLoop,
+        NodeKind::WhileLoop,
+        NodeKind::BreakBlock,
+        NodeKind::ContinueBlock,
+        NodeKind::ReturnBlock,
+        NodeKind::FunctionDefinition,
+        NodeKind::SubflowCall,
+        NodeKind::Custom,
+        NodeKind::SignalConstant,
+        NodeKind::SignalStep,
+        NodeKind::SignalSine,
+        NodeKind::SignalPulse,
+        NodeKind::SignalRamp,
+        NodeKind::SignalClock,
+        NodeKind::SignalChirp,
+        NodeKind::SignalNoise,
+        NodeKind::SignalFunctionCallGenerator,
+        NodeKind::SignalScope,
+        NodeKind::SignalDisplay,
+        NodeKind::SignalToWorkspace,
+        NodeKind::SignalTerminator,
+        NodeKind::SignalIntegrator,
         NodeKind::SignalPid,
-        NodeKind::SignalDerivative, NodeKind::SignalTransferFcn, NodeKind::SignalStateSpace,
-        NodeKind::SignalZeroPole, NodeKind::SignalTransportDelay, NodeKind::SignalUnitDelay,
-        NodeKind::SignalZoh, NodeKind::SignalDiscreteIntegrator, NodeKind::SignalDiscreteFilter,
-        NodeKind::SignalRateTransition, NodeKind::SignalGain, NodeKind::SignalSum,
-        NodeKind::SignalProduct, NodeKind::SignalAbs, NodeKind::SignalSaturation,
-        NodeKind::SignalMathFcn, NodeKind::SignalTrigFcn, NodeKind::SignalDeadZone,
-        NodeKind::SignalRelop, NodeKind::SignalLogical, NodeKind::SignalCompareToZero,
-        NodeKind::SignalCompareToConstant, NodeKind::SignalRelay, NodeKind::SignalMux,
-        NodeKind::SignalDemux, NodeKind::SignalSwitch, NodeKind::SignalMultiportSwitch,
-        NodeKind::SignalMerge, NodeKind::SignalGoto, NodeKind::SignalFrom,
-        NodeKind::SignalBusCreator, NodeKind::SignalBusSelector, NodeKind::SignalReshape,
-        NodeKind::SignalMatlabFcn, NodeKind::SignalLookup1D, NodeKind::SignalLookup2D,
-        NodeKind::SignalSubsystem, NodeKind::SignalInport, NodeKind::SignalOutport,
-        NodeKind::SignalEnabledSubsystem, NodeKind::SignalTriggeredSubsystem, NodeKind::State,
-        NodeKind::JunctionConnective, NodeKind::JunctionHistory, NodeKind::JunctionEntry,
-        NodeKind::JunctionExit, NodeKind::JunctionDefault, NodeKind::ChartFnGraphical,
-        NodeKind::ChartFnMatlab, NodeKind::ChartFnTruthTable,
+        NodeKind::SignalDerivative,
+        NodeKind::SignalTransferFcn,
+        NodeKind::SignalStateSpace,
+        NodeKind::SignalZeroPole,
+        NodeKind::SignalTransportDelay,
+        NodeKind::SignalUnitDelay,
+        NodeKind::SignalZoh,
+        NodeKind::SignalDiscreteIntegrator,
+        NodeKind::SignalDiscreteFilter,
+        NodeKind::SignalRateTransition,
+        NodeKind::SignalGain,
+        NodeKind::SignalSum,
+        NodeKind::SignalProduct,
+        NodeKind::SignalAbs,
+        NodeKind::SignalSaturation,
+        NodeKind::SignalMathFcn,
+        NodeKind::SignalTrigFcn,
+        NodeKind::SignalDeadZone,
+        NodeKind::SignalRelop,
+        NodeKind::SignalLogical,
+        NodeKind::SignalCompareToZero,
+        NodeKind::SignalCompareToConstant,
+        NodeKind::SignalRelay,
+        NodeKind::SignalMux,
+        NodeKind::SignalDemux,
+        NodeKind::SignalSwitch,
+        NodeKind::SignalMultiportSwitch,
+        NodeKind::SignalMerge,
+        NodeKind::SignalGoto,
+        NodeKind::SignalFrom,
+        NodeKind::SignalBusCreator,
+        NodeKind::SignalBusSelector,
+        NodeKind::SignalReshape,
+        NodeKind::SignalMatlabFcn,
+        NodeKind::SignalLookup1D,
+        NodeKind::SignalLookup2D,
+        NodeKind::SignalSubsystem,
+        NodeKind::SignalInport,
+        NodeKind::SignalOutport,
+        NodeKind::SignalEnabledSubsystem,
+        NodeKind::SignalTriggeredSubsystem,
+        NodeKind::State,
+        NodeKind::JunctionConnective,
+        NodeKind::JunctionHistory,
+        NodeKind::JunctionEntry,
+        NodeKind::JunctionExit,
+        NodeKind::JunctionDefault,
+        NodeKind::ChartFnGraphical,
+        NodeKind::ChartFnMatlab,
+        NodeKind::ChartFnTruthTable,
     ];
 
     /// Palette / inspector category.
@@ -303,22 +361,52 @@ impl NodeKind {
             Constant | Variable | Assignment | Expression => C::Data,
             FunctionDefinition | FunctionCall | SubflowCall | Custom => C::Functions,
             MatrixLiteral => C::Matrix,
-            SignalConstant | SignalStep | SignalSine | SignalPulse | SignalRamp | SignalClock
-            | SignalChirp | SignalNoise | SignalFunctionCallGenerator => C::SignalSources,
+            SignalConstant
+            | SignalStep
+            | SignalSine
+            | SignalPulse
+            | SignalRamp
+            | SignalClock
+            | SignalChirp
+            | SignalNoise
+            | SignalFunctionCallGenerator => C::SignalSources,
             SignalScope | SignalDisplay | SignalToWorkspace | SignalTerminator => C::SignalSinks,
-            SignalIntegrator | SignalPid | SignalDerivative | SignalTransferFcn | SignalStateSpace
-            | SignalZeroPole | SignalTransportDelay => C::SignalContinuous,
-            SignalUnitDelay | SignalZoh | SignalDiscreteIntegrator | SignalDiscreteFilter
+            SignalIntegrator | SignalPid | SignalDerivative | SignalTransferFcn
+            | SignalStateSpace | SignalZeroPole | SignalTransportDelay => C::SignalContinuous,
+            SignalUnitDelay
+            | SignalZoh
+            | SignalDiscreteIntegrator
+            | SignalDiscreteFilter
             | SignalRateTransition => C::SignalDiscrete,
-            SignalGain | SignalSum | SignalProduct | SignalAbs | SignalSaturation | SignalMathFcn
-            | SignalTrigFcn | SignalDeadZone | SignalRelop | SignalLogical | SignalCompareToZero
-            | SignalCompareToConstant | SignalRelay | SignalMatlabFcn => C::SignalMath,
-            SignalMux | SignalDemux | SignalSwitch | SignalMultiportSwitch | SignalMerge
-            | SignalGoto | SignalFrom | SignalBusCreator | SignalBusSelector | SignalReshape => {
-                C::SignalRouting
-            }
+            SignalGain
+            | SignalSum
+            | SignalProduct
+            | SignalAbs
+            | SignalSaturation
+            | SignalMathFcn
+            | SignalTrigFcn
+            | SignalDeadZone
+            | SignalRelop
+            | SignalLogical
+            | SignalCompareToZero
+            | SignalCompareToConstant
+            | SignalRelay
+            | SignalMatlabFcn => C::SignalMath,
+            SignalMux
+            | SignalDemux
+            | SignalSwitch
+            | SignalMultiportSwitch
+            | SignalMerge
+            | SignalGoto
+            | SignalFrom
+            | SignalBusCreator
+            | SignalBusSelector
+            | SignalReshape => C::SignalRouting,
             SignalLookup1D | SignalLookup2D => C::SignalLookup,
-            SignalSubsystem | SignalInport | SignalOutport | SignalEnabledSubsystem
+            SignalSubsystem
+            | SignalInport
+            | SignalOutport
+            | SignalEnabledSubsystem
             | SignalTriggeredSubsystem => C::SignalComposite,
             State => C::ChartStates,
             JunctionConnective | JunctionHistory | JunctionEntry | JunctionExit
@@ -451,7 +539,8 @@ impl NodeKind {
         use NodeKind::*;
         !matches!(
             self,
-            Start | End
+            Start
+                | End
                 | Comment
                 | FunctionDefinition
                 | JunctionConnective
@@ -501,25 +590,45 @@ impl NodeKind {
         use NodeKind::*;
         if self.is_state_chart() {
             return match self {
-                State => FlowSize { width: 160.0, height: 96.0 },
-                ChartFnGraphical | ChartFnMatlab | ChartFnTruthTable => {
-                    FlowSize { width: 150.0, height: 72.0 }
-                }
-                _ => FlowSize { width: 28.0, height: 28.0 },
+                State => FlowSize {
+                    width: 160.0,
+                    height: 96.0,
+                },
+                ChartFnGraphical | ChartFnMatlab | ChartFnTruthTable => FlowSize {
+                    width: 150.0,
+                    height: 72.0,
+                },
+                _ => FlowSize {
+                    width: 28.0,
+                    height: 28.0,
+                },
             };
         }
         if self.is_signal_flow() {
             return match self {
-                SignalSubsystem | SignalEnabledSubsystem | SignalTriggeredSubsystem => {
-                    FlowSize { width: 150.0, height: 80.0 }
-                }
-                SignalInport | SignalOutport => FlowSize { width: 90.0, height: 44.0 },
-                _ => FlowSize { width: 120.0, height: 56.0 },
+                SignalSubsystem | SignalEnabledSubsystem | SignalTriggeredSubsystem => FlowSize {
+                    width: 150.0,
+                    height: 80.0,
+                },
+                SignalInport | SignalOutport => FlowSize {
+                    width: 90.0,
+                    height: 44.0,
+                },
+                _ => FlowSize {
+                    width: 120.0,
+                    height: 56.0,
+                },
             };
         }
         match self.shape() {
-            NodeShape::Diamond | NodeShape::Hexagon => FlowSize { width: 220.0, height: 80.0 },
-            _ => FlowSize { width: 180.0, height: 56.0 },
+            NodeShape::Diamond | NodeShape::Hexagon => FlowSize {
+                width: 220.0,
+                height: 80.0,
+            },
+            _ => FlowSize {
+                width: 180.0,
+                height: 56.0,
+            },
         }
     }
 
@@ -565,8 +674,16 @@ impl NodeKind {
         use NodeKind::*;
         use PortAnchor::*;
         match self {
-            SignalConstant | SignalStep | SignalSine | SignalPulse | SignalRamp | SignalInport
-            | SignalClock | SignalChirp | SignalNoise | SignalFunctionCallGenerator
+            SignalConstant
+            | SignalStep
+            | SignalSine
+            | SignalPulse
+            | SignalRamp
+            | SignalInport
+            | SignalClock
+            | SignalChirp
+            | SignalNoise
+            | SignalFunctionCallGenerator
             | SignalFrom => (id == "out").then_some(Right),
             SignalScope | SignalDisplay | SignalToWorkspace | SignalTerminator | SignalOutport
             | SignalGoto => (id == "in").then_some(Left),
@@ -602,8 +719,14 @@ impl NodeKind {
                 "out" => Some(Right),
                 _ => None,
             },
-            SignalSum | SignalProduct | SignalRelop | SignalLogical | SignalMultiportSwitch
-            | SignalMerge | SignalLookup2D | SignalBusCreator => {
+            SignalSum
+            | SignalProduct
+            | SignalRelop
+            | SignalLogical
+            | SignalMultiportSwitch
+            | SignalMerge
+            | SignalLookup2D
+            | SignalBusCreator => {
                 if id == "out" {
                     Some(Right)
                 } else if id.starts_with("in") {
@@ -630,8 +753,14 @@ impl NodeKind {
         use NodeKind::*;
         let p = FlowPort::new;
         match self {
-            Start => FlowPorts { inputs: vec![], outputs: vec![p("out")] },
-            End => FlowPorts { inputs: vec![p("in")], outputs: vec![] },
+            Start => FlowPorts {
+                inputs: vec![],
+                outputs: vec![p("out")],
+            },
+            End => FlowPorts {
+                inputs: vec![p("in")],
+                outputs: vec![],
+            },
             IfBlock => FlowPorts {
                 inputs: vec![p("in")],
                 outputs: vec![p("true"), p("false")],
@@ -640,18 +769,34 @@ impl NodeKind {
                 inputs: vec![p("in")],
                 outputs: vec![p("body"), p("done")],
             },
-            SignalConstant | SignalStep | SignalSine | SignalPulse | SignalRamp | SignalInport
-            | SignalClock | SignalChirp | SignalNoise | SignalFunctionCallGenerator
-            | SignalFrom => FlowPorts { inputs: vec![], outputs: vec![p("out")] },
+            SignalConstant
+            | SignalStep
+            | SignalSine
+            | SignalPulse
+            | SignalRamp
+            | SignalInport
+            | SignalClock
+            | SignalChirp
+            | SignalNoise
+            | SignalFunctionCallGenerator
+            | SignalFrom => FlowPorts {
+                inputs: vec![],
+                outputs: vec![p("out")],
+            },
             SignalScope | SignalDisplay | SignalToWorkspace | SignalTerminator | SignalOutport
-            | SignalGoto => FlowPorts { inputs: vec![p("in")], outputs: vec![] },
-            SignalSubsystem | SignalEnabledSubsystem | SignalTriggeredSubsystem => {
-                FlowPorts { inputs: vec![p("in1")], outputs: vec![p("out1")] }
-            }
+            | SignalGoto => FlowPorts {
+                inputs: vec![p("in")],
+                outputs: vec![],
+            },
+            SignalSubsystem | SignalEnabledSubsystem | SignalTriggeredSubsystem => FlowPorts {
+                inputs: vec![p("in1")],
+                outputs: vec![p("out1")],
+            },
             SignalSum | SignalProduct | SignalMux | SignalRelop | SignalLogical
-            | SignalBusCreator | SignalLookup2D => {
-                FlowPorts { inputs: vec![p("in1"), p("in2")], outputs: vec![p("out")] }
-            }
+            | SignalBusCreator | SignalLookup2D => FlowPorts {
+                inputs: vec![p("in1"), p("in2")],
+                outputs: vec![p("out")],
+            },
             SignalDemux => FlowPorts {
                 inputs: vec![p("in")],
                 outputs: vec![p("out1"), p("out2")],
@@ -664,8 +809,14 @@ impl NodeKind {
                 inputs: vec![p("in1"), p("in2"), p("in3")],
                 outputs: vec![p("out")],
             },
-            SignalMerge => FlowPorts { inputs: vec![p("in1"), p("in2")], outputs: vec![p("out")] },
-            _ => FlowPorts { inputs: vec![p("in")], outputs: vec![p("out")] },
+            SignalMerge => FlowPorts {
+                inputs: vec![p("in1"), p("in2")],
+                outputs: vec![p("out")],
+            },
+            _ => FlowPorts {
+                inputs: vec![p("in")],
+                outputs: vec![p("out")],
+            },
         }
     }
 }
@@ -724,7 +875,11 @@ pub struct NodeData {
     pub source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub path: Option<String>,
-    #[serde(rename = "library_id", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "library_id",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub library_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub inputs: Option<Vec<String>>,
@@ -734,28 +889,60 @@ pub struct NodeData {
     pub text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub params: Option<BTreeMap<String, ParamValue>>,
-    #[serde(rename = "sample_time", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "sample_time",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub sample_time: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub units: Option<String>,
     #[serde(rename = "data_type", skip_serializing_if = "Option::is_none", default)]
     pub data_type: Option<String>,
-    #[serde(rename = "log_signal", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "log_signal",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub log_signal: Option<bool>,
-    #[serde(rename = "enable_block", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "enable_block",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub enable_block: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub tag: Option<String>,
-    #[serde(rename = "mask_params", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "mask_params",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub mask_params: Option<BTreeMap<String, String>>,
     // mStateflow action bodies — camelCase JSON keys to match shipped fixtures.
-    #[serde(rename = "entryAction", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "entryAction",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub entry_action: Option<String>,
-    #[serde(rename = "duringAction", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "duringAction",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub during_action: Option<String>,
-    #[serde(rename = "exitAction", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "exitAction",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub exit_action: Option<String>,
-    #[serde(rename = "onEventActions", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "onEventActions",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub on_event_actions: Option<BTreeMap<String, String>>,
 }
 
@@ -824,7 +1011,11 @@ pub struct FlowUi {
 
 impl FlowUi {
     pub fn at(position: FlowPosition) -> FlowUi {
-        FlowUi { position, size: None, collapsed: None }
+        FlowUi {
+            position,
+            size: None,
+            collapsed: None,
+        }
     }
 }
 
@@ -883,7 +1074,10 @@ mod tests {
     fn default_ports_for_control_flow() {
         let p = NodeKind::IfBlock.default_ports();
         assert_eq!(p.inputs.len(), 1);
-        assert_eq!(p.outputs.iter().map(|x| x.id.as_str()).collect::<Vec<_>>(), ["true", "false"]);
+        assert_eq!(
+            p.outputs.iter().map(|x| x.id.as_str()).collect::<Vec<_>>(),
+            ["true", "false"]
+        );
         let start = NodeKind::Start.default_ports();
         assert!(start.inputs.is_empty());
         assert_eq!(start.outputs[0].id, "out");
@@ -899,9 +1093,18 @@ mod tests {
     #[test]
     fn port_anchor_conventions() {
         assert_eq!(NodeKind::Start.port_anchor("out"), Some(PortAnchor::Bottom));
-        assert_eq!(NodeKind::IfBlock.port_anchor("false"), Some(PortAnchor::Right));
-        assert_eq!(NodeKind::SignalGain.port_anchor("in"), Some(PortAnchor::Left));
-        assert_eq!(NodeKind::SignalGain.port_anchor("out"), Some(PortAnchor::Right));
+        assert_eq!(
+            NodeKind::IfBlock.port_anchor("false"),
+            Some(PortAnchor::Right)
+        );
+        assert_eq!(
+            NodeKind::SignalGain.port_anchor("in"),
+            Some(PortAnchor::Left)
+        );
+        assert_eq!(
+            NodeKind::SignalGain.port_anchor("out"),
+            Some(PortAnchor::Right)
+        );
         assert_eq!(NodeKind::Assignment.port_anchor("nope"), None);
     }
 
@@ -923,11 +1126,26 @@ mod tests {
 
     #[test]
     fn param_value_untagged_serde() {
-        assert_eq!(serde_json::to_string(&ParamValue::Double(2.0)).unwrap(), "2.0");
-        assert_eq!(serde_json::to_string(&ParamValue::Bool(true)).unwrap(), "true");
-        assert_eq!(serde_json::to_string(&ParamValue::Str("hi".into())).unwrap(), "\"hi\"");
-        assert_eq!(serde_json::from_str::<ParamValue>("3.5").unwrap(), ParamValue::Double(3.5));
-        assert_eq!(serde_json::from_str::<ParamValue>("true").unwrap(), ParamValue::Bool(true));
+        assert_eq!(
+            serde_json::to_string(&ParamValue::Double(2.0)).unwrap(),
+            "2.0"
+        );
+        assert_eq!(
+            serde_json::to_string(&ParamValue::Bool(true)).unwrap(),
+            "true"
+        );
+        assert_eq!(
+            serde_json::to_string(&ParamValue::Str("hi".into())).unwrap(),
+            "\"hi\""
+        );
+        assert_eq!(
+            serde_json::from_str::<ParamValue>("3.5").unwrap(),
+            ParamValue::Double(3.5)
+        );
+        assert_eq!(
+            serde_json::from_str::<ParamValue>("true").unwrap(),
+            ParamValue::Bool(true)
+        );
         assert_eq!(
             serde_json::from_str::<ParamValue>("\"x\"").unwrap(),
             ParamValue::Str("x".into())
@@ -982,7 +1200,11 @@ mod tests {
             let ports = k.default_ports();
             // Every declared port resolves to an anchor.
             for p in ports.inputs.iter().chain(ports.outputs.iter()) {
-                assert!(k.port_anchor(&p.id).is_some(), "{k:?} port {} has no anchor", p.id);
+                assert!(
+                    k.port_anchor(&p.id).is_some(),
+                    "{k:?} port {} has no anchor",
+                    p.id
+                );
             }
             // Dialect flags are consistent with the category.
             assert_eq!(k.is_signal_flow(), k.category().is_signal_flow());

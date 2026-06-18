@@ -162,12 +162,6 @@ impl FlowchartViewModel {
         self.document.with(|d| d.algebraic_loop_nodes())
     }
 
-    /// Block ids sitting on an algebraic loop — drives the inspector note and
-    /// the canvas warning outline. Empty unless this is a signal-flow document.
-    pub fn algebraic_loop_nodes(&self) -> std::collections::BTreeSet<String> {
-        self.document.with(|d| d.algebraic_loop_nodes())
-    }
-
     /// Delete a node and any edge that touches it.
     pub fn delete_node(&self, id: &str) {
         self.push_undo();

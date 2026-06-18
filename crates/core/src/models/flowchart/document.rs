@@ -54,15 +54,6 @@ impl FlowchartDocument {
             .unwrap_or_default()
     }
 
-    /// Block ids on an algebraic loop in the entry flow. Empty for non
-    /// signal-flow documents — the concept only applies to signal diagrams.
-    pub fn algebraic_loop_nodes(&self) -> std::collections::BTreeSet<String> {
-        if self.schema_kind() != SchemaKind::SignalFlow {
-            return std::collections::BTreeSet::new();
-        }
-        self.flows.first().map(super::analysis::algebraic_loop_nodes).unwrap_or_default()
-    }
-
     /// Fresh empty document for the given dialect.
     pub fn empty(name: &str, kind: SchemaKind) -> FlowchartDocument {
         match kind {
