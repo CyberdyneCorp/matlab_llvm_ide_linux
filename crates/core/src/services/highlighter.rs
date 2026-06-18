@@ -233,12 +233,14 @@ pub fn highlight(source: &str, language: Language) -> Vec<TokenSpan> {
         if prefixed.contains(&c) {
             let start = i;
             i += 1;
-            while i < n
-                && (s[i].is_alphanumeric() || s[i] == '_' || s[i] == '.')
-            {
+            while i < n && (s[i].is_alphanumeric() || s[i] == '_' || s[i] == '.') {
                 i += 1;
             }
-            let color = if c == '@' { TokenColor::SsaGlobal } else { TokenColor::SsaLocal };
+            let color = if c == '@' {
+                TokenColor::SsaGlobal
+            } else {
+                TokenColor::SsaLocal
+            };
             push(&mut out, start, i, color);
             continue;
         }
@@ -268,9 +270,7 @@ pub fn highlight(source: &str, language: Language) -> Vec<TokenSpan> {
                 TokenColor::Keyword
             } else if cw.contains(word.as_str()) {
                 TokenColor::Control
-            } else if bi.contains(word.as_str()) {
-                TokenColor::Function
-            } else if is_followed_by_call(&s, i) {
+            } else if bi.contains(word.as_str()) || is_followed_by_call(&s, i) {
                 TokenColor::Function
             } else {
                 TokenColor::Identifier
@@ -419,7 +419,9 @@ mod tests {
         let char_start = src[..start].chars().count();
         spans
             .iter()
-            .find(|s| s.start == char_start && &chars[s.start..s.end].iter().collect::<String>() == needle)
+            .find(|s| {
+                s.start == char_start && chars[s.start..s.end].iter().collect::<String>() == needle
+            })
             .map(|s| s.color)
     }
 
@@ -432,10 +434,16 @@ mod tests {
     fn matlab_keyword_and_comment() {
         let src = "function y = f(x) % doc\nend";
         let spans = highlight(src, Language::Matlab);
-        assert_eq!(colors_at(&spans, src, "function"), Some(TokenColor::Keyword));
+        assert_eq!(
+            colors_at(&spans, src, "function"),
+            Some(TokenColor::Keyword)
+        );
         assert_eq!(colors_at(&spans, src, "end"), Some(TokenColor::Keyword));
         // comment span covers "% doc"
-        let comment = spans.iter().find(|s| s.color == TokenColor::Comment).unwrap();
+        let comment = spans
+            .iter()
+            .find(|s| s.color == TokenColor::Comment)
+            .unwrap();
         let chars: Vec<char> = src.chars().collect();
         let text: String = chars[comment.start..comment.end].iter().collect();
         assert!(text.starts_with("% doc"));
@@ -449,7 +457,10 @@ mod tests {
         // foo is colored function because it is followed by '('
         assert_eq!(colors_at(&spans, src, "foo"), Some(TokenColor::Function));
         // myvar is a plain identifier
-        assert_eq!(colors_at(&spans, src, "myvar"), Some(TokenColor::Identifier));
+        assert_eq!(
+            colors_at(&spans, src, "myvar"),
+            Some(TokenColor::Identifier)
+        );
     }
 
     #[test]
@@ -457,7 +468,9 @@ mod tests {
         let transpose = "a'";
         let spans = highlight(transpose, Language::Matlab);
         // the apostrophe after identifier is an operator (transpose)
-        assert!(spans.iter().any(|s| s.color == TokenColor::Operator && s.start == 1));
+        assert!(spans
+            .iter()
+            .any(|s| s.color == TokenColor::Operator && s.start == 1));
 
         let string = "x = 'hi'";
         let spans = highlight(string, Language::Matlab);
@@ -477,7 +490,10 @@ mod tests {
         let spans = highlight(src, Language::Cpp);
         assert_eq!(colors_at(&spans, src, "int"), Some(TokenColor::Keyword));
         assert_eq!(colors_at(&spans, src, "return"), Some(TokenColor::Keyword));
-        let comment = spans.iter().find(|s| s.color == TokenColor::Comment).unwrap();
+        let comment = spans
+            .iter()
+            .find(|s| s.color == TokenColor::Comment)
+            .unwrap();
         let chars: Vec<char> = src.chars().collect();
         let text: String = chars[comment.start..comment.end].iter().collect();
         assert_eq!(text, "/* block */");
@@ -504,7 +520,10 @@ mod tests {
     fn verilog_system_task_is_builtin() {
         let src = "$display(\"x\");";
         let spans = highlight(src, Language::Verilog);
-        assert_eq!(colors_at(&spans, src, "$display"), Some(TokenColor::Function));
+        assert_eq!(
+            colors_at(&spans, src, "$display"),
+            Some(TokenColor::Function)
+        );
     }
 
     #[test]

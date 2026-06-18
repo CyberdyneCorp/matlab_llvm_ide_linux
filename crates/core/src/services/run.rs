@@ -34,7 +34,10 @@ impl RunPlan {
     /// `matlabc` args that emit LLVM IR for `source` (IR goes to stdout; the
     /// executor redirects it to [`ll_path`](RunPlan::ll_path)).
     pub fn emit_args(source: &Path) -> Vec<String> {
-        vec!["-emit-llvm".to_string(), source.to_string_lossy().into_owned()]
+        vec![
+            "-emit-llvm".to_string(),
+            source.to_string_lossy().into_owned(),
+        ]
     }
 
     /// The clang link command: `(program, args)`. Mirrors the doc's recipe
@@ -42,7 +45,11 @@ impl RunPlan {
     /// -o <bin>`). `extra_libs` are appended after the runtime archive (and
     /// before `-o`) so libraries the runtime pulls in — e.g. FFmpeg for
     /// `VideoWriter` — resolve in left-to-right link order.
-    pub fn link_command(&self, runtime_archive: &Path, extra_libs: &[String]) -> (String, Vec<String>) {
+    pub fn link_command(
+        &self,
+        runtime_archive: &Path,
+        extra_libs: &[String],
+    ) -> (String, Vec<String>) {
         let mut args = vec![
             "-std=c++20".to_string(),
             "-O2".to_string(),
@@ -110,7 +117,10 @@ mod tests {
         let plan = RunPlan::new(Path::new("/proj/vid.m"), Path::new("/tmp"));
         let extra = vec!["-lavformat".to_string(), "-lavcodec".to_string()];
         let (_prog, args) = plan.link_command(Path::new("/rt/libMatlabRuntime.a"), &extra);
-        let archive = args.iter().position(|a| a == "/rt/libMatlabRuntime.a").unwrap();
+        let archive = args
+            .iter()
+            .position(|a| a == "/rt/libMatlabRuntime.a")
+            .unwrap();
         let avformat = args.iter().position(|a| a == "-lavformat").unwrap();
         let out = args.iter().position(|a| a == "-o").unwrap();
         // FFmpeg libs must resolve the archive's references (after it) and come

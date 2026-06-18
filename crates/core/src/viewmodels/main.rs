@@ -9,7 +9,9 @@ use std::rc::Rc;
 
 use crate::models::{CompilerTarget, ConsoleLevel, PlotFigure, PlotKind};
 use crate::observable::Property;
-use crate::services::compiler::{parse_diagnostic, CompileResult, CompilerInvocation, CompilerService};
+use crate::services::compiler::{
+    parse_diagnostic, CompileResult, CompilerInvocation, CompilerService,
+};
 use crate::services::filesystem::FileSystem;
 use crate::services::sentinels::ReplEvent;
 use crate::services::settings::Settings;
@@ -17,10 +19,11 @@ use crate::services::system_bridge::{Clipboard, FilePicker};
 
 use super::{
     activity_bar::ActivityBarViewModel, appearance::AppearanceViewModel,
-    breakpoints::BreakpointsViewModel, console::ConsoleViewModel, toast::ToastViewModel,
-    debug::DebugViewModel, editor::EditorViewModel, layout::LayoutViewModel, plots::PlotsViewModel,
+    breakpoints::BreakpointsViewModel, console::ConsoleViewModel, debug::DebugViewModel,
+    editor::EditorViewModel, layout::LayoutViewModel, plots::PlotsViewModel,
     project_explorer::ProjectExplorerViewModel, repl::ReplViewModel, search::SearchViewModel,
-    status_bar::StatusBarViewModel, toolbar::ToolbarViewModel, workspace::WorkspaceViewModel,
+    status_bar::StatusBarViewModel, toast::ToastViewModel, toolbar::ToolbarViewModel,
+    workspace::WorkspaceViewModel,
 };
 
 pub struct MainViewModel {
@@ -100,7 +103,8 @@ impl MainViewModel {
 
     pub fn open_folder(&self, path: &Path) -> std::io::Result<()> {
         self.project.open_folder(self.fs.as_ref(), path)?;
-        self.status_bar.set_message(format!("Opened {}", path.display()));
+        self.status_bar
+            .set_message(format!("Opened {}", path.display()));
         Ok(())
     }
 
@@ -146,10 +150,12 @@ impl MainViewModel {
         self.toolbar.last_build.set(Some(result.success()));
         if result.success() {
             self.console.set_artifact(target, result.stdout.clone());
-            self.status_bar.set_message(format!("Compiled to {}", target.label()));
+            self.status_bar
+                .set_message(format!("Compiled to {}", target.label()));
             self.toast.show(format!("Compiled to {}", target.label()));
         } else {
-            self.status_bar.set_message(format!("Compile failed (exit {})", result.exit_code));
+            self.status_bar
+                .set_message(format!("Compile failed (exit {})", result.exit_code));
         }
     }
 
@@ -161,7 +167,8 @@ impl MainViewModel {
             self.status_bar.set_message("Nothing to compile");
             return false;
         };
-        self.status_bar.set_message(format!("Compiling {}…", target.label()));
+        self.status_bar
+            .set_message(format!("Compiling {}…", target.label()));
         self.toolbar.is_compiling.set(true);
         let outcome = match svc.run(&inv, &mut |_| {}) {
             Ok(result) => {
@@ -170,7 +177,8 @@ impl MainViewModel {
                 ok
             }
             Err(e) => {
-                self.console.log(ConsoleLevel::Error, format!("compiler error: {e}"));
+                self.console
+                    .log(ConsoleLevel::Error, format!("compiler error: {e}"));
                 self.toolbar.last_build.set(Some(false));
                 false
             }
@@ -223,7 +231,9 @@ impl MainViewModel {
     /// If a "Plot As" is pending for `name`, build a line-style figure from the
     /// freshly inspected matrix and add it to the Plots panel.
     fn fulfil_pending_plot(&self, name: &str) {
-        let Some((pname, kind)) = self.pending_plot.get() else { return };
+        let Some((pname, kind)) = self.pending_plot.get() else {
+            return;
+        };
         if pname != name {
             return;
         }
@@ -240,7 +250,8 @@ impl MainViewModel {
                 let ys: Vec<f64> = m.cells.iter().flatten().copied().collect();
                 if !ys.is_empty() {
                     let xs: Vec<f64> = (0..ys.len()).map(|i| i as f64).collect();
-                    let fig = PlotFigure::series(index, pname.clone(), kind, xs, ys).with_source(pname);
+                    let fig =
+                        PlotFigure::series(index, pname.clone(), kind, xs, ys).with_source(pname);
                     self.plots.add(fig);
                 }
             }
@@ -255,11 +266,20 @@ impl MainViewModel {
                 self.workspace.live.set(true);
             }
             ReplEvent::Value(text) => {
-                let name = self.workspace.selected_name.get().unwrap_or_else(|| "ans".to_string());
+                let name = self
+                    .workspace
+                    .selected_name
+                    .get()
+                    .unwrap_or_else(|| "ans".to_string());
                 self.workspace.set_matrix_from_disp(name.as_str(), &text);
                 self.fulfil_pending_plot(&name);
             }
-            ReplEvent::Figure { runtime_id, width, height, png } => {
+            ReplEvent::Figure {
+                runtime_id,
+                width,
+                height,
+                png,
+            } => {
                 use crate::models::{PlotFigure, PlotKind};
                 let mut fig = PlotFigure::series(
                     runtime_id as i32,
@@ -301,12 +321,7 @@ mod tests {
         let clipboard = Rc::new(FakeClipboard::new());
         let picker = Rc::new(FakeFilePicker::new());
         let settings = Settings::resolve(Some("/opt/matlabc"), None);
-        let vm = MainViewModel::new(
-            Rc::new(fs),
-            clipboard.clone(),
-            picker.clone(),
-            settings,
-        );
+        let vm = MainViewModel::new(Rc::new(fs), clipboard.clone(), picker.clone(), settings);
         (vm, clipboard, picker)
     }
 
@@ -354,8 +369,16 @@ mod tests {
         });
         assert!(vm.run_compile(&svc));
         assert_eq!(vm.console.active_tab.get(), ConsoleTab::Cpp);
-        assert_eq!(vm.console.artifacts.get().get(&ConsoleTab::Cpp).unwrap(), "int main(){}");
-        assert!(vm.status_bar.state.get().message.contains("Compiled to C++"));
+        assert_eq!(
+            vm.console.artifacts.get().get(&ConsoleTab::Cpp).unwrap(),
+            "int main(){}"
+        );
+        assert!(vm
+            .status_bar
+            .state
+            .get()
+            .message
+            .contains("Compiled to C++"));
     }
 
     #[test]
@@ -372,7 +395,12 @@ mod tests {
         assert!(!vm.run_compile(&svc));
         assert_eq!(vm.console.problems.get().len(), 1);
         assert_eq!(vm.console.problems.get()[0].line, 1);
-        assert!(vm.console.messages.get().iter().any(|m| m.level == ConsoleLevel::Error));
+        assert!(vm
+            .console
+            .messages
+            .get()
+            .iter()
+            .any(|m| m.level == ConsoleLevel::Error));
     }
 
     #[test]
@@ -392,12 +420,18 @@ mod tests {
         let (vm, _, _) = main_vm(FakeFileSystem::new());
 
         // Plain program output during debug comes back for the console.
-        assert_eq!(vm.feed_debug_output("result = 42").as_deref(), Some("result = 42"));
+        assert_eq!(
+            vm.feed_debug_output("result = 42").as_deref(),
+            Some("result = 42")
+        );
         assert_eq!(vm.plots.figures.get().len(), 0);
 
         // A figure emitted while debugging lands in the Plots panel (not the
         // console) — the regression this method fixes.
-        assert_eq!(vm.feed_debug_output(&format!("{FIG_BEGIN} id=5 w=320 h=240")), None);
+        assert_eq!(
+            vm.feed_debug_output(&format!("{FIG_BEGIN} id=5 w=320 h=240")),
+            None
+        );
         assert_eq!(vm.feed_debug_output("QUJD"), None); // base64 payload ("ABC")
         assert_eq!(vm.feed_debug_output(FIG_END), None);
         assert_eq!(vm.plots.figures.get().len(), 1);
@@ -443,15 +477,26 @@ mod tests {
 
     struct ErroringCompiler;
     impl CompilerService for ErroringCompiler {
-        fn run(&self, _inv: &CompilerInvocation, _on_log: &mut dyn FnMut(&str)) -> std::io::Result<CompileResult> {
-            Err(std::io::Error::new(std::io::ErrorKind::NotFound, "matlabc missing"))
+        fn run(
+            &self,
+            _inv: &CompilerInvocation,
+            _on_log: &mut dyn FnMut(&str),
+        ) -> std::io::Result<CompileResult> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "matlabc missing",
+            ))
         }
     }
 
     #[test]
     fn run_compile_with_no_file_reports_nothing() {
         let (vm, _, _) = main_vm(FakeFileSystem::new());
-        let svc = FakeCompilerService::new(CompileResult { stdout: String::new(), stderr_lines: vec![], exit_code: 0 });
+        let svc = FakeCompilerService::new(CompileResult {
+            stdout: String::new(),
+            stderr_lines: vec![],
+            exit_code: 0,
+        });
         assert!(!vm.run_compile(&svc));
         assert_eq!(vm.status_bar.state.get().message, "Nothing to compile");
     }
@@ -463,7 +508,12 @@ mod tests {
         let (vm, _, _) = main_vm(fs);
         vm.open_file(Path::new("/p/a.m")).unwrap();
         assert!(!vm.run_compile(&ErroringCompiler));
-        assert!(vm.console.messages.get().iter().any(|m| m.text.contains("compiler error")));
+        assert!(vm
+            .console
+            .messages
+            .get()
+            .iter()
+            .any(|m| m.text.contains("compiler error")));
     }
 
     #[test]
