@@ -24,9 +24,7 @@ pub use editor::{BreakpointConfig, EditorTab, TabKind};
 pub use ids::next_id;
 pub use plot::{PlotFigure, PlotKind, PlotView, SurfaceCamera};
 pub use project::{NodeFileKind, ProjectNode};
-pub use status::{
-    CenterLayoutMode, ExplorerAction, SearchMode, SearchScope, StatusBarState,
-};
+pub use status::{CenterLayoutMode, ExplorerAction, SearchMode, SearchScope, StatusBarState};
 pub use workspace::{
     DType, InspectionColumn, InspectionField, InspectionMethod, MatrixView, WorkspaceVariable,
 };

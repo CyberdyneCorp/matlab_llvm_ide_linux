@@ -54,10 +54,17 @@ impl AppState {
             return true;
         }
         if !self.matlabc_ok() {
-            self.vm.console.log(ConsoleLevel::Error, "matlabc not found — cannot start REPL");
+            self.vm
+                .console
+                .log(ConsoleLevel::Error, "matlabc not found — cannot start REPL");
             return false;
         }
-        let cwd = self.vm.project.root_url.get().unwrap_or_else(std::env::temp_dir);
+        let cwd = self
+            .vm
+            .project
+            .root_url
+            .get()
+            .unwrap_or_else(std::env::temp_dir);
         let app = self.clone();
         match ReplSession::start(&self.settings.matlabc_path, &cwd, move |line| {
             app.vm.feed_repl_line(&line);
@@ -68,7 +75,9 @@ impl AppState {
                 true
             }
             Err(e) => {
-                self.vm.console.log(ConsoleLevel::Error, format!("REPL failed to start: {e}"));
+                self.vm
+                    .console
+                    .log(ConsoleLevel::Error, format!("REPL failed to start: {e}"));
                 false
             }
         }
@@ -79,7 +88,9 @@ impl AppState {
         if self.ensure_repl() {
             if let Some(session) = self.repl.borrow_mut().as_mut() {
                 if let Err(e) = session.send(command) {
-                    self.vm.console.log(ConsoleLevel::Error, format!("REPL write failed: {e}"));
+                    self.vm
+                        .console
+                        .log(ConsoleLevel::Error, format!("REPL write failed: {e}"));
                 }
             }
         }
@@ -117,9 +128,8 @@ impl AppState {
         }
         if self.ensure_repl() {
             if let Some(session) = self.repl.borrow_mut().as_mut() {
-                let probe = format!(
-                    "disp('___MF_VAL_BEGIN___'); disp({name}); disp('___MF_VAL_END___')"
-                );
+                let probe =
+                    format!("disp('___MF_VAL_BEGIN___'); disp({name}); disp('___MF_VAL_END___')");
                 let _ = session.eval(&probe);
             }
         }
@@ -136,7 +146,9 @@ impl AppState {
     pub fn plot_inspected(self: &Rc<Self>) {
         use matforge_core::models::{PlotFigure, PlotKind};
         let Some(m) = self.vm.workspace.inspected_matrix.get() else {
-            self.vm.status_bar.set_message("Click a workspace variable first, then +");
+            self.vm
+                .status_bar
+                .set_message("Click a workspace variable first, then +");
             return;
         };
         let ys: Vec<f64> = m.cells.iter().flatten().copied().collect();
@@ -159,18 +171,27 @@ impl AppState {
             return;
         };
         let Some(file) = tab.url else {
-            self.vm.status_bar.set_message("Save the file before debugging");
+            self.vm
+                .status_bar
+                .set_message("Save the file before debugging");
             return;
         };
         if !self.matlabc_ok() {
-            self.vm.console.log(ConsoleLevel::Error, "matlabc not found — cannot debug");
+            self.vm
+                .console
+                .log(ConsoleLevel::Error, "matlabc not found — cannot debug");
             return;
         }
         self.stop_debug();
-        self.vm.activity_bar.select(matforge_core::viewmodels::ActivityItem::Debug);
+        self.vm
+            .activity_bar
+            .select(matforge_core::viewmodels::ActivityItem::Debug);
         self.vm.debug.launch();
         self.vm.toolbar.is_debugging.set(true);
-        self.vm.console.log(ConsoleLevel::Info, format!("debug: launching {}", file.display()));
+        self.vm.console.log(
+            ConsoleLevel::Info,
+            format!("debug: launching {}", file.display()),
+        );
         *self.dbg_file.borrow_mut() = Some(file.clone());
 
         let app = self.clone();
@@ -191,7 +212,10 @@ impl AppState {
                 );
                 self.vm.status_bar.set_message("Debugging…");
             }
-            Err(e) => self.vm.console.log(ConsoleLevel::Error, format!("debug failed to start: {e}")),
+            Err(e) => self
+                .vm
+                .console
+                .log(ConsoleLevel::Error, format!("debug failed to start: {e}")),
         }
     }
 
@@ -209,7 +233,9 @@ impl AppState {
     /// Evaluate a watch expression against the paused top frame.
     pub fn evaluate_watch(self: &Rc<Self>, expr: &str) {
         let Some(fid) = self.dbg_frames.borrow().first().map(|f| f.id) else {
-            self.vm.console.log(ConsoleLevel::Warning, "Not paused — can't evaluate a watch");
+            self.vm
+                .console
+                .log(ConsoleLevel::Warning, "Not paused — can't evaluate a watch");
             return;
         };
         if let Some(session) = self.dap.borrow_mut().as_mut() {
@@ -219,7 +245,9 @@ impl AppState {
             );
             let seq = session.client.last_seq();
             let _ = session.write_frame(&frame);
-            self.dbg_watch_pending.borrow_mut().insert(seq, expr.to_string());
+            self.dbg_watch_pending
+                .borrow_mut()
+                .insert(seq, expr.to_string());
         }
     }
 
@@ -259,7 +287,10 @@ impl AppState {
                 })
                 .collect()
         });
-        self.send_request("setFunctionBreakpoints", Some(json!({ "breakpoints": bps })));
+        self.send_request(
+            "setFunctionBreakpoints",
+            Some(json!({ "breakpoints": bps })),
+        );
     }
 
     /// Push the enabled exception filters to a live adapter.
@@ -268,9 +299,15 @@ impl AppState {
             return;
         }
         let filters: Vec<String> = self.vm.breakpoints.exception_filters.with(|list| {
-            list.iter().filter(|f| f.enabled).map(|f| f.filter.clone()).collect()
+            list.iter()
+                .filter(|f| f.enabled)
+                .map(|f| f.filter.clone())
+                .collect()
         });
-        self.send_request("setExceptionBreakpoints", Some(json!({ "filters": filters })));
+        self.send_request(
+            "setExceptionBreakpoints",
+            Some(json!({ "filters": filters })),
+        );
     }
 
     fn send_request(self: &Rc<Self>, command: &str, args: Option<Value>) {
@@ -297,15 +334,24 @@ impl AppState {
             return;
         }
         match parse_message(body) {
-            Some(DapMessage::Response { request_seq, command, success, body }) => {
-                self.on_dap_response(request_seq, &command, success, &body)
-            }
+            Some(DapMessage::Response {
+                request_seq,
+                command,
+                success,
+                body,
+            }) => self.on_dap_response(request_seq, &command, success, &body),
             Some(DapMessage::Event { event, body }) => self.on_dap_event(&event, &body),
             _ => {}
         }
     }
 
-    fn on_dap_response(self: &Rc<Self>, request_seq: i64, command: &str, success: bool, body: &Value) {
+    fn on_dap_response(
+        self: &Rc<Self>,
+        request_seq: i64,
+        command: &str,
+        success: bool,
+        body: &Value,
+    ) {
         if !success && command != "disconnect" {
             // A failed watch still resolves its pending slot.
             self.dbg_watch_pending.borrow_mut().remove(&request_seq);
@@ -314,13 +360,23 @@ impl AppState {
         match command {
             "evaluate" => {
                 if let Some(expr) = self.dbg_watch_pending.borrow_mut().remove(&request_seq) {
-                    let result = body.get("result").and_then(Value::as_str).unwrap_or("").to_string();
+                    let result = body
+                        .get("result")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
                     self.vm.debug.add_evaluation(expr, result);
                 }
             }
             "initialize" => {
-                let data_bp = body.get("supportsDataBreakpoints").and_then(Value::as_bool).unwrap_or(false);
-                let step_back = body.get("supportsStepBack").and_then(Value::as_bool).unwrap_or(false);
+                let data_bp = body
+                    .get("supportsDataBreakpoints")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                let step_back = body
+                    .get("supportsStepBack")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
                 self.vm.debug.set_capabilities(data_bp, step_back);
                 let program = self.dbg_file.borrow().clone().unwrap_or_default();
                 self.send_request(
@@ -394,8 +450,12 @@ impl AppState {
     }
 
     fn send_breakpoints(self: &Rc<Self>) {
-        let Some(file) = self.dbg_file.borrow().clone() else { return };
-        let Some(tab) = self.vm.editor.active_tab() else { return };
+        let Some(file) = self.dbg_file.borrow().clone() else {
+            return;
+        };
+        let Some(tab) = self.vm.editor.active_tab() else {
+            return;
+        };
         let lines: Vec<Value> = tab
             .breakpoints
             .iter()
@@ -424,7 +484,9 @@ impl AppState {
 
     fn mark_exec_line(self: &Rc<Self>, frame: &DapStackFrame) {
         let Some(line) = frame.line else { return };
-        let Some(tab) = self.vm.editor.active_tab() else { return };
+        let Some(tab) = self.vm.editor.active_tab() else {
+            return;
+        };
         // Only mark when the paused source matches the active tab.
         let matches = match (&frame.source_path, &tab.url) {
             (Some(sp), Some(url)) => url.to_string_lossy() == *sp,
@@ -445,7 +507,11 @@ fn parse_frames(body: &Value) -> Vec<DapStackFrame> {
             arr.iter()
                 .map(|f| DapStackFrame {
                     id: f.get("id").and_then(Value::as_i64).unwrap_or(0),
-                    name: f.get("name").and_then(Value::as_str).unwrap_or("").to_string(),
+                    name: f
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
                     source_path: f
                         .get("source")
                         .and_then(|s| s.get("path"))
@@ -463,7 +529,12 @@ fn locals_reference(body: &Value) -> Option<i64> {
     // Prefer a scope literally named "Locals"; fall back to the first.
     scopes
         .iter()
-        .find(|s| s.get("name").and_then(Value::as_str).map(|n| n.eq_ignore_ascii_case("locals")).unwrap_or(false))
+        .find(|s| {
+            s.get("name")
+                .and_then(Value::as_str)
+                .map(|n| n.eq_ignore_ascii_case("locals"))
+                .unwrap_or(false)
+        })
         .or_else(|| scopes.first())
         .and_then(|s| s.get("variablesReference").and_then(Value::as_i64))
         .filter(|r| *r != 0)
@@ -475,10 +546,21 @@ fn parse_variables(body: &Value) -> Vec<DapVariable> {
         .map(|arr| {
             arr.iter()
                 .map(|v| DapVariable {
-                    name: v.get("name").and_then(Value::as_str).unwrap_or("").to_string(),
-                    value: v.get("value").and_then(Value::as_str).unwrap_or("").to_string(),
+                    name: v
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                    value: v
+                        .get("value")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
                     type_hint: v.get("type").and_then(Value::as_str).map(str::to_string),
-                    variables_reference: v.get("variablesReference").and_then(Value::as_i64).unwrap_or(0),
+                    variables_reference: v
+                        .get("variablesReference")
+                        .and_then(Value::as_i64)
+                        .unwrap_or(0),
                     indexed_variables: v.get("indexedVariables").and_then(Value::as_i64),
                     named_variables: v.get("namedVariables").and_then(Value::as_i64),
                 })

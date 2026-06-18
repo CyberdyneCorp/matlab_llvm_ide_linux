@@ -9,7 +9,9 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use gtk::prelude::*;
-use gtk::{Box as GtkBox, Button, DrawingArea, Label, ListBox, Orientation, ScrolledWindow, Window};
+use gtk::{
+    Box as GtkBox, Button, DrawingArea, Label, ListBox, Orientation, ScrolledWindow, Window,
+};
 
 use matforge_core::models::flowchart::FlowchartDocument;
 use matforge_core::models::ConsoleLevel;
@@ -21,7 +23,12 @@ use crate::process::SimHandle;
 
 /// Open a state-machine window for a state-chart document. `autostart` runs the
 /// trace immediately (used by the `MATFORGE_STATECHART` demo hook).
-pub fn open(app: &Rc<AppState>, document: FlowchartDocument, path: Option<PathBuf>, autostart: bool) {
+pub fn open(
+    app: &Rc<AppState>,
+    document: FlowchartDocument,
+    path: Option<PathBuf>,
+    autostart: bool,
+) {
     let vm = Rc::new(StateChartViewModel::new(document));
     let sim: Rc<RefCell<Option<SimHandle>>> = Rc::new(RefCell::new(None));
 
@@ -40,7 +47,9 @@ pub fn open(app: &Rc<AppState>, document: FlowchartDocument, path: Option<PathBu
     let window = Window::builder()
         .title(format!(
             "mStateflow — {}",
-            path.as_ref().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned())
+            path.as_ref()
+                .and_then(|p| p.file_name())
+                .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "untitled".into())
         ))
         .default_width(1040)
@@ -151,7 +160,14 @@ fn build_transport(
         let active = active.clone();
         vm.active_states.bind(move |set| {
             let names: Vec<&str> = set.iter().map(String::as_str).collect();
-            active.set_text(&format!("active: {}", if names.is_empty() { "—".into() } else { names.join(", ") }));
+            active.set_text(&format!(
+                "active: {}",
+                if names.is_empty() {
+                    "—".into()
+                } else {
+                    names.join(", ")
+                }
+            ));
         });
     }
     bar
@@ -171,12 +187,23 @@ fn start_trace(
             &owned
         }
     };
-    let json = match vm.document.with(matforge_core::services::flowchart_codec::encode_string) {
+    let json = match vm
+        .document
+        .with(matforge_core::services::flowchart_codec::encode_string)
+    {
         Ok(j) => j,
-        Err(e) => return app.vm.console.log(ConsoleLevel::Error, format!("encode: {e}")),
+        Err(e) => {
+            return app
+                .vm
+                .console
+                .log(ConsoleLevel::Error, format!("encode: {e}"))
+        }
     };
     if std::fs::write(file, json).is_err() {
-        return app.vm.console.log(ConsoleLevel::Error, "could not write chart");
+        return app
+            .vm
+            .console
+            .log(ConsoleLevel::Error, "could not write chart");
     }
     if !app.settings.matlabc_path.exists() {
         return app.vm.console.log(ConsoleLevel::Error, "matlabc not found");
@@ -193,7 +220,10 @@ fn start_trace(
     });
     match handle {
         Ok(h) => *sim.borrow_mut() = Some(h),
-        Err(e) => app.vm.console.log(ConsoleLevel::Error, format!("trace: {e}")),
+        Err(e) => app
+            .vm
+            .console
+            .log(ConsoleLevel::Error, format!("trace: {e}")),
     }
 }
 
@@ -244,14 +274,22 @@ fn build_chart_canvas(vm: &Rc<StateChartViewModel>) -> GtkBox {
 
 fn fit_viewport(bounds: Option<(f64, f64, f64, f64)>, w: f64, h: f64) -> Viewport {
     let Some((minx, miny, maxx, maxy)) = bounds else {
-        return Viewport { pan: (0.0, 0.0), zoom: 1.0 };
+        return Viewport {
+            pan: (0.0, 0.0),
+            zoom: 1.0,
+        };
     };
     let (bw, bh) = ((maxx - minx).max(1.0), (maxy - miny).max(1.0));
     let margin = 40.0;
-    let zoom = ((w - 2.0 * margin) / bw).min((h - 2.0 * margin) / bh).clamp(0.2, 2.0);
+    let zoom = ((w - 2.0 * margin) / bw)
+        .min((h - 2.0 * margin) / bh)
+        .clamp(0.2, 2.0);
     let cx = (minx + maxx) / 2.0;
     let cy = (miny + maxy) / 2.0;
-    Viewport { pan: (w / 2.0 - cx * zoom, h / 2.0 - cy * zoom), zoom }
+    Viewport {
+        pan: (w / 2.0 - cx * zoom, h / 2.0 - cy * zoom),
+        zoom,
+    }
 }
 
 fn build_event_log(vm: &Rc<StateChartViewModel>) -> GtkBox {

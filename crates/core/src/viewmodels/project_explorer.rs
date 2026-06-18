@@ -53,7 +53,8 @@ impl ProjectExplorerViewModel {
 
     pub fn selected_node(&self) -> Option<ProjectNode> {
         let id = self.selected_id.get()?;
-        self.root.with(|r| r.as_ref().and_then(|node| find_node(node, id).cloned()))
+        self.root
+            .with(|r| r.as_ref().and_then(|node| find_node(node, id).cloned()))
     }
 
     /// Toggle the expansion of the folder node with `id`.
@@ -88,7 +89,9 @@ mod tests {
 
     fn fs() -> FakeFileSystem {
         let mut fs = FakeFileSystem::new();
-        fs.add_file("/proj/main.m", "x=1;").add_file("/proj/src/util.m", "y=2;").add_dir("/proj");
+        fs.add_file("/proj/main.m", "x=1;")
+            .add_file("/proj/src/util.m", "y=2;")
+            .add_dir("/proj");
         fs
     }
 
@@ -107,7 +110,13 @@ mod tests {
         let vm = ProjectExplorerViewModel::new();
         vm.open_folder(&fs(), Path::new("/proj")).unwrap();
         let main_id = vm.root.with(|r| {
-            r.as_ref().unwrap().children.iter().find(|c| c.name == "main.m").unwrap().id
+            r.as_ref()
+                .unwrap()
+                .children
+                .iter()
+                .find(|c| c.name == "main.m")
+                .unwrap()
+                .id
         });
         vm.select(main_id);
         assert_eq!(vm.selected_node().unwrap().name, "main.m");
@@ -118,14 +127,32 @@ mod tests {
         let vm = ProjectExplorerViewModel::new();
         vm.open_folder(&fs(), Path::new("/proj")).unwrap();
         let src_id = vm.root.with(|r| {
-            r.as_ref().unwrap().children.iter().find(|c| c.name == "src").unwrap().id
+            r.as_ref()
+                .unwrap()
+                .children
+                .iter()
+                .find(|c| c.name == "src")
+                .unwrap()
+                .id
         });
         let before = vm.root.with(|r| {
-            r.as_ref().unwrap().children.iter().find(|c| c.id == src_id).unwrap().is_expanded
+            r.as_ref()
+                .unwrap()
+                .children
+                .iter()
+                .find(|c| c.id == src_id)
+                .unwrap()
+                .is_expanded
         });
         vm.toggle_expand(src_id);
         let after = vm.root.with(|r| {
-            r.as_ref().unwrap().children.iter().find(|c| c.id == src_id).unwrap().is_expanded
+            r.as_ref()
+                .unwrap()
+                .children
+                .iter()
+                .find(|c| c.id == src_id)
+                .unwrap()
+                .is_expanded
         });
         assert_ne!(before, after);
     }
