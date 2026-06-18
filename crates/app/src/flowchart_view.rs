@@ -974,6 +974,17 @@ fn build_flow_toolbar(
             symbols.connect_clicked(move |b| open_symbols_popover(&app, &fc, b));
         }
         bar.append(&symbols);
+
+        // Tabular alternative to drawing transitions on the canvas.
+        let table = Button::with_label("Transitions…");
+        table.add_css_class("mf-tool");
+        table.set_tooltip_text(Some("Edit transitions as a table"));
+        {
+            let app = app.clone();
+            let fc = fc.clone();
+            table.connect_clicked(move |_| crate::transition_table::open(&app, &fc));
+        }
+        bar.append(&table);
     } else {
         // Control-flow charts get a structural visual step: highlight each block
         // in execution order (no value evaluation — runs need the DAP adapter).

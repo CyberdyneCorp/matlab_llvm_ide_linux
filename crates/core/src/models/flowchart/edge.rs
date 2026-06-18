@@ -44,6 +44,90 @@ pub struct EdgeData {
     pub params: Option<BTreeMap<String, ParamValue>>,
 }
 
+/// The structured parts of a Stateflow transition label, in canonical order
+/// `event[guard]{condAction}/transAction` — each part optional. Used by the
+/// state-transition table editor to decompose / recompose the edge `label`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TransitionLabel {
+    pub event: Option<String>,
+    pub guard: Option<String>,
+    pub cond_action: Option<String>,
+    pub trans_action: Option<String>,
+}
+
+impl TransitionLabel {
+    /// Parse a transition label. The bracketed `[guard]` and braced
+    /// `{condAction}` sections are pulled out first (so a `/` inside them is not
+    /// mistaken for the transition-action separator); what remains splits on the
+    /// first `/` into the event and the transition action.
+    pub fn parse(label: &str) -> TransitionLabel {
+        let (guard, rest) = take_braced(label, '[', ']');
+        let (cond_action, rest) = take_braced(&rest, '{', '}');
+        let (event, trans_action) = match rest.split_once('/') {
+            Some((e, t)) => (e.to_string(), Some(t.to_string())),
+            None => (rest, None),
+        };
+        let norm = |s: &str| {
+            let t = s.trim();
+            (!t.is_empty()).then(|| t.to_string())
+        };
+        TransitionLabel {
+            event: norm(&event),
+            guard: guard.as_deref().and_then(norm),
+            cond_action: cond_action.as_deref().and_then(norm),
+            trans_action: trans_action.as_deref().and_then(norm),
+        }
+    }
+
+    /// Recompose the canonical label string (empty when every part is unset).
+    pub fn format(&self) -> String {
+        let mut out = String::new();
+        if let Some(e) = &self.event {
+            out.push_str(e);
+        }
+        if let Some(g) = &self.guard {
+            out.push('[');
+            out.push_str(g);
+            out.push(']');
+        }
+        if let Some(c) = &self.cond_action {
+            out.push('{');
+            out.push_str(c);
+            out.push('}');
+        }
+        if let Some(t) = &self.trans_action {
+            out.push('/');
+            out.push_str(t);
+        }
+        out
+    }
+
+    /// True when no part is set (so the edge needs no label).
+    pub fn is_empty(&self) -> bool {
+        self.event.is_none()
+            && self.guard.is_none()
+            && self.cond_action.is_none()
+            && self.trans_action.is_none()
+    }
+}
+
+/// Pull the first `open..close` section out of `s`, returning its inner text and
+/// `s` with that section removed. Returns `(None, s)` when unbalanced/absent.
+fn take_braced(s: &str, open: char, close: char) -> (Option<String>, String) {
+    let Some(start) = s.find(open) else {
+        return (None, s.to_string());
+    };
+    let after = &s[start + open.len_utf8()..];
+    let Some(len) = after.find(close) else {
+        return (None, s.to_string());
+    };
+    let inner = after[..len].to_string();
+    let mut rem = String::with_capacity(s.len());
+    rem.push_str(&s[..start]);
+    rem.push_str(&after[len + close.len_utf8()..]);
+    (Some(inner), rem)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum EdgeKind {
@@ -112,5 +196,28 @@ mod tests {
         let json = serde_json::to_string(&ep).unwrap();
         let back: EdgeEndpoint = serde_json::from_str(&json).unwrap();
         assert_eq!(ep, back);
+    }
+
+    #[test]
+    fn transition_label_parse_and_format_round_trip() {
+        // Full label: event[guard]{condAction}/transAction.
+        let l = TransitionLabel::parse("E[x > 0]{y = 1}/z = z + 1");
+        assert_eq!(l.event.as_deref(), Some("E"));
+        assert_eq!(l.guard.as_deref(), Some("x > 0"));
+        assert_eq!(l.cond_action.as_deref(), Some("y = 1"));
+        assert_eq!(l.trans_action.as_deref(), Some("z = z + 1"));
+        assert_eq!(l.format(), "E[x > 0]{y = 1}/z = z + 1");
+
+        // Guard only, and a '/' living inside the condition action is preserved.
+        let g = TransitionLabel::parse("[a && b]");
+        assert_eq!(g.guard.as_deref(), Some("a && b"));
+        assert!(g.event.is_none() && g.trans_action.is_none());
+        let slash = TransitionLabel::parse("{p = a/b}");
+        assert_eq!(slash.cond_action.as_deref(), Some("p = a/b"));
+        assert!(slash.trans_action.is_none());
+
+        // Empty / whitespace label is empty.
+        assert!(TransitionLabel::parse("   ").is_empty());
+        assert_eq!(TransitionLabel::default().format(), "");
     }
 }

@@ -168,6 +168,11 @@ through the tested [`FlowchartViewModel`](../crates/core/src/viewmodels/flowchar
   order badges and a history "H" badge renders on the compound. A hierarchy lint
   (history-on-AND, duplicate execution order) is flagged inline and as a red
   dashed halo on the offending state.
+* **Transitions…** (state charts): opens the **state-transition table** — a
+  tabular alternative to drawing transitions, one row per transition with
+  source × dest × event × guard × cond-action × trans-action × priority. Edits
+  write straight back to the chart edges (ids preserved), so the table and canvas
+  stay in sync.
 * **Save** writes the `.mflow` back to disk; **Compile** lowers the chart to MATLAB
   via `matlabc -emit-matlab`, writes the generated `.m` beside it, and opens it in
   the editor.

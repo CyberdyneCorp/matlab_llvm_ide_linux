@@ -32,6 +32,7 @@ mod services_impl;
 mod settings_view;
 mod statechart_window;
 mod theme_css;
+mod transition_table;
 mod ui;
 mod video_view;
 
