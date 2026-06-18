@@ -5,6 +5,7 @@
 
 pub mod brackets;
 pub mod chart_trace;
+pub mod codegen;
 pub mod compiler;
 pub mod control_analysis;
 pub mod dap;

@@ -159,3 +159,8 @@ through the tested [`FlowchartViewModel`](../crates/core/src/viewmodels/flowchar
 * **Save** writes the `.mflow` back to disk; **Compile** lowers the chart to MATLAB
   via `matlabc -emit-matlab`, writes the generated `.m` beside it, and opens it in
   the editor.
+* **Export ▾** surfaces the compiler's codegen lanes — `-emit-matlab`,
+  `-dump-chart`, `-emit-c`, `-emit-cpp`, `-emit-llvm`, `-emit-systemverilog` —
+  each writing its artifact beside the model and opening it.
+* **Preview** toggles a docked, syntax-highlighted **live `-emit-matlab` preview**
+  pane that re-runs the generator (debounced ~500 ms) as you edit the chart.
