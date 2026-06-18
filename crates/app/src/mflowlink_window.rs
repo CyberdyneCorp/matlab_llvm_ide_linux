@@ -392,7 +392,10 @@ fn open_breakpoints_popover(
     let rtol = entry("relTol e.g. 1e-4");
     let mstep = entry("maxStep e.g. 0.01");
     let edges: Vec<String> = vm.document.with(|d| {
-        d.flows.first().map(|f| f.edges.iter().map(|e| e.id.clone()).collect()).unwrap_or_default()
+        d.flows
+            .first()
+            .map(|f| f.edges.iter().map(|e| e.id.clone()).collect())
+            .unwrap_or_default()
     });
     let edge_dd =
         gtk::DropDown::from_strings(&edges.iter().map(String::as_str).collect::<Vec<_>>());
@@ -473,21 +476,34 @@ fn write_model_to(
     vm: &Rc<MflowLinkViewModel>,
     path: Option<&Path>,
 ) -> Option<PathBuf> {
-    let file =
-        path.map(Path::to_path_buf).unwrap_or_else(|| std::env::temp_dir().join("matforge_sim.mflow"));
-    let json = match vm.document.with(matforge_core::services::flowchart_codec::encode_string) {
+    let file = path
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::env::temp_dir().join("matforge_sim.mflow"));
+    let json = match vm
+        .document
+        .with(matforge_core::services::flowchart_codec::encode_string)
+    {
         Ok(j) => j,
         Err(e) => {
-            app.vm.console.log(matforge_core::models::ConsoleLevel::Error, format!("encode: {e}"));
+            app.vm.console.log(
+                matforge_core::models::ConsoleLevel::Error,
+                format!("encode: {e}"),
+            );
             return None;
         }
     };
     if std::fs::write(&file, json).is_err() {
-        app.vm.console.log(matforge_core::models::ConsoleLevel::Error, "could not write model");
+        app.vm.console.log(
+            matforge_core::models::ConsoleLevel::Error,
+            "could not write model",
+        );
         return None;
     }
     if !app.settings.matlabc_path.exists() {
-        app.vm.console.log(matforge_core::models::ConsoleLevel::Error, "matlabc not found");
+        app.vm.console.log(
+            matforge_core::models::ConsoleLevel::Error,
+            "matlabc not found",
+        );
         return None;
     }
     Some(file)
@@ -502,7 +518,9 @@ fn start_live_simulation(
     dap: &LiveSession,
     path: Option<&Path>,
 ) {
-    let Some(file) = write_model_to(app, vm, path) else { return };
+    let Some(file) = write_model_to(app, vm, path) else {
+        return;
+    };
     vm.start_live();
     let vm2 = vm.clone();
     let dap2 = dap.clone();
@@ -512,11 +530,17 @@ fn start_live_simulation(
             vm2.finish();
             return;
         }
-        let Some(msg) = parse_message(&body) else { return };
+        let Some(msg) = parse_message(&body) else {
+            return;
+        };
         match &msg {
             // Handshake: initialize → launch → (initialized) → configurationDone.
             DapMessage::Response { command, .. } if command.as_str() == "initialize" => {
-                send_dap(&dap2, "launch", Some(json!({ "program": program, "stopOnEntry": true })));
+                send_dap(
+                    &dap2,
+                    "launch",
+                    Some(json!({ "program": program, "stopOnEntry": true })),
+                );
             }
             DapMessage::Event { event, .. } if event.as_str() == "initialized" => {
                 send_dap(&dap2, "configurationDone", None);
@@ -531,10 +555,17 @@ fn start_live_simulation(
     match started {
         Ok(session) => {
             *dap.borrow_mut() = Some(session);
-            send_dap(dap, "initialize", Some(json!({ "clientID": "matforge", "adapterID": "matlabc" })));
+            send_dap(
+                dap,
+                "initialize",
+                Some(json!({ "clientID": "matforge", "adapterID": "matlabc" })),
+            );
         }
         Err(e) => {
-            app.vm.console.log(matforge_core::models::ConsoleLevel::Error, format!("sim-dap: {e}"));
+            app.vm.console.log(
+                matforge_core::models::ConsoleLevel::Error,
+                format!("sim-dap: {e}"),
+            );
             vm.reset();
         }
     }
