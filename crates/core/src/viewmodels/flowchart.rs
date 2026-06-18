@@ -7,15 +7,28 @@ use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 
 use crate::models::flowchart::{
-    EdgeEndpoint, EdgeKind, FlowEdge, FlowNode, FlowPosition, FlowUi, FlowchartDocument, NodeData,
-    NodeKind, SchemaKind, SolverConfig,
+    EdgeData, EdgeEndpoint, EdgeKind, FlowEdge, FlowNode, FlowPosition, FlowUi, FlowchartDocument,
+    NodeData, NodeKind, ParamValue, SchemaKind, SolverConfig, TransitionLabel,
 };
+
 use crate::models::BreakpointConfig;
 use crate::observable::Property;
 use crate::services::flowchart_codec;
 
 pub const ZOOM_MIN: f64 = 0.4;
 pub const ZOOM_MAX: f64 = 2.5;
+
+/// One row of the state-transition table: a `Transition` edge decomposed into
+/// its source/destination states and label parts, with its id preserved so the
+/// table and canvas stay in sync.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TransitionRow {
+    pub edge_id: String,
+    pub src: String,
+    pub dst: String,
+    pub label: TransitionLabel,
+    pub priority: Option<u32>,
+}
 
 pub struct FlowchartViewModel {
     pub document: Property<FlowchartDocument>,
@@ -253,6 +266,89 @@ impl FlowchartViewModel {
         id
     }
 
+    /// All `Transition` edges as table rows, ordered by priority then edge id
+    /// (so the table is stable). Drives the state-transition table editor.
+    pub fn transition_rows(&self) -> Vec<TransitionRow> {
+        self.document.with(|d| {
+            let Some(flow) = d.flows.first() else {
+                return Vec::new();
+            };
+            let mut rows: Vec<TransitionRow> = flow
+                .edges
+                .iter()
+                .filter(|e| e.kind == EdgeKind::Transition)
+                .map(|e| TransitionRow {
+                    edge_id: e.id.clone(),
+                    src: e.from.node.clone(),
+                    dst: e.to.node.clone(),
+                    label: TransitionLabel::parse(e.label.as_deref().unwrap_or("")),
+                    priority: edge_priority(e),
+                })
+                .collect();
+            rows.sort_by(|a, b| {
+                a.priority
+                    .unwrap_or(u32::MAX)
+                    .cmp(&b.priority.unwrap_or(u32::MAX))
+                    .then_with(|| a.edge_id.cmp(&b.edge_id))
+            });
+            rows
+        })
+    }
+
+    /// Add an empty `Transition` edge between two states and return its id.
+    pub fn add_transition(&self, src: &str, dst: &str) -> String {
+        self.push_undo();
+        let id = format!("t{}", self.next_seq());
+        let edge = FlowEdge::new(
+            &id,
+            EdgeKind::Transition,
+            EdgeEndpoint::new(src, "out"),
+            EdgeEndpoint::new(dst, "in"),
+        );
+        self.document.update(|d| {
+            if let Some(flow) = d.flows.first_mut() {
+                flow.edges.push(edge);
+            }
+        });
+        self.is_dirty.set(true);
+        id
+    }
+
+    /// Update a transition edge in place (id preserved), writing its endpoints,
+    /// canonical label, and priority back to the document. One undo step.
+    pub fn set_transition(
+        &self,
+        edge_id: &str,
+        src: &str,
+        dst: &str,
+        label: &TransitionLabel,
+        priority: Option<u32>,
+    ) {
+        self.push_undo();
+        self.document.update(|d| {
+            if let Some(flow) = d.flows.first_mut() {
+                if let Some(edge) = flow.edges.iter_mut().find(|e| e.id == edge_id) {
+                    edge.from.node = src.to_string();
+                    edge.to.node = dst.to_string();
+                    edge.label = (!label.is_empty()).then(|| label.format());
+                    set_edge_priority(edge, priority);
+                }
+            }
+        });
+        self.is_dirty.set(true);
+    }
+
+    /// Delete an edge by id. One undo step.
+    pub fn delete_edge(&self, edge_id: &str) {
+        self.push_undo();
+        self.document.update(|d| {
+            if let Some(flow) = d.flows.first_mut() {
+                flow.edges.retain(|e| e.id != edge_id);
+            }
+        });
+        self.is_dirty.set(true);
+    }
+
     pub fn select(&self, id: Option<String>) {
         self.selected_id.set(id);
     }
@@ -387,6 +483,33 @@ const LAY_NODE_H: f64 = 60.0;
 const LAY_LAYER_GAP: f64 = 70.0;
 const LAY_SIBLING_GAP: f64 = 36.0;
 const LAY_MARGIN: f64 = 40.0;
+
+/// Read a transition edge's priority from `data.params["priority"]`.
+fn edge_priority(edge: &FlowEdge) -> Option<u32> {
+    match edge.data.as_ref()?.params.as_ref()?.get("priority")? {
+        ParamValue::Double(d) => Some(*d as u32),
+        ParamValue::Str(s) => s.trim().parse().ok(),
+        ParamValue::Bool(_) => None,
+    }
+}
+
+/// Write (or clear) a transition edge's priority in `data.params`.
+fn set_edge_priority(edge: &mut FlowEdge, priority: Option<u32>) {
+    match priority {
+        Some(p) => {
+            edge.data
+                .get_or_insert_with(EdgeData::default)
+                .params
+                .get_or_insert_with(BTreeMap::new)
+                .insert("priority".to_string(), ParamValue::Double(p as f64));
+        }
+        None => {
+            if let Some(params) = edge.data.as_mut().and_then(|d| d.params.as_mut()) {
+                params.remove("priority");
+            }
+        }
+    }
+}
 
 /// Compute clean layered positions for the entry flow. Layers come from a
 /// longest-path pass (back edges dropped so loops/cycles don't blow up), then
@@ -822,5 +945,44 @@ mod tests {
         // Undo restores the previous (default) solver.
         vm.undo();
         assert_eq!(vm.solver_config().algorithm, Some(SolverAlgorithm::Ode45));
+    }
+
+    #[test]
+    fn transition_table_round_trips_with_canvas() {
+        let vm = FlowchartViewModel::empty("Chart", SchemaKind::StateChart);
+        let a = vm.add_node(NodeKind::State, 0.0, 0.0);
+        let b = vm.add_node(NodeKind::State, 200.0, 0.0);
+
+        // Add a transition, then edit it through the table API.
+        let id = vm.add_transition(&a, &b);
+        let label = TransitionLabel {
+            event: Some("Tick".into()),
+            guard: Some("x > 0".into()),
+            cond_action: None,
+            trans_action: Some("x = 0".into()),
+        };
+        vm.set_transition(&id, &a, &b, &label, Some(2));
+
+        let rows = vm.transition_rows();
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+        assert_eq!(row.edge_id, id); // id preserved (two-way sync)
+        assert_eq!(
+            (row.src.as_str(), row.dst.as_str()),
+            (a.as_str(), b.as_str())
+        );
+        assert_eq!(row.label.event.as_deref(), Some("Tick"));
+        assert_eq!(row.priority, Some(2));
+
+        // The canvas edge carries the canonical label + priority param.
+        let json = vm.encode().unwrap();
+        assert!(json.contains("Tick[x > 0]/x = 0"));
+        assert!(json.contains("\"priority\""));
+
+        // Clearing priority drops the param; deletion removes the edge.
+        vm.set_transition(&id, &a, &b, &label, None);
+        assert_eq!(vm.transition_rows()[0].priority, None);
+        vm.delete_edge(&id);
+        assert!(vm.transition_rows().is_empty());
     }
 }

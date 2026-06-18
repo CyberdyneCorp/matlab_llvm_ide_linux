@@ -14,7 +14,7 @@ pub use document::{
     FlowchartDocument, FlowchartMetadata, FlowchartSettings, SchemaKind, SnapshotConfig,
     SnapshotFields, SolverAlgorithm, SolverConfig, SolverType,
 };
-pub use edge::{EdgeData, EdgeEndpoint, EdgeKind, FlowEdge, FlowchartClipboard};
+pub use edge::{EdgeData, EdgeEndpoint, EdgeKind, FlowEdge, FlowchartClipboard, TransitionLabel};
 pub use node::{
     FlowNode, FlowPort, FlowPorts, FlowPosition, FlowSize, FlowUi, NodeData, NodeKind, NodeShape,
     ParamValue, PortAnchor,

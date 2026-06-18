@@ -766,13 +766,26 @@ fn build_flow_toolbar(
         let run = Button::with_label("▶ Run Chart");
         run.add_css_class("mf-tool");
         run.add_css_class("mf-run");
-        let app = app.clone();
-        let fc = fc.clone();
-        let path = path.clone();
-        run.connect_clicked(move |_| {
-            crate::statechart_window::open(&app, fc.document.get(), (*path).clone(), false);
-        });
+        {
+            let app = app.clone();
+            let fc = fc.clone();
+            let path = path.clone();
+            run.connect_clicked(move |_| {
+                crate::statechart_window::open(&app, fc.document.get(), (*path).clone(), false);
+            });
+        }
         bar.append(&run);
+
+        // Tabular alternative to drawing transitions on the canvas.
+        let table = Button::with_label("Transitions…");
+        table.add_css_class("mf-tool");
+        table.set_tooltip_text(Some("Edit transitions as a table"));
+        {
+            let app = app.clone();
+            let fc = fc.clone();
+            table.connect_clicked(move |_| crate::transition_table::open(&app, &fc));
+        }
+        bar.append(&table);
     } else {
         // Control-flow charts get a structural visual step: highlight each block
         // in execution order (no value evaluation — runs need the DAP adapter).
