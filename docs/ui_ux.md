@@ -156,6 +156,14 @@ through the tested [`FlowchartViewModel`](../crates/core/src/viewmodels/flowchar
   matter for its kind (assignment target/expression, `if`/`while` condition, `for`
   loop variable/iterable, signal-flow block parameters, state actions, …) and a
   **Toggle breakpoint** action for executable blocks.
+* **State hierarchy** (state charts): drag a state onto another to **reparent** it
+  (drops into a state's own descendant are rejected — no cycles), and compound
+  states **autosize** to wrap their children with a titled header. The inspector
+  exposes **decomposition** (OR exclusive / AND parallel), a **history junction**
+  toggle, and an **execution order** for AND siblings; AND children show numbered
+  order badges and a history "H" badge renders on the compound. A hierarchy lint
+  (history-on-AND, duplicate execution order) is flagged inline and as a red
+  dashed halo on the offending state.
 * **Save** writes the `.mflow` back to disk; **Compile** lowers the chart to MATLAB
   via `matlabc -emit-matlab`, writes the generated `.m` beside it, and opens it in
   the editor.
