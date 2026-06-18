@@ -7,8 +7,8 @@ use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 
 use crate::models::flowchart::{
-    EdgeEndpoint, EdgeKind, FlowEdge, FlowNode, FlowPosition, FlowUi, FlowchartDocument, NodeData,
-    NodeKind, SchemaKind, SolverConfig,
+    ChartSymbols, EdgeEndpoint, EdgeKind, FlowEdge, FlowNode, FlowPosition, FlowUi,
+    FlowchartDocument, NodeData, NodeKind, SchemaKind, SolverConfig,
 };
 use crate::models::BreakpointConfig;
 use crate::observable::Property;
@@ -177,6 +177,33 @@ impl FlowchartViewModel {
         self.push_undo();
         self.document.update(|d| {
             d.settings.get_or_insert_with(Default::default).solver = Some(cfg);
+        });
+        self.is_dirty.set(true);
+    }
+
+    /// The chart's symbol table (data / events / messages), or an empty table if
+    /// the document defines none. State-chart documents only.
+    pub fn chart_symbols(&self) -> ChartSymbols {
+        self.document.with(|d| {
+            d.flows
+                .first()
+                .and_then(|f| f.symbols.clone())
+                .unwrap_or_default()
+        })
+    }
+
+    /// Replace the chart's symbol table (one undo step) and mark the document
+    /// dirty. An all-empty table is stored as `None` so it serializes away.
+    pub fn set_chart_symbols(&self, symbols: ChartSymbols) {
+        self.push_undo();
+        self.document.update(|d| {
+            if let Some(flow) = d.flows.first_mut() {
+                flow.symbols = if symbols.is_empty() {
+                    None
+                } else {
+                    Some(symbols)
+                };
+            }
         });
         self.is_dirty.set(true);
     }
@@ -822,5 +849,48 @@ mod tests {
         // Undo restores the previous (default) solver.
         vm.undo();
         assert_eq!(vm.solver_config().algorithm, Some(SolverAlgorithm::Ode45));
+    }
+
+    #[test]
+    fn chart_symbols_round_trip_and_undo() {
+        use crate::models::flowchart::ChartSymbol;
+        let vm = FlowchartViewModel::empty("Chart", SchemaKind::StateChart);
+        // Unset → empty table.
+        assert!(vm.chart_symbols().is_empty());
+
+        let syms = ChartSymbols {
+            data: Some(vec![ChartSymbol {
+                name: "speed".into(),
+                scope: Some("local".into()),
+                symbol_type: Some("double".into()),
+                units: Some("m/s".into()),
+                trigger: None,
+                initial: Some("0".into()),
+            }]),
+            events: Some(vec![ChartSymbol {
+                name: "tick".into(),
+                scope: None,
+                symbol_type: None,
+                units: None,
+                trigger: Some("rising".into()),
+                initial: None,
+            }]),
+            messages: None,
+        };
+        vm.set_chart_symbols(syms.clone());
+        assert_eq!(vm.chart_symbols(), syms);
+        assert!(vm.is_dirty.get());
+        // Round-trips through the codec (lands in flows[0].symbols).
+        let json = vm.encode().unwrap();
+        assert!(json.contains("\"symbols\""));
+        assert!(json.contains("\"speed\""));
+
+        // Undo restores the empty table.
+        vm.undo();
+        assert!(vm.chart_symbols().is_empty());
+
+        // An all-empty table is stored as None (serializes away).
+        vm.set_chart_symbols(ChartSymbols::default());
+        assert!(!vm.encode().unwrap().contains("\"symbols\""));
     }
 }

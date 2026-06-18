@@ -666,6 +666,179 @@ fn open_solver_popover(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>, anchor: 
     pop.popup();
 }
 
+/// Append one editable symbol row (one `Entry` per placeholder plus a remove
+/// button) to `container`, pre-filled from `values` when supplied.
+fn add_symbol_row(container: &gtk::Box, placeholders: &[&str], values: &[String]) {
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    for (i, ph) in placeholders.iter().enumerate() {
+        let e = Entry::new();
+        e.set_placeholder_text(Some(ph));
+        e.set_width_chars(if i == 0 { 12 } else { 8 });
+        if let Some(v) = values.get(i) {
+            e.set_text(v);
+        }
+        row.append(&e);
+    }
+    let del = Button::from_icon_name("user-trash-symbolic");
+    del.add_css_class("flat");
+    del.set_tooltip_text(Some("Remove this symbol"));
+    {
+        let container = container.clone();
+        let row = row.clone();
+        del.connect_clicked(move |_| container.remove(&row));
+    }
+    row.append(&del);
+    container.append(&row);
+}
+
+/// Read back the symbol rows in `container` as `cols` trimmed fields each,
+/// dropping rows whose name (first field) is blank.
+fn read_symbol_rows(container: &gtk::Box, cols: usize) -> Vec<Vec<String>> {
+    let mut out = Vec::new();
+    let mut child = container.first_child();
+    while let Some(row) = child {
+        let mut fields = Vec::with_capacity(cols);
+        let mut c = row.first_child();
+        while let Some(w) = c {
+            if let Some(e) = w.downcast_ref::<Entry>() {
+                fields.push(e.text().trim().to_string());
+            }
+            c = w.next_sibling();
+        }
+        if fields.len() >= cols && !fields[0].is_empty() {
+            fields.truncate(cols);
+            out.push(fields);
+        }
+        child = row.next_sibling();
+    }
+    out
+}
+
+/// Popover editor for the chart symbol table (`flows[0].symbols`): data,
+/// events, and messages. Applying writes one undo step. State-chart only.
+fn open_symbols_popover(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>, anchor: &Button) {
+    use matforge_core::models::flowchart::{ChartSymbol, ChartSymbols};
+    const DATA_COLS: &[&str] = &["name", "scope", "type", "units", "initial"];
+    const EVENT_COLS: &[&str] = &["name", "trigger"];
+    const MSG_COLS: &[&str] = &["name"];
+
+    let body = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    body.set_margin_top(10);
+    body.set_margin_bottom(10);
+    body.set_margin_start(10);
+    body.set_margin_end(10);
+
+    let make_section = |title: &str, placeholders: &'static [&'static str]| -> gtk::Box {
+        let heading = Label::new(Some(title));
+        heading.add_css_class("mf-col-title");
+        heading.set_halign(gtk::Align::Start);
+        heading.set_margin_top(6);
+        body.append(&heading);
+        let rows = gtk::Box::new(gtk::Orientation::Vertical, 4);
+        body.append(&rows);
+        let add = Button::with_label("+ Add");
+        add.add_css_class("flat");
+        add.set_halign(gtk::Align::Start);
+        let rows2 = rows.clone();
+        add.connect_clicked(move |_| add_symbol_row(&rows2, placeholders, &[]));
+        body.append(&add);
+        rows
+    };
+
+    let data_box = make_section("Data", DATA_COLS);
+    let event_box = make_section("Events", EVENT_COLS);
+    let msg_box = make_section("Messages", MSG_COLS);
+
+    // Pre-fill from the current symbol table.
+    let v = |o: &Option<String>| o.clone().unwrap_or_default();
+    let syms = fc.chart_symbols();
+    for s in syms.data.unwrap_or_default() {
+        let row = [
+            s.name,
+            v(&s.scope),
+            v(&s.symbol_type),
+            v(&s.units),
+            v(&s.initial),
+        ];
+        add_symbol_row(&data_box, DATA_COLS, &row);
+    }
+    for s in syms.events.unwrap_or_default() {
+        add_symbol_row(&event_box, EVENT_COLS, &[s.name, v(&s.trigger)]);
+    }
+    for s in syms.messages.unwrap_or_default() {
+        add_symbol_row(&msg_box, MSG_COLS, &[s.name]);
+    }
+
+    let apply = Button::with_label("Apply");
+    apply.add_css_class("mf-compile-cta");
+    apply.set_margin_top(10);
+    body.append(&apply);
+
+    let scroller = gtk::ScrolledWindow::new();
+    scroller.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
+    scroller.set_min_content_height(280);
+    scroller.set_min_content_width(360);
+    scroller.set_child(Some(&body));
+
+    let pop = gtk::Popover::new();
+    pop.set_parent(anchor);
+    pop.set_child(Some(&scroller));
+
+    {
+        let app = app.clone();
+        let fc = fc.clone();
+        let pop = pop.clone();
+        apply.connect_clicked(move |_| {
+            let opt = |s: &str| {
+                let t = s.trim();
+                (!t.is_empty()).then(|| t.to_string())
+            };
+            let data: Vec<ChartSymbol> = read_symbol_rows(&data_box, 5)
+                .into_iter()
+                .map(|r| ChartSymbol {
+                    name: r[0].clone(),
+                    scope: opt(&r[1]),
+                    symbol_type: opt(&r[2]),
+                    units: opt(&r[3]),
+                    trigger: None,
+                    initial: opt(&r[4]),
+                })
+                .collect();
+            let events: Vec<ChartSymbol> = read_symbol_rows(&event_box, 2)
+                .into_iter()
+                .map(|r| ChartSymbol {
+                    name: r[0].clone(),
+                    scope: None,
+                    symbol_type: None,
+                    units: None,
+                    trigger: opt(&r[1]),
+                    initial: None,
+                })
+                .collect();
+            let messages: Vec<ChartSymbol> = read_symbol_rows(&msg_box, 1)
+                .into_iter()
+                .map(|r| ChartSymbol {
+                    name: r[0].clone(),
+                    scope: None,
+                    symbol_type: None,
+                    units: None,
+                    trigger: None,
+                    initial: None,
+                })
+                .collect();
+            let syms = ChartSymbols {
+                data: (!data.is_empty()).then_some(data),
+                events: (!events.is_empty()).then_some(events),
+                messages: (!messages.is_empty()).then_some(messages),
+            };
+            fc.set_chart_symbols(syms);
+            app.vm.toast.show("Chart symbols updated");
+            pop.popdown();
+        });
+    }
+    pop.popup();
+}
+
 fn build_flow_toolbar(
     app: &Rc<AppState>,
     fc: &Rc<FlowchartViewModel>,
@@ -766,13 +939,26 @@ fn build_flow_toolbar(
         let run = Button::with_label("▶ Run Chart");
         run.add_css_class("mf-tool");
         run.add_css_class("mf-run");
-        let app = app.clone();
-        let fc = fc.clone();
-        let path = path.clone();
-        run.connect_clicked(move |_| {
-            crate::statechart_window::open(&app, fc.document.get(), (*path).clone(), false);
-        });
+        {
+            let app = app.clone();
+            let fc = fc.clone();
+            let path = path.clone();
+            run.connect_clicked(move |_| {
+                crate::statechart_window::open(&app, fc.document.get(), (*path).clone(), false);
+            });
+        }
         bar.append(&run);
+
+        // Chart symbol table (flows[0].symbols): data / events / messages.
+        let symbols = Button::with_label("Symbols…");
+        symbols.add_css_class("mf-tool");
+        symbols.set_tooltip_text(Some("Edit the chart's data, events, and messages"));
+        {
+            let app = app.clone();
+            let fc = fc.clone();
+            symbols.connect_clicked(move |b| open_symbols_popover(&app, &fc, b));
+        }
+        bar.append(&symbols);
     } else {
         // Control-flow charts get a structural visual step: highlight each block
         // in execution order (no value evaluation — runs need the DAP adapter).
