@@ -131,13 +131,10 @@ def scenario_repl_plot():
 
 def scenario_search():
     print("scenario: find-in-files lists matches and opens one")
-    app = App(env_extra={"MATFORGE_OPEN": PROJ})
+    # Open the Search panel deterministically via the env hook instead of the
+    # Ctrl+F accelerator, which is flaky to deliver under headless Xvfb.
+    app = App(env_extra={"MATFORGE_OPEN": PROJ, "MATFORGE_SEARCH": "1"})
     try:
-        # Focus the window via the REPL entry, then Ctrl+F opens the Search panel.
-        ex, ey, ew, eh = app.wait_rect("repl_entry_rect")
-        app.click_window(ex + ew // 2, ey + eh // 2)
-        app.key("f", ctrl=True)
-
         sx, sy, sw, sh = app.wait_rect("search_entry_rect")
         app.click_window(sx + sw // 2, sy + sh // 2)
         app.type_text("disp")
