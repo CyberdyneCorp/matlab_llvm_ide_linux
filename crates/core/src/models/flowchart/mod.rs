@@ -8,7 +8,7 @@ mod edge;
 mod node;
 mod palette;
 
-pub use analysis::algebraic_loop_nodes;
+pub use analysis::{algebraic_loop_nodes, format_on_event, lint_action, parse_on_event};
 pub use document::{
     AlgebraicLoopMethod, ChartSymbol, ChartSymbols, Flow, FlowKind, FlowLayout, FlowSignature,
     FlowchartDocument, FlowchartMetadata, FlowchartSettings, SchemaKind, SnapshotConfig,

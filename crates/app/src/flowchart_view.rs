@@ -12,7 +12,9 @@ use std::process::Command;
 use std::rc::Rc;
 
 use gtk::prelude::*;
-use gtk::{Box as GtkBox, Button, DrawingArea, Entry, Label, Orientation, ScrolledWindow};
+use gtk::{
+    Box as GtkBox, Button, DrawingArea, Entry, Label, Orientation, ScrolledWindow, TextView,
+};
 
 use std::cell::Cell;
 
@@ -81,6 +83,8 @@ pub fn build_flowchart_view(
                 zoom: fc.zoom.get(),
             };
             let algebraic = fc.algebraic_loop_nodes();
+            let lint: std::collections::BTreeSet<String> =
+                fc.action_lint_nodes().into_keys().collect();
             fc.document.with(|doc| {
                 let sel = fc.selected_id.get();
                 let exec = fc.execution_node.get();
@@ -95,6 +99,7 @@ pub fn build_flowchart_view(
                         bps,
                         exec.as_deref(),
                         &algebraic,
+                        &lint,
                     );
                 });
             });
@@ -959,6 +964,13 @@ fn build_inspector_body(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>) -> Scro
 
             let kind = node.kind;
             for (label_text, key) in node_fields(&node) {
+                // State-action snippets get a multi-line, MATLAB-highlighted,
+                // lint-checked editor rather than a single-line entry.
+                if key.is_action() {
+                    let initial = field_get(&node, &key);
+                    body.append(&build_action_field(&fc, &id, &label_text, key, &initial));
+                    continue;
+                }
                 let field = GtkBox::new(Orientation::Vertical, 2);
                 let lbl = Label::new(Some(&label_text));
                 lbl.add_css_class("mf-col-title");
@@ -1030,6 +1042,75 @@ fn build_inspector_body(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>) -> Scro
     scroll
 }
 
+/// A multi-line, MATLAB-highlighted, lint-checked editor for one state-action
+/// snippet (entry / during / exit / on-event). Edits commit to the node through
+/// `field_set`; a structural bracket error is shown inline (and re-surfaces on
+/// the canvas via [`FlowchartViewModel::action_lint_nodes`]).
+fn build_action_field(
+    fc: &Rc<FlowchartViewModel>,
+    id: &str,
+    label_text: &str,
+    key: FieldKey,
+    initial: &str,
+) -> GtkBox {
+    use matforge_core::models::flowchart::lint_action;
+    use matforge_core::services::highlighter::Language;
+
+    let field = GtkBox::new(Orientation::Vertical, 2);
+    let lbl = Label::new(Some(label_text));
+    lbl.add_css_class("mf-col-title");
+    lbl.set_halign(gtk::Align::Start);
+
+    let view = TextView::new();
+    view.set_monospace(true);
+    view.set_top_margin(4);
+    view.set_bottom_margin(4);
+    view.set_left_margin(6);
+    view.set_right_margin(6);
+    view.add_css_class("mf-action-editor");
+    let buffer = view.buffer();
+    buffer.set_text(initial);
+    crate::highlight::ensure_tags(&buffer);
+    crate::highlight::apply(&buffer, Language::Matlab);
+
+    let scroll = ScrolledWindow::new();
+    scroll.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
+    scroll.set_min_content_height(54);
+    scroll.set_child(Some(&view));
+
+    let err = Label::new(None);
+    err.add_css_class("mf-field-error-text");
+    err.set_halign(gtk::Align::Start);
+    err.set_wrap(true);
+    let show_lint = move |err: &Label, text: &str| match lint_action(text) {
+        Some(msg) => {
+            err.set_text(&format!("⚠ {msg}"));
+            err.set_visible(true);
+        }
+        None => err.set_visible(false),
+    };
+    show_lint(&err, initial);
+
+    // Connect *after* set_text so the initial value is not echoed back through
+    // edit_node (which would falsely mark the document dirty).
+    {
+        let fc = fc.clone();
+        let id = id.to_string();
+        let err = err.clone();
+        buffer.connect_changed(move |b| {
+            let text = b.text(&b.start_iter(), &b.end_iter(), false).to_string();
+            crate::highlight::apply(b, Language::Matlab);
+            fc.edit_node(&id, |n| field_set(n, &key, &text));
+            show_lint(&err, &text);
+        });
+    }
+
+    field.append(&lbl);
+    field.append(&scroll);
+    field.append(&err);
+    field
+}
+
 /// Which `FlowNode` field an inspector entry edits.
 #[derive(Clone)]
 enum FieldKey {
@@ -1049,7 +1130,23 @@ enum FieldKey {
     EntryAction,
     DuringAction,
     ExitAction,
+    OnEvent,
     Param(String),
+}
+
+impl FieldKey {
+    /// Multi-line MATLAB action snippets (state-chart blocks). These render as
+    /// syntax-highlighted text editors with a structural lint, not single-line
+    /// entries.
+    fn is_action(&self) -> bool {
+        matches!(
+            self,
+            FieldKey::EntryAction
+                | FieldKey::DuringAction
+                | FieldKey::ExitAction
+                | FieldKey::OnEvent
+        )
+    }
 }
 
 /// The editable fields for a node, in display order (Label first).
@@ -1084,9 +1181,10 @@ fn node_fields(node: &FlowNode) -> Vec<(String, FieldKey)> {
         MatrixLiteral => fields.push(s("Value", FieldKey::Value)),
         State => {
             fields.push(s("Name", FieldKey::Name));
-            fields.push(s("Entry action", FieldKey::EntryAction));
-            fields.push(s("During action", FieldKey::DuringAction));
-            fields.push(s("Exit action", FieldKey::ExitAction));
+            fields.push(s("entry", FieldKey::EntryAction));
+            fields.push(s("during", FieldKey::DuringAction));
+            fields.push(s("exit", FieldKey::ExitAction));
+            fields.push(s("on event  (one EVENT: code per line)", FieldKey::OnEvent));
         }
         kind if kind.is_signal_flow() => {
             for spec in SignalFlowParamSpec::fields(kind) {
@@ -1118,6 +1216,11 @@ fn field_get(node: &FlowNode, key: &FieldKey) -> String {
         FieldKey::EntryAction => opt(&d.entry_action),
         FieldKey::DuringAction => opt(&d.during_action),
         FieldKey::ExitAction => opt(&d.exit_action),
+        FieldKey::OnEvent => d
+            .on_event_actions
+            .as_ref()
+            .map(matforge_core::models::flowchart::format_on_event)
+            .unwrap_or_default(),
         FieldKey::Param(k) => d
             .params
             .as_ref()
@@ -1149,9 +1252,13 @@ fn field_set(node: &mut FlowNode, key: &FieldKey, value: &str) {
         FieldKey::LoopVar => put(&mut node.data.loop_var, value),
         FieldKey::Iter => put(&mut node.data.iter, value),
         FieldKey::Text => put(&mut node.data.text, value),
-        FieldKey::EntryAction => put(&mut node.data.entry_action, value),
-        FieldKey::DuringAction => put(&mut node.data.during_action, value),
-        FieldKey::ExitAction => put(&mut node.data.exit_action, value),
+        FieldKey::EntryAction => put(&mut node.data.entry_action, value.trim()),
+        FieldKey::DuringAction => put(&mut node.data.during_action, value.trim()),
+        FieldKey::ExitAction => put(&mut node.data.exit_action, value.trim()),
+        FieldKey::OnEvent => {
+            let map = matforge_core::models::flowchart::parse_on_event(value);
+            node.data.on_event_actions = if map.is_empty() { None } else { Some(map) };
+        }
         FieldKey::Param(k) => {
             let map = node.data.params.get_or_insert_with(BTreeMap::new);
             if value.is_empty() {

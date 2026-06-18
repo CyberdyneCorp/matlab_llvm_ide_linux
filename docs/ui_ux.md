@@ -154,8 +154,12 @@ through the tested [`FlowchartViewModel`](../crates/core/src/viewmodels/flowchar
   rubber band follows the cursor and snaps to the target's nearest input port).
 * **Inspector** (right): edits the selected block — its label plus the fields that
   matter for its kind (assignment target/expression, `if`/`while` condition, `for`
-  loop variable/iterable, signal-flow block parameters, state actions, …) and a
-  **Toggle breakpoint** action for executable blocks.
+  loop variable/iterable, signal-flow block parameters, …) and a
+  **Toggle breakpoint** action for executable blocks. For a **state** block the
+  inspector shows four multi-line, MATLAB-highlighted action editors — `entry`,
+  `during`, `exit`, and `on event` (one `EVENT: code` line per event) — each
+  lint-checked for balanced brackets; an unbalanced snippet is flagged inline and
+  with a red dashed halo on the state in the canvas.
 * **Save** writes the `.mflow` back to disk; **Compile** lowers the chart to MATLAB
   via `matlabc -emit-matlab`, writes the generated `.m` beside it, and opens it in
   the editor.

@@ -54,6 +54,18 @@ impl FlowchartDocument {
             .unwrap_or_default()
     }
 
+    /// State nodes whose action snippets have a structural lint error, mapped to
+    /// the first error message. Empty for non state-chart documents.
+    pub fn action_lint_nodes(&self) -> std::collections::BTreeMap<String, String> {
+        if self.schema_kind() != SchemaKind::StateChart {
+            return std::collections::BTreeMap::new();
+        }
+        self.flows
+            .first()
+            .map(super::analysis::state_action_errors)
+            .unwrap_or_default()
+    }
+
     /// Fresh empty document for the given dialect.
     pub fn empty(name: &str, kind: SchemaKind) -> FlowchartDocument {
         match kind {

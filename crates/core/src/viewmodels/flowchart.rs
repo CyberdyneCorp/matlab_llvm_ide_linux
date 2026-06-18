@@ -162,6 +162,12 @@ impl FlowchartViewModel {
         self.document.with(|d| d.algebraic_loop_nodes())
     }
 
+    /// State nodes flagged by the action linter (id → first error message).
+    /// Drives the inspector message and the canvas warning outline.
+    pub fn action_lint_nodes(&self) -> std::collections::BTreeMap<String, String> {
+        self.document.with(|d| d.action_lint_nodes())
+    }
+
     /// The document's solver settings, or the variable-step default if unset.
     pub fn solver_config(&self) -> SolverConfig {
         self.document.with(|d| {
