@@ -15,14 +15,19 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use matforge_core::models::{CompilerTarget, OptimizationProfile};
-use matforge_core::services::compiler::{CompilerInvocation, CompilerService, ProcessCompilerService};
+use matforge_core::services::compiler::{
+    CompilerInvocation, CompilerService, ProcessCompilerService,
+};
 use matforge_core::services::dap::{parse_message, DapClient, DapFramer, DapMessage};
 use matforge_core::services::settings::Settings;
 
 /// Resolve `matlabc`, or `None` (→ skip) if it isn't installed.
 fn matlabc() -> Option<PathBuf> {
     let settings = Settings::from_env();
-    settings.matlabc_path.exists().then_some(settings.matlabc_path)
+    settings
+        .matlabc_path
+        .exists()
+        .then_some(settings.matlabc_path)
 }
 
 /// Write a `.m` source to a unique temp file and return its path.
@@ -44,12 +49,16 @@ fn emit_cpp_produces_source() {
         return;
     };
     let src = temp_source("hello.m", "x = 1 + 2;\ndisp(x)\n");
-    let inv = CompilerInvocation::emit(&binary, CompilerTarget::Cpp, OptimizationProfile::O0, &src).unwrap();
+    let inv = CompilerInvocation::emit(&binary, CompilerTarget::Cpp, OptimizationProfile::O0, &src)
+        .unwrap();
     let result = ProcessCompilerService.run(&inv, &mut |_| {}).unwrap();
     std::fs::remove_file(&src).ok();
 
     assert!(result.success(), "stderr: {:?}", result.stderr_lines);
-    assert!(!result.stdout.trim().is_empty(), "expected generated C++ on stdout");
+    assert!(
+        !result.stdout.trim().is_empty(),
+        "expected generated C++ on stdout"
+    );
 }
 
 #[test]
@@ -59,7 +68,9 @@ fn emit_llvm_contains_ir() {
         return;
     };
     let src = temp_source("ir.m", "y = 3 * 4;\n");
-    let inv = CompilerInvocation::emit(&binary, CompilerTarget::Llvm, OptimizationProfile::O0, &src).unwrap();
+    let inv =
+        CompilerInvocation::emit(&binary, CompilerTarget::Llvm, OptimizationProfile::O0, &src)
+            .unwrap();
     let result = ProcessCompilerService.run(&inv, &mut |_| {}).unwrap();
     std::fs::remove_file(&src).ok();
 
@@ -99,7 +110,12 @@ fn repl_plot_emits_figure_sentinel() {
         .write_all(b"plot(1:10);\ndrawnow;\nexit\n")
         .unwrap();
     let mut out = String::new();
-    child.stdout.take().unwrap().read_to_string(&mut out).unwrap();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut out)
+        .unwrap();
     let _ = child.wait();
 
     assert!(
@@ -117,15 +133,19 @@ fn diagnostics_surface_for_bad_source() {
     };
     // Undefined name should produce a clang-style diagnostic on stderr.
     let src = temp_source("bad.m", "x = 1 + + undefined_name_zzz;\n");
-    let inv = CompilerInvocation::emit(&binary, CompilerTarget::Cpp, OptimizationProfile::O0, &src).unwrap();
+    let inv = CompilerInvocation::emit(&binary, CompilerTarget::Cpp, OptimizationProfile::O0, &src)
+        .unwrap();
     let mut logs = Vec::new();
-    let result = ProcessCompilerService.run(&inv, &mut |l| logs.push(l.to_string())).unwrap();
+    let result = ProcessCompilerService
+        .run(&inv, &mut |l| logs.push(l.to_string()))
+        .unwrap();
     std::fs::remove_file(&src).ok();
 
     // Either it fails, or it emits at least one diagnostic-looking line.
-    let saw_diag = result.stderr_lines.iter().any(|l| {
-        matforge_core::services::compiler::parse_diagnostic(l).is_some()
-    });
+    let saw_diag = result
+        .stderr_lines
+        .iter()
+        .any(|l| matforge_core::services::compiler::parse_diagnostic(l).is_some());
     assert!(
         !result.success() || saw_diag,
         "expected a failure or a diagnostic for undefined name"
@@ -141,8 +161,11 @@ fn dap_reaches_stopped_at_breakpoint() {
         eprintln!("skipping: matlabc not found");
         return;
     };
-    let dir = std::env::temp_dir()
-        .join(format!("matforge_dap_{}_{}", std::process::id(), matforge_core::models::next_id()));
+    let dir = std::env::temp_dir().join(format!(
+        "matforge_dap_{}_{}",
+        std::process::id(),
+        matforge_core::models::next_id()
+    ));
     std::fs::create_dir_all(&dir).unwrap();
     let prog = dir.join("prog.m");
     std::fs::write(
@@ -193,11 +216,19 @@ fn dap_reaches_stopped_at_breakpoint() {
         stdin.flush().unwrap();
         std::thread::sleep(Duration::from_millis(150));
     };
-    send("initialize", Some(serde_json::json!({ "clientID": "matforge", "adapterID": "matlabc" })));
-    send("launch", Some(serde_json::json!({ "program": prog.to_string_lossy(), "stopOnEntry": true })));
+    send(
+        "initialize",
+        Some(serde_json::json!({ "clientID": "matforge", "adapterID": "matlabc" })),
+    );
+    send(
+        "launch",
+        Some(serde_json::json!({ "program": prog.to_string_lossy(), "stopOnEntry": true })),
+    );
     send(
         "setBreakpoints",
-        Some(serde_json::json!({ "source": { "path": prog.to_string_lossy() }, "breakpoints": [{ "line": 4 }] })),
+        Some(
+            serde_json::json!({ "source": { "path": prog.to_string_lossy() }, "breakpoints": [{ "line": 4 }] }),
+        ),
     );
     send("configurationDone", None);
 
@@ -221,5 +252,8 @@ fn dap_reaches_stopped_at_breakpoint() {
     let _ = reader.join();
     std::fs::remove_dir_all(&dir).ok();
 
-    assert!(stopped, "matlabc -dap did not reach a stopped event at the breakpoint");
+    assert!(
+        stopped,
+        "matlabc -dap did not reach a stopped event at the breakpoint"
+    );
 }
