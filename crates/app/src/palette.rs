@@ -7,7 +7,9 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gtk::prelude::*;
-use gtk::{ApplicationWindow, Box as GtkBox, Entry, Label, ListBox, Orientation, ScrolledWindow, Window};
+use gtk::{
+    ApplicationWindow, Box as GtkBox, Entry, Label, ListBox, Orientation, ScrolledWindow, Window,
+};
 
 use matforge_core::services::fuzzy;
 
@@ -22,7 +24,11 @@ pub struct PickEntry {
 
 impl PickEntry {
     fn new(label: impl Into<String>, run: Rc<dyn Fn()>) -> PickEntry {
-        PickEntry { label: label.into(), detail: None, run }
+        PickEntry {
+            label: label.into(),
+            detail: None,
+            run,
+        }
     }
     fn with_detail(mut self, detail: impl Into<String>) -> PickEntry {
         self.detail = Some(detail.into());
@@ -74,8 +80,11 @@ pub fn open_picker(parent: &ApplicationWindow, placeholder: &str, entries: Vec<P
             while let Some(c) = list.first_child() {
                 list.remove(&c);
             }
-            let pairs: Vec<(usize, &str)> =
-                entries.iter().enumerate().map(|(i, e)| (i, e.label.as_str())).collect();
+            let pairs: Vec<(usize, &str)> = entries
+                .iter()
+                .enumerate()
+                .map(|(i, e)| (i, e.label.as_str()))
+                .collect();
             let order = fuzzy::filter_sort(query, pairs, |p| p.1);
             let idxs: Vec<usize> = order.iter().map(|(i, _)| *i).collect();
             for &idx in idxs.iter().take(50) {
@@ -198,9 +207,12 @@ pub fn open_command_palette(app: &Rc<AppState>, window: &ApplicationWindow) {
     // Menu actions, reused via the window's action group.
     let act = |label: &str, name: &'static str| {
         let w = window.clone();
-        PickEntry::new(label, Rc::new(move || {
-            let _ = WidgetExt::activate_action(&w, name, None);
-        }))
+        PickEntry::new(
+            label,
+            Rc::new(move || {
+                let _ = WidgetExt::activate_action(&w, name, None);
+            }),
+        )
     };
     cmds.push(act("New File", "win.new"));
     cmds.push(act("Open Folder…", "win.open"));
@@ -235,7 +247,9 @@ pub fn open_command_palette(app: &Rc<AppState>, window: &ApplicationWindow) {
 /// Open the fuzzy file finder over the current project.
 pub fn open_quick_open(app: &Rc<AppState>, window: &ApplicationWindow) {
     let Some(root) = app.vm.project.root_url.get() else {
-        app.vm.status_bar.set_message("Open a folder to quick-open files");
+        app.vm
+            .status_bar
+            .set_message("Open a folder to quick-open files");
         return;
     };
     let mut files = Vec::new();
@@ -244,11 +258,17 @@ pub fn open_quick_open(app: &Rc<AppState>, window: &ApplicationWindow) {
     let entries: Vec<PickEntry> = files
         .into_iter()
         .map(|path| {
-            let rel = path.strip_prefix(&root).unwrap_or(&path).to_string_lossy().into_owned();
+            let rel = path
+                .strip_prefix(&root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .into_owned();
             let app = app.clone();
             let open_path = path.clone();
             PickEntry::new(
-                path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                path.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
                 Rc::new(move || crate::ui::open_file_path(&app, &open_path)),
             )
             .with_detail(rel)
@@ -259,10 +279,15 @@ pub fn open_quick_open(app: &Rc<AppState>, window: &ApplicationWindow) {
 }
 
 fn collect_files(dir: &std::path::Path, depth: usize, out: &mut Vec<std::path::PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
-        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         if name.starts_with('.') || name == "target" {
             continue;
         }

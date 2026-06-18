@@ -18,7 +18,10 @@ impl Default for ToastViewModel {
 
 impl ToastViewModel {
     pub fn new() -> ToastViewModel {
-        ToastViewModel { message: Property::new(None), revision: Property::new(0) }
+        ToastViewModel {
+            message: Property::new(None),
+            revision: Property::new(0),
+        }
     }
 
     /// Flash `message`.

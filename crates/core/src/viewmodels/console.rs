@@ -126,14 +126,20 @@ mod tests {
     #[test]
     fn visible_tabs_grow_with_artifacts() {
         let vm = ConsoleViewModel::new();
-        assert_eq!(vm.visible_tabs(), vec![ConsoleTab::Console, ConsoleTab::Problems]);
+        assert_eq!(
+            vm.visible_tabs(),
+            vec![ConsoleTab::Console, ConsoleTab::Problems]
+        );
         vm.set_artifact(CompilerTarget::Cpp, "int main(){}");
         vm.set_artifact(CompilerTarget::Python, "print(1)");
         let tabs = vm.visible_tabs();
         assert!(tabs.contains(&ConsoleTab::Cpp));
         assert!(tabs.contains(&ConsoleTab::Python));
         // C and C++ share the Cpp tab
-        assert_eq!(ConsoleViewModel::tab_for_target(CompilerTarget::C), ConsoleTab::Cpp);
+        assert_eq!(
+            ConsoleViewModel::tab_for_target(CompilerTarget::C),
+            ConsoleTab::Cpp
+        );
     }
 
     #[test]
