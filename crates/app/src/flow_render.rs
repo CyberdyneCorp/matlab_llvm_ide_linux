@@ -54,6 +54,7 @@ pub fn draw_document(
     breakpoints: &BTreeMap<String, BreakpointConfig>,
     exec_node: Option<&str>,
     algebraic: &BTreeSet<String>,
+    lint: &BTreeSet<String>,
 ) {
     set_rgb(ctx, crate::theme_css::current().editor_bg);
     ctx.rectangle(0.0, 0.0, w, h);
@@ -119,6 +120,17 @@ pub fn draw_document(
             set_rgb(ctx, crate::theme_css::current().amber);
             ctx.set_line_width(2.0);
             ctx.set_dash(&[4.0, 3.0], 0.0);
+            ctx.stroke().ok();
+            ctx.set_dash(&[], 0.0);
+        }
+
+        // Action lint warning: a red dashed halo on a state whose entry/during/
+        // exit/on-event code has unbalanced brackets.
+        if lint.contains(&node.id) {
+            draw_shape(ctx, node.kind.shape(), x - 3.0, y - 3.0, nw + 6.0, nh + 6.0);
+            set_rgb(ctx, crate::theme_css::current().red);
+            ctx.set_line_width(2.0);
+            ctx.set_dash(&[3.0, 3.0], 0.0);
             ctx.stroke().ok();
             ctx.set_dash(&[], 0.0);
         }
