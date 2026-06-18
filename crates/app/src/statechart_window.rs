@@ -230,12 +230,23 @@ fn start_live_chart(
         Some(p) => p.to_path_buf(),
         None => std::env::temp_dir().join("matforge_chart.mflow"),
     };
-    let json = match vm.document.with(matforge_core::services::flowchart_codec::encode_string) {
+    let json = match vm
+        .document
+        .with(matforge_core::services::flowchart_codec::encode_string)
+    {
         Ok(j) => j,
-        Err(e) => return app.vm.console.log(ConsoleLevel::Error, format!("encode: {e}")),
+        Err(e) => {
+            return app
+                .vm
+                .console
+                .log(ConsoleLevel::Error, format!("encode: {e}"))
+        }
     };
     if std::fs::write(&file, json).is_err() {
-        return app.vm.console.log(ConsoleLevel::Error, "could not write chart");
+        return app
+            .vm
+            .console
+            .log(ConsoleLevel::Error, "could not write chart");
     }
     if !app.settings.matlabc_path.exists() {
         return app.vm.console.log(ConsoleLevel::Error, "matlabc not found");
@@ -250,10 +261,16 @@ fn start_live_chart(
             vm2.finish();
             return;
         }
-        let Some(msg) = parse_message(&body) else { return };
+        let Some(msg) = parse_message(&body) else {
+            return;
+        };
         match &msg {
             DapMessage::Response { command, .. } if command.as_str() == "initialize" => {
-                send_dap(&dap2, "launch", Some(json!({ "program": program, "stopOnEntry": true })));
+                send_dap(
+                    &dap2,
+                    "launch",
+                    Some(json!({ "program": program, "stopOnEntry": true })),
+                );
             }
             DapMessage::Event { event, .. } if event.as_str() == "initialized" => {
                 send_dap(&dap2, "configurationDone", None);
@@ -268,10 +285,16 @@ fn start_live_chart(
     match started {
         Ok(session) => {
             *dap.borrow_mut() = Some(session);
-            send_dap(dap, "initialize", Some(json!({ "clientID": "matforge", "adapterID": "matlabc" })));
+            send_dap(
+                dap,
+                "initialize",
+                Some(json!({ "clientID": "matforge", "adapterID": "matlabc" })),
+            );
         }
         Err(e) => {
-            app.vm.console.log(ConsoleLevel::Error, format!("sim-dap: {e}"));
+            app.vm
+                .console
+                .log(ConsoleLevel::Error, format!("sim-dap: {e}"));
             vm.reset();
         }
     }

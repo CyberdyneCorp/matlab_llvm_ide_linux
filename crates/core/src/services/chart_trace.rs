@@ -18,12 +18,27 @@ use super::dap::DapMessage;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ChartEvent {
-    StateEnter { id: String },
-    StateExit { id: String },
-    TransitionFired { id: String, src: String, dst: String },
-    SuperStepBegin { iteration: i64 },
-    SuperStepEnd { iteration: i64, quiescent: bool },
-    Other { kind: String },
+    StateEnter {
+        id: String,
+    },
+    StateExit {
+        id: String,
+    },
+    TransitionFired {
+        id: String,
+        src: String,
+        dst: String,
+    },
+    SuperStepBegin {
+        iteration: i64,
+    },
+    SuperStepEnd {
+        iteration: i64,
+        quiescent: bool,
+    },
+    Other {
+        kind: String,
+    },
 }
 
 impl ChartEvent {
@@ -33,9 +48,17 @@ impl ChartEvent {
             ChartEvent::StateEnter { id } => format!("→ enter {id}"),
             ChartEvent::StateExit { id } => format!("← exit {id}"),
             ChartEvent::TransitionFired { src, dst, .. } => format!("⇒ {src} → {dst}"),
-            ChartEvent::SuperStepBegin { iteration } => format!("· super-step begin (i={iteration})"),
-            ChartEvent::SuperStepEnd { iteration, quiescent } => {
-                format!("· super-step end (i={iteration}{})", if *quiescent { ", quiescent" } else { "" })
+            ChartEvent::SuperStepBegin { iteration } => {
+                format!("· super-step begin (i={iteration})")
+            }
+            ChartEvent::SuperStepEnd {
+                iteration,
+                quiescent,
+            } => {
+                format!(
+                    "· super-step end (i={iteration}{})",
+                    if *quiescent { ", quiescent" } else { "" }
+                )
             }
             ChartEvent::Other { kind } => format!("· {kind}"),
         }
@@ -65,19 +88,30 @@ fn chart_event(kind: &str, fields: &Value) -> ChartEvent {
     let s = |k: &str| fields.get(k).and_then(Value::as_str).map(str::to_string);
     let i = |k: &str| fields.get(k).and_then(Value::as_i64);
     match kind {
-        "stateEnter" => ChartEvent::StateEnter { id: s("id").unwrap_or_default() },
-        "stateExit" => ChartEvent::StateExit { id: s("id").unwrap_or_default() },
+        "stateEnter" => ChartEvent::StateEnter {
+            id: s("id").unwrap_or_default(),
+        },
+        "stateExit" => ChartEvent::StateExit {
+            id: s("id").unwrap_or_default(),
+        },
         "transitionFired" => ChartEvent::TransitionFired {
             id: s("id").unwrap_or_default(),
             src: s("src").unwrap_or_default(),
             dst: s("dst").unwrap_or_default(),
         },
-        "superStepBegin" => ChartEvent::SuperStepBegin { iteration: i("iteration").unwrap_or(0) },
+        "superStepBegin" => ChartEvent::SuperStepBegin {
+            iteration: i("iteration").unwrap_or(0),
+        },
         "superStepEnd" => ChartEvent::SuperStepEnd {
             iteration: i("iteration").unwrap_or(0),
-            quiescent: fields.get("quiescent").and_then(Value::as_bool).unwrap_or(false),
+            quiescent: fields
+                .get("quiescent")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
         },
-        other => ChartEvent::Other { kind: other.to_string() },
+        other => ChartEvent::Other {
+            kind: other.to_string(),
+        },
     }
 }
 
@@ -95,7 +129,9 @@ pub fn parse_chart_event(line: &str) -> Option<ChartEvent> {
 /// Interpret a `stateChart/*` DAP event (from `-simulate --sim-dap` on a chart)
 /// as a [`ChartEvent`]. Returns `None` for non-chart messages.
 pub fn parse_chart_dap_event(msg: &DapMessage) -> Option<ChartEvent> {
-    let DapMessage::Event { event, body } = msg else { return None };
+    let DapMessage::Event { event, body } = msg else {
+        return None;
+    };
     let kind = event.strip_prefix("stateChart/")?;
     Some(chart_event(kind, body))
 }
@@ -108,11 +144,15 @@ mod tests {
     fn parses_state_events() {
         assert_eq!(
             parse_chart_event(r#"{"kind":"stateEnter","id":"Charge"}"#),
-            Some(ChartEvent::StateEnter { id: "Charge".into() })
+            Some(ChartEvent::StateEnter {
+                id: "Charge".into()
+            })
         );
         assert_eq!(
             parse_chart_event(r#"{"kind":"stateExit","id":"Charge"}"#),
-            Some(ChartEvent::StateExit { id: "Charge".into() })
+            Some(ChartEvent::StateExit {
+                id: "Charge".into()
+            })
         );
     }
 
@@ -122,24 +162,50 @@ mod tests {
             r#"{"kind":"transitionFired","id":"t1","src":"Charge","dst":"Discharge"}"#,
         )
         .unwrap();
-        assert_eq!(t, ChartEvent::TransitionFired { id: "t1".into(), src: "Charge".into(), dst: "Discharge".into() });
+        assert_eq!(
+            t,
+            ChartEvent::TransitionFired {
+                id: "t1".into(),
+                src: "Charge".into(),
+                dst: "Discharge".into()
+            }
+        );
         assert_eq!(
             parse_chart_event(r#"{"kind":"superStepEnd","iteration":2,"quiescent":true}"#),
-            Some(ChartEvent::SuperStepEnd { iteration: 2, quiescent: true })
+            Some(ChartEvent::SuperStepEnd {
+                iteration: 2,
+                quiescent: true
+            })
         );
     }
 
     #[test]
     fn entered_exited_helpers() {
-        assert_eq!(ChartEvent::StateEnter { id: "A".into() }.entered_state(), Some("A"));
-        assert_eq!(ChartEvent::StateExit { id: "A".into() }.exited_state(), Some("A"));
-        assert_eq!(ChartEvent::SuperStepBegin { iteration: 0 }.entered_state(), None);
+        assert_eq!(
+            ChartEvent::StateEnter { id: "A".into() }.entered_state(),
+            Some("A")
+        );
+        assert_eq!(
+            ChartEvent::StateExit { id: "A".into() }.exited_state(),
+            Some("A")
+        );
+        assert_eq!(
+            ChartEvent::SuperStepBegin { iteration: 0 }.entered_state(),
+            None
+        );
     }
 
     #[test]
     fn summary_is_human_readable() {
-        assert_eq!(ChartEvent::StateEnter { id: "X".into() }.summary(), "→ enter X");
-        let t = ChartEvent::TransitionFired { id: "t".into(), src: "A".into(), dst: "B".into() };
+        assert_eq!(
+            ChartEvent::StateEnter { id: "X".into() }.summary(),
+            "→ enter X"
+        );
+        let t = ChartEvent::TransitionFired {
+            id: "t".into(),
+            src: "A".into(),
+            dst: "B".into(),
+        };
         assert_eq!(t.summary(), "⇒ A → B");
     }
 
@@ -154,7 +220,9 @@ mod tests {
     fn unknown_kind_falls_back_to_other() {
         assert_eq!(
             parse_chart_event(r#"{"kind":"customEvent","foo":1}"#),
-            Some(ChartEvent::Other { kind: "customEvent".into() })
+            Some(ChartEvent::Other {
+                kind: "customEvent".into()
+            })
         );
     }
 
@@ -163,22 +231,39 @@ mod tests {
         use super::super::dap::parse_message;
         let ev = |body: &str| parse_chart_dap_event(&parse_message(body).unwrap());
         assert_eq!(
-            ev(r#"{"type":"event","event":"stateChart/stateEnter","body":{"id":"Charge","t":1.0}}"#),
-            Some(ChartEvent::StateEnter { id: "Charge".into() })
+            ev(
+                r#"{"type":"event","event":"stateChart/stateEnter","body":{"id":"Charge","t":1.0}}"#
+            ),
+            Some(ChartEvent::StateEnter {
+                id: "Charge".into()
+            })
         );
         assert_eq!(
-            ev(r#"{"type":"event","event":"stateChart/transitionFired","body":{"id":"t","src":"A","dst":"B"}}"#),
-            Some(ChartEvent::TransitionFired { id: "t".into(), src: "A".into(), dst: "B".into() })
+            ev(
+                r#"{"type":"event","event":"stateChart/transitionFired","body":{"id":"t","src":"A","dst":"B"}}"#
+            ),
+            Some(ChartEvent::TransitionFired {
+                id: "t".into(),
+                src: "A".into(),
+                dst: "B".into()
+            })
         );
         assert_eq!(
-            ev(r#"{"type":"event","event":"stateChart/superStepEnd","body":{"iteration":2,"quiescent":true}}"#),
-            Some(ChartEvent::SuperStepEnd { iteration: 2, quiescent: true })
+            ev(
+                r#"{"type":"event","event":"stateChart/superStepEnd","body":{"iteration":2,"quiescent":true}}"#
+            ),
+            Some(ChartEvent::SuperStepEnd {
+                iteration: 2,
+                quiescent: true
+            })
         );
         // Non-chart messages are ignored.
         assert!(ev(r#"{"type":"event","event":"stopped","body":{"reason":"step"}}"#).is_none());
         assert!(parse_chart_dap_event(
-            &parse_message(r#"{"type":"response","request_seq":1,"command":"x","success":true,"body":{}}"#)
-                .unwrap()
+            &parse_message(
+                r#"{"type":"response","request_seq":1,"command":"x","success":true,"body":{}}"#
+            )
+            .unwrap()
         )
         .is_none());
     }
