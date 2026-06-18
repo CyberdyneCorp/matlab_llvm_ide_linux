@@ -413,6 +413,18 @@ pub struct ChartSymbols {
     pub messages: Option<Vec<ChartSymbol>>,
 }
 
+impl ChartSymbols {
+    /// True when the table holds no data, event, or message symbols (so it can
+    /// be dropped to `None` rather than serialized as an empty object).
+    pub fn is_empty(&self) -> bool {
+        let empty = |v: &Option<Vec<ChartSymbol>>| match v {
+            Some(x) => x.is_empty(),
+            None => true,
+        };
+        empty(&self.data) && empty(&self.events) && empty(&self.messages)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ChartSymbol {
     pub name: String,
