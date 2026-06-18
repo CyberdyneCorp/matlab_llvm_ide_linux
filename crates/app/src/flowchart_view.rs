@@ -1100,6 +1100,47 @@ fn build_flow_toolbar(
             solver.connect_clicked(move |b| open_solver_popover(&app, &fc, b));
         }
         bar.append(&solver);
+
+        // Insert a masked instance of one of the document's `kind: library` flows.
+        let library = gtk::MenuButton::new();
+        library.set_label("Library ▾");
+        library.add_css_class("mf-tool");
+        library.set_tooltip_text(Some("Insert a masked library block"));
+        let lib_menu = GtkBox::new(Orientation::Vertical, 2);
+        lib_menu.set_margin_top(4);
+        lib_menu.set_margin_bottom(4);
+        lib_menu.set_margin_start(4);
+        lib_menu.set_margin_end(4);
+        let lib_pop = gtk::Popover::new();
+        lib_pop.set_child(Some(&lib_menu));
+        library.set_popover(Some(&lib_pop));
+        let libs = fc.library_flows();
+        if libs.is_empty() {
+            let note = Label::new(Some("No library flows in this model"));
+            note.add_css_class("mf-text-muted");
+            note.set_margin_start(6);
+            note.set_margin_end(6);
+            lib_menu.append(&note);
+        } else {
+            for (lib_id, name) in libs {
+                let item = Button::with_label(&name);
+                item.set_has_frame(false);
+                item.set_halign(gtk::Align::Start);
+                item.add_css_class("mf-row");
+                let app = app.clone();
+                let fc = fc.clone();
+                let lib_pop = lib_pop.clone();
+                item.connect_clicked(move |_| {
+                    lib_pop.popdown();
+                    if let Some(id) = fc.instantiate_library(&lib_id, 80.0, 80.0) {
+                        fc.select(Some(id));
+                        app.vm.toast.show("Inserted library block");
+                    }
+                });
+                lib_menu.append(&item);
+            }
+        }
+        bar.append(&library);
     } else if schema == SchemaKind::StateChart {
         let run = Button::with_label("▶ Run Chart");
         run.add_css_class("mf-tool");
@@ -1405,6 +1446,67 @@ fn reparent_on_drop(fc: &Rc<FlowchartViewModel>, id: &str) {
     fc.reparent(id, target.as_deref());
 }
 
+/// Inspector section for a masked library instance: one entry per mask
+/// parameter plus a live `${name}` substitution preview of the library flow.
+fn append_mask_editor(body: &GtkBox, fc: &Rc<FlowchartViewModel>, node: &FlowNode) {
+    let id = node.id.clone();
+
+    let heading = Label::new(Some("Mask parameters"));
+    heading.add_css_class("mf-col-title");
+    heading.set_halign(gtk::Align::Start);
+    heading.set_margin_top(6);
+    body.append(&heading);
+
+    let preview = Label::new(None);
+    preview.add_css_class("mf-text-muted");
+    preview.set_halign(gtk::Align::Start);
+    preview.set_wrap(true);
+    let refresh: Rc<dyn Fn()> = {
+        let fc = fc.clone();
+        let id = id.clone();
+        let preview = preview.clone();
+        Rc::new(move || {
+            preview.set_text(&fc.mask_preview(&id).unwrap_or_default());
+        })
+    };
+
+    let params = node.data.mask_params.clone().unwrap_or_default();
+    if params.is_empty() {
+        let note = Label::new(Some("This library defines no mask parameters."));
+        note.add_css_class("mf-text-muted");
+        note.set_halign(gtk::Align::Start);
+        body.append(&note);
+    }
+    for (name, value) in &params {
+        let row = GtkBox::new(Orientation::Vertical, 2);
+        let lbl = Label::new(Some(name));
+        lbl.add_css_class("mf-col-title");
+        lbl.set_halign(gtk::Align::Start);
+        let entry = Entry::new();
+        entry.set_text(value);
+        entry.set_hexpand(true);
+        let fc2 = fc.clone();
+        let id2 = id.clone();
+        let name2 = name.clone();
+        let refresh2 = refresh.clone();
+        entry.connect_changed(move |e| {
+            fc2.set_mask_param(&id2, &name2, &e.text());
+            refresh2();
+        });
+        row.append(&lbl);
+        row.append(&entry);
+        body.append(&row);
+    }
+
+    let pv_title = Label::new(Some("Expansion preview"));
+    pv_title.add_css_class("mf-col-title");
+    pv_title.set_halign(gtk::Align::Start);
+    pv_title.set_margin_top(6);
+    body.append(&pv_title);
+    body.append(&preview);
+    refresh();
+}
+
 fn build_inspector_body(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>) -> ScrolledWindow {
     let body = GtkBox::new(Orientation::Vertical, 8);
     body.set_margin_start(10);
@@ -1498,6 +1600,12 @@ fn build_inspector_body(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>) -> Scro
 
             if node.kind == NodeKind::State {
                 append_state_hierarchy_controls(&body, &fc, &node);
+            }
+
+            // Masked library instance: mask-parameter editors + a live ${name}
+            // substitution preview of the underlying library flow.
+            if node.data.library_id.is_some() {
+                append_mask_editor(&body, &fc, &node);
             }
 
             if node.kind.is_executable() {

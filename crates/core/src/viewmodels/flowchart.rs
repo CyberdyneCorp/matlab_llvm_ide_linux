@@ -591,6 +591,72 @@ impl FlowchartViewModel {
         result
     }
 
+    /// `(id, name)` of the document's `kind: library` flows (for the insert menu).
+    pub fn library_flows(&self) -> Vec<(String, String)> {
+        self.document.with(|d| d.library_flows())
+    }
+
+    /// Instantiate a library flow as a masked block in the entry flow: a
+    /// subsystem node referencing the library (`data.library_id`) with its mask
+    /// parameters discovered from `${name}` placeholders. Returns the node id.
+    pub fn instantiate_library(&self, lib_id: &str, x: f64, y: f64) -> Option<String> {
+        let (names, label) = self.document.with(|d| {
+            d.flow_by_id(lib_id).map(|f| {
+                (
+                    crate::models::flowchart::mask_param_names(f),
+                    f.name.clone(),
+                )
+            })
+        })?;
+        self.push_undo();
+        let id = format!("n{}", self.next_seq());
+        let mask: BTreeMap<String, String> =
+            names.into_iter().map(|n| (n, String::new())).collect();
+        let node = FlowNode::new(
+            &id,
+            NodeKind::SignalSubsystem,
+            &label,
+            NodeKind::SignalSubsystem.default_ports(),
+            NodeData {
+                library_id: Some(lib_id.to_string()),
+                mask_params: (!mask.is_empty()).then_some(mask),
+                ..NodeData::default()
+            },
+            FlowUi::at(FlowPosition { x, y }),
+        );
+        self.document.update(|d| {
+            if let Some(flow) = d.flows.first_mut() {
+                flow.nodes.push(node);
+            }
+        });
+        self.is_dirty.set(true);
+        self.select(Some(id.clone()));
+        Some(id)
+    }
+
+    /// Set a masked block's mask parameter value (typed inspector field: no undo
+    /// snapshot of its own).
+    pub fn set_mask_param(&self, node_id: &str, name: &str, value: &str) {
+        self.edit_node(node_id, |n| {
+            n.data
+                .mask_params
+                .get_or_insert_with(BTreeMap::new)
+                .insert(name.to_string(), value.to_string());
+        });
+    }
+
+    /// The `${name}` → value substitution preview for a masked block, or `None`
+    /// if the node isn't a library instance (or the library is missing).
+    pub fn mask_preview(&self, node_id: &str) -> Option<String> {
+        let node = self.node(node_id)?;
+        let lib_id = node.data.library_id?;
+        let values = node.data.mask_params.unwrap_or_default();
+        self.document.with(|d| {
+            d.flow_by_id(&lib_id)
+                .map(|f| crate::models::flowchart::mask_preview(f, &values))
+        })
+    }
+
     pub fn select(&self, id: Option<String>) {
         self.selected_id.set(id);
     }
@@ -1486,5 +1552,62 @@ mod tests {
         vm.undo();
         assert!(vm.node(&b).is_some());
         assert!(vm.node(&sub).is_none());
+    }
+
+    #[test]
+    fn instantiate_library_block_with_mask_and_preview() {
+        use crate::models::flowchart::{Flow, FlowKind, FlowSignature, ParamValue};
+        // A document with a `kind: library` flow carrying a ${k} mask param.
+        let mut doc = FlowchartDocument::empty("M", SchemaKind::SignalFlow);
+        let mut gain = FlowNode::new(
+            "g",
+            NodeKind::SignalGain,
+            "Gain",
+            NodeKind::SignalGain.default_ports(),
+            NodeData::default(),
+            FlowUi::at(FlowPosition { x: 0.0, y: 0.0 }),
+        );
+        gain.data.params = Some(BTreeMap::from([(
+            "gain".to_string(),
+            ParamValue::Str("${k}".to_string()),
+        )]));
+        doc.flows.push(Flow::new(
+            "lib_g",
+            FlowKind::Library,
+            "Gain Block",
+            FlowSignature::default(),
+            vec![gain],
+            vec![],
+            None,
+        ));
+        let vm = FlowchartViewModel::from_document(doc);
+
+        assert_eq!(
+            vm.library_flows(),
+            vec![("lib_g".to_string(), "Gain Block".to_string())]
+        );
+
+        // Instantiate → a subsystem node linked to the library with mask param k.
+        let id = vm.instantiate_library("lib_g", 10.0, 20.0).unwrap();
+        let node = vm.node(&id).unwrap();
+        assert_eq!(node.kind, NodeKind::SignalSubsystem);
+        assert_eq!(node.data.library_id.as_deref(), Some("lib_g"));
+        assert!(node.data.mask_params.as_ref().unwrap().contains_key("k"));
+
+        // Setting the mask param drives the substitution preview.
+        vm.set_mask_param(&id, "k", "3.3");
+        assert!(vm.mask_preview(&id).unwrap().contains("Gain.gain = 3.3"));
+
+        // The library flow + masked instance round-trip through the codec.
+        let json = vm.encode().unwrap();
+        assert!(json.contains("\"library\"")); // the library flow's kind
+        assert!(json.contains("\"library_id\"") && json.contains("lib_g"));
+        assert!(json.contains("\"mask_params\""));
+        // Re-decoding preserves the library flow + the masked instance.
+        let back = crate::services::flowchart_codec::decode_str(&json).unwrap();
+        assert_eq!(back.library_flows(), vm.library_flows());
+
+        // Unknown library → no instance.
+        assert!(vm.instantiate_library("nope", 0.0, 0.0).is_none());
     }
 }

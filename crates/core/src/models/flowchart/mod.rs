@@ -5,6 +5,7 @@
 mod analysis;
 mod document;
 mod edge;
+mod library;
 mod node;
 mod palette;
 
@@ -18,6 +19,7 @@ pub use document::{
     SnapshotFields, SolverAlgorithm, SolverConfig, SolverType,
 };
 pub use edge::{EdgeData, EdgeEndpoint, EdgeKind, FlowEdge, FlowchartClipboard, TransitionLabel};
+pub use library::{mask_param_names, mask_preview, substitute};
 pub use node::{
     FlowNode, FlowPort, FlowPorts, FlowPosition, FlowSize, FlowUi, NodeData, NodeKind, NodeShape,
     ParamValue, PortAnchor, StateDecomposition,

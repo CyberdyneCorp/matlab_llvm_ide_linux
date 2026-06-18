@@ -179,6 +179,11 @@ through the tested [`FlowchartViewModel`](../crates/core/src/viewmodels/flowchar
   a block ▸ **Extract to Subsystem** moves it into a fresh sub-flow, rerouting its
   wires through inport / outport blocks and leaving a linked subsystem node in its
   place.
+* **Library ▾** (signal flow) lists the document's `kind: library` flows; picking
+  one inserts a **masked block** — a subsystem node linked to the library
+  (`library_id`) whose `${name}` mask parameters appear in the inspector. The
+  inspector's **Mask parameters** section edits those values and shows a live
+  `${name}` → value **expansion preview** of the library flow.
 * **Save** writes the `.mflow` back to disk; **Compile** lowers the chart to MATLAB
   via `matlabc -emit-matlab`, writes the generated `.m` beside it, and opens it in
   the editor.
