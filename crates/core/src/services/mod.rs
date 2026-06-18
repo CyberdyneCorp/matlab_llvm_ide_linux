@@ -19,5 +19,6 @@ pub mod preferences;
 pub mod run;
 pub mod sentinels;
 pub mod settings;
+pub mod sim_dap;
 pub mod sim_trace;
 pub mod system_bridge;
