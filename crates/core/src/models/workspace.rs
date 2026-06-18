@@ -42,7 +42,10 @@ impl DType {
     /// matlabc REPL (matlab_llvm#156), so the IDE must not probe non-matrix
     /// variables.
     pub fn is_inspectable_matrix(&self) -> bool {
-        matches!(self, DType::Double | DType::Int32 | DType::Complex | DType::Logical)
+        matches!(
+            self,
+            DType::Double | DType::Int32 | DType::Complex | DType::Logical
+        )
     }
 
     /// Map a MATLAB `whos` class string onto a `DType`.
@@ -75,7 +78,12 @@ pub struct WorkspaceVariable {
 }
 
 impl WorkspaceVariable {
-    pub fn new(name: impl Into<String>, dtype: DType, size: impl Into<String>, bytes: usize) -> WorkspaceVariable {
+    pub fn new(
+        name: impl Into<String>,
+        dtype: DType,
+        size: impl Into<String>,
+        bytes: usize,
+    ) -> WorkspaceVariable {
         WorkspaceVariable {
             id: next_id(),
             name: name.into(),
@@ -105,13 +113,23 @@ impl MatrixView {
     pub fn new(title: impl Into<String>, cells: Vec<Vec<f64>>) -> MatrixView {
         let rows = cells.len();
         let cols = cells.first().map_or(0, |r| r.len());
-        MatrixView { rows, cols, cells, title: title.into() }
+        MatrixView {
+            rows,
+            cols,
+            cells,
+            title: title.into(),
+        }
     }
 
     /// Min and max finite cell values, for the heatmap gradient scale.
     /// Returns `None` for an empty matrix.
     pub fn value_range(&self) -> Option<(f64, f64)> {
-        let mut iter = self.cells.iter().flatten().copied().filter(|v| v.is_finite());
+        let mut iter = self
+            .cells
+            .iter()
+            .flatten()
+            .copied()
+            .filter(|v| v.is_finite());
         let first = iter.next()?;
         let (mut lo, mut hi) = (first, first);
         for v in iter {
@@ -154,8 +172,18 @@ impl InspectionColumn {
     pub fn is_numeric(&self) -> bool {
         matches!(
             self.matlab_type.to_lowercase().as_str(),
-            "double" | "single" | "float" | "int8" | "int16" | "int32" | "int64" | "uint8"
-                | "uint16" | "uint32" | "uint64" | "logical"
+            "double"
+                | "single"
+                | "float"
+                | "int8"
+                | "int16"
+                | "int32"
+                | "int64"
+                | "uint8"
+                | "uint16"
+                | "uint32"
+                | "uint64"
+                | "logical"
         )
     }
 }
@@ -181,8 +209,14 @@ mod tests {
     #[test]
     fn dtype_from_class_and_display() {
         assert_eq!(DType::from_class("double"), DType::Double);
-        assert_eq!(DType::from_class("BankAccount"), DType::Object("BankAccount".into()));
-        assert_eq!(DType::Object("BankAccount".into()).display_name(), "BankAccount");
+        assert_eq!(
+            DType::from_class("BankAccount"),
+            DType::Object("BankAccount".into())
+        );
+        assert_eq!(
+            DType::Object("BankAccount".into()).display_name(),
+            "BankAccount"
+        );
         assert_eq!(DType::Struct.display_name(), "struct");
     }
 

@@ -19,7 +19,10 @@ use matforge_core::services::dap::{DapClient, DapFramer};
 /// Spawn a thread that reads `reader` line-by-line and forwards each (newline
 /// trimmed) line over `tx`. Returns the join handle so callers can wait for the
 /// stream to drain (the REPL/DAP sessions ignore it).
-fn spawn_line_reader<R: Read + Send + 'static>(reader: R, tx: Sender<String>) -> thread::JoinHandle<()> {
+fn spawn_line_reader<R: Read + Send + 'static>(
+    reader: R,
+    tx: Sender<String>,
+) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let mut buf = BufReader::new(reader);
         let mut line = String::new();
@@ -72,7 +75,9 @@ pub fn run_streaming(
     on_line: impl FnMut(String) + 'static,
 ) -> std::io::Result<()> {
     let mut cmd = Command::new(bin);
-    cmd.current_dir(cwd).stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.current_dir(cwd)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     if figures {
         cmd.env("MATLAB_LLVM_IDE_FIGURES", "1");
     }
@@ -150,7 +155,10 @@ pub fn run_chart_trace(
 /// Spawn `cmd` with piped output, stream each line to `on_line` on the GTK main
 /// loop, and append `RUN_EXIT_PREFIX<code>` once it exits. Shared by the
 /// simulation + chart-trace runners; the returned handle kills the child.
-fn stream_child(cmd: &mut Command, on_line: impl FnMut(String) + 'static) -> std::io::Result<SimHandle> {
+fn stream_child(
+    cmd: &mut Command,
+    on_line: impl FnMut(String) + 'static,
+) -> std::io::Result<SimHandle> {
     let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
     let stdout = child.stdout.take().expect("piped stdout");
     let stderr = child.stderr.take().expect("piped stderr");
@@ -310,7 +318,11 @@ impl DapSession {
         });
         pump_to_main_loop(rx, on_message);
 
-        Ok(DapSession { stdin, child, client: DapClient::new() })
+        Ok(DapSession {
+            stdin,
+            child,
+            client: DapClient::new(),
+        })
     }
 
     /// Write a pre-framed request (built via `self.client`) to the adapter.

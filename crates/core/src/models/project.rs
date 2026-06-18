@@ -96,7 +96,10 @@ mod tests {
     #[test]
     fn from_extension_classifies() {
         assert_eq!(NodeFileKind::from_extension("m"), NodeFileKind::Matlab);
-        assert_eq!(NodeFileKind::from_extension("MFLOW"), NodeFileKind::Flowchart);
+        assert_eq!(
+            NodeFileKind::from_extension("MFLOW"),
+            NodeFileKind::Flowchart
+        );
         assert_eq!(NodeFileKind::from_extension("cpp"), NodeFileKind::Source);
         assert_eq!(NodeFileKind::from_extension("h"), NodeFileKind::Header);
         assert_eq!(NodeFileKind::from_extension("xyz"), NodeFileKind::Generic);
@@ -105,7 +108,10 @@ mod tests {
     #[test]
     fn icon_color_mapping() {
         assert_eq!(NodeFileKind::Matlab.icon_color(), palette::ACCENT_ORANGE);
-        assert_eq!(NodeFileKind::Flowchart.icon_color(), palette::ACCENT_MAGENTA);
+        assert_eq!(
+            NodeFileKind::Flowchart.icon_color(),
+            palette::ACCENT_MAGENTA
+        );
     }
 
     #[test]
