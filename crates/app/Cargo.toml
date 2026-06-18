@@ -31,5 +31,8 @@ assets = [
 [dependencies]
 matforge-core = { workspace = true }
 gtk = { package = "gtk4", version = "0.9", features = ["v4_12"] }
+# Same cairo-rs gtk4 pulls in; the `png` feature enables ImageSurface PNG export
+# (scope-tile export) and feature-unifies onto gtk's copy of the crate.
+cairo-rs = { version = "0.20", features = ["png"] }
 serde_json = { workspace = true }
 libc = "0.2"

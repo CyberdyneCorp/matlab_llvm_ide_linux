@@ -159,3 +159,18 @@ through the tested [`FlowchartViewModel`](../crates/core/src/viewmodels/flowchar
 * **Save** writes the `.mflow` back to disk; **Compile** lowers the chart to MATLAB
   via `matlabc -emit-matlab`, writes the generated `.m` beside it, and opens it in
   the editor.
+
+## mflowLink scope
+
+Simulating a signal-flow model (`▶ Simulate`) opens a window
+([`mflowlink_window`](../crates/app/src/mflowlink_window.rs)) with the model
+canvas beside a production **overlay scope** backed by the streamed `SimTrace`:
+
+* **Overlay + legend** — every logged signal shares one set of axes with a
+  legend and stable per-signal colors (`services/scope.rs`).
+* **Crosshair** — hovering shows a dashed crosshair and a readout box with the
+  cursor time and each signal's nearest-sample value.
+* **Box-zoom / pan / scale** — left-drag a box to zoom, middle-drag to pan,
+  **Auto** to autoscale, or pin a manual **Y min / Y max**.
+* **Export** — **CSV** writes the *visible* trace (the pinned time window) and
+  **PNG** writes the rendered scope, both beside the model file.
