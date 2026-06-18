@@ -71,7 +71,8 @@ pub fn run(vm: Rc<MainViewModel>, settings: &Settings) {
     let started = run_streaming(&plan.bin_path, &out_dir, true, lib_dir, move |line| {
         if let Some(code) = line.strip_prefix(RUN_EXIT_PREFIX) {
             vm.toolbar.is_running.set(false);
-            vm.status_bar.set_message(format!("Finished {stem} (exit {code})"));
+            vm.status_bar
+                .set_message(format!("Finished {stem} (exit {code})"));
         } else {
             vm.feed_repl_line(&line);
         }
@@ -97,7 +98,13 @@ fn fail(vm: &MainViewModel, message: &str) {
 /// programs still link (video ones then report the missing libs at link time).
 fn ffmpeg_link_flags() -> Vec<String> {
     let out = Command::new("pkg-config")
-        .args(["--libs", "libavformat", "libavcodec", "libavutil", "libswscale"])
+        .args([
+            "--libs",
+            "libavformat",
+            "libavcodec",
+            "libavutil",
+            "libswscale",
+        ])
         .output();
     match out {
         Ok(o) if o.status.success() => {

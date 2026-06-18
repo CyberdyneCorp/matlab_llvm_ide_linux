@@ -56,7 +56,11 @@ pub struct EditorTab {
 }
 
 impl EditorTab {
-    pub fn text(name: impl Into<String>, language: impl Into<String>, contents: impl Into<String>) -> EditorTab {
+    pub fn text(
+        name: impl Into<String>,
+        language: impl Into<String>,
+        contents: impl Into<String>,
+    ) -> EditorTab {
         EditorTab {
             id: next_id(),
             name: name.into(),
@@ -125,9 +129,15 @@ mod tests {
     fn breakpoint_config_predicates() {
         let plain = BreakpointConfig::plain();
         assert!(!plain.is_conditional() && !plain.is_log_point() && !plain.has_hit_count());
-        let cond = BreakpointConfig { condition: Some("x>1".into()), ..Default::default() };
+        let cond = BreakpointConfig {
+            condition: Some("x>1".into()),
+            ..Default::default()
+        };
         assert!(cond.is_conditional());
-        let empty_cond = BreakpointConfig { condition: Some(String::new()), ..Default::default() };
+        let empty_cond = BreakpointConfig {
+            condition: Some(String::new()),
+            ..Default::default()
+        };
         assert!(!empty_cond.is_conditional());
     }
 
