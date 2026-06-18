@@ -22,6 +22,7 @@ use matforge_core::models::flowchart::{
     FlowNode, NodeKind, ParamValue, SignalFlowParamSpec, StateDecomposition,
 };
 use matforge_core::models::ConsoleLevel;
+use matforge_core::services::codegen::ExportTarget;
 use matforge_core::viewmodels::flowchart::{ZOOM_MAX, ZOOM_MIN};
 use matforge_core::viewmodels::FlowchartViewModel;
 
@@ -457,6 +458,12 @@ pub fn build_flowchart_view(
     content.set_vexpand(true);
     content.append(&palette);
     content.append(&overlay);
+
+    // Live MATLAB preview pane (hidden until the Preview toggle is on).
+    let (preview_pane, preview_toggle) = build_preview_pane(app, &fc, path.clone());
+    toolbar.append(&preview_toggle);
+    content.append(&preview_pane);
+
     root.append(&toolbar);
     root.append(&content);
 
@@ -922,6 +929,37 @@ fn build_flow_toolbar(
         });
     }
     bar.append(&compile);
+
+    // Export ▾ — the compiler's codegen lanes (-emit-matlab / -dump-chart /
+    // -emit-c / -emit-cpp / -emit-llvm / -emit-systemverilog).
+    let export_menu = GtkBox::new(Orientation::Vertical, 2);
+    export_menu.set_margin_top(4);
+    export_menu.set_margin_bottom(4);
+    export_menu.set_margin_start(4);
+    export_menu.set_margin_end(4);
+    let export = gtk::MenuButton::new();
+    export.set_label("Export ▾");
+    export.add_css_class("mf-tool");
+    export.set_tooltip_text(Some("Generate code via matlabc"));
+    let export_pop = gtk::Popover::new();
+    export_pop.set_child(Some(&export_menu));
+    export.set_popover(Some(&export_pop));
+    for target in ExportTarget::all() {
+        let item = Button::with_label(target.label());
+        item.set_has_frame(false);
+        item.set_halign(gtk::Align::Start);
+        item.add_css_class("mf-row");
+        let app = app.clone();
+        let fc = fc.clone();
+        let path = path.clone();
+        let export_pop = export_pop.clone();
+        item.connect_clicked(move |_| {
+            export_pop.popdown();
+            emit_artifact(&app, &fc, path.as_deref(), target);
+        });
+        export_menu.append(&item);
+    }
+    bar.append(&export);
 
     // Signal-flow → Simulate (mflowLink); state-chart → Run Chart (mStateflow).
     let schema = fc.document.with(|d| d.schema_kind());
@@ -1634,6 +1672,98 @@ fn save_flowchart(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>, path: Option<
 }
 
 /// Save, then lower the chart to MATLAB and open the generated `.m` source.
+/// A collapsible pane showing a live `matlabc -emit-matlab` preview of the
+/// chart, refreshed (debounced) whenever the document changes while visible.
+/// Returns the pane and the toolbar toggle that shows/hides it.
+fn build_preview_pane(
+    app: &Rc<AppState>,
+    fc: &Rc<FlowchartViewModel>,
+    path: Rc<Option<PathBuf>>,
+) -> (GtkBox, gtk::ToggleButton) {
+    use matforge_core::services::highlighter::Language;
+
+    let pane = GtkBox::new(Orientation::Vertical, 0);
+    pane.add_css_class("mf-panel");
+    pane.add_css_class("mf-border-left");
+    pane.set_size_request(360, -1);
+    pane.set_visible(false);
+    let header = Label::new(Some("MATLAB PREVIEW"));
+    header.add_css_class("mf-panel-header");
+    header.set_halign(gtk::Align::Start);
+    header.set_margin_start(8);
+    header.set_margin_top(6);
+    pane.append(&header);
+
+    let view = TextView::new();
+    view.set_editable(false);
+    view.set_monospace(true);
+    view.set_left_margin(6);
+    view.set_top_margin(4);
+    let buffer = view.buffer();
+    crate::highlight::ensure_tags(&buffer);
+    let scroll = ScrolledWindow::new();
+    scroll.set_vexpand(true);
+    scroll.set_child(Some(&view));
+    pane.append(&scroll);
+
+    let refresh: Rc<dyn Fn()> = {
+        let app = app.clone();
+        let fc = fc.clone();
+        let path = path.clone();
+        let buffer = buffer.clone();
+        Rc::new(move || {
+            let text = match preview_matlab(&app, &fc, path.as_deref()) {
+                Ok(src) => src,
+                Err(msg) => format!("% {msg}"),
+            };
+            buffer.set_text(&text);
+            crate::highlight::apply(&buffer, Language::Matlab);
+        })
+    };
+
+    // Debounce: coalesce a burst of edits into a single refresh ~500ms later,
+    // and only while the pane is visible (so hidden previews cost nothing).
+    let pending: Rc<RefCell<Option<gtk::glib::SourceId>>> = Rc::new(RefCell::new(None));
+    {
+        let pane = pane.clone();
+        let refresh = refresh.clone();
+        let pending = pending.clone();
+        fc.document.subscribe(move |_| {
+            if !pane.is_visible() {
+                return;
+            }
+            if let Some(id) = pending.borrow_mut().take() {
+                id.remove();
+            }
+            let refresh = refresh.clone();
+            let pending2 = pending.clone();
+            let id = gtk::glib::timeout_add_local_once(
+                std::time::Duration::from_millis(500),
+                move || {
+                    *pending2.borrow_mut() = None;
+                    refresh();
+                },
+            );
+            *pending.borrow_mut() = Some(id);
+        });
+    }
+
+    let toggle = gtk::ToggleButton::with_label("Preview");
+    toggle.add_css_class("mf-tool");
+    toggle.set_tooltip_text(Some("Live MATLAB preview (matlabc -emit-matlab)"));
+    {
+        let pane = pane.clone();
+        let refresh = refresh.clone();
+        toggle.connect_toggled(move |t| {
+            pane.set_visible(t.is_active());
+            if t.is_active() {
+                refresh();
+            }
+        });
+    }
+    (pane, toggle)
+}
+
 /// Lower the flowchart to MATLAB via `matlabc -emit-matlab`, open the generated
 /// `.m` in an editor tab, and return its path (or `None` if compilation failed).
 pub(crate) fn emit_matlab(
@@ -1641,60 +1771,75 @@ pub(crate) fn emit_matlab(
     fc: &Rc<FlowchartViewModel>,
     path: Option<&Path>,
 ) -> Option<PathBuf> {
-    // Persist to a real file matlabc can read (a temp file for demo charts).
-    let owned;
-    let mflow: &Path = match path {
-        Some(p) => p,
-        None => {
-            owned = std::env::temp_dir().join("matforge_demo.mflow");
-            &owned
-        }
-    };
+    emit_artifact(app, fc, path, ExportTarget::Matlab)
+}
+
+/// Persist the document to a real `.mflow` matlabc can read (a temp file for
+/// unsaved demo charts), returning that path.
+fn persist_for_codegen(
+    app: &Rc<AppState>,
+    fc: &Rc<FlowchartViewModel>,
+    path: Option<&Path>,
+) -> Option<PathBuf> {
+    let mflow = path
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::env::temp_dir().join("matforge_demo.mflow"));
     match fc.encode() {
-        Ok(json) => {
-            if let Err(e) = std::fs::write(mflow, json) {
+        Ok(json) => match std::fs::write(&mflow, json) {
+            Ok(()) => Some(mflow),
+            Err(e) => {
                 app.vm
                     .console
                     .log(ConsoleLevel::Error, format!("save failed: {e}"));
-                return None;
+                None
             }
-        }
+        },
         Err(e) => {
             app.vm
                 .console
                 .log(ConsoleLevel::Error, format!("encode failed: {e}"));
-            return None;
+            None
         }
     }
+}
 
+/// Run a `matlabc` codegen lane on the flowchart, write the artifact beside the
+/// model, open it in an editor tab, and return its path (`None` on failure).
+pub(crate) fn emit_artifact(
+    app: &Rc<AppState>,
+    fc: &Rc<FlowchartViewModel>,
+    path: Option<&Path>,
+    target: ExportTarget,
+) -> Option<PathBuf> {
+    let mflow = persist_for_codegen(app, fc, path)?;
     if !app.settings.matlabc_path.exists() {
-        app.vm.console.log(
-            ConsoleLevel::Error,
-            "matlabc not found — cannot compile flowchart",
-        );
+        app.vm
+            .console
+            .log(ConsoleLevel::Error, "matlabc not found — cannot export");
         return None;
     }
-    app.vm.status_bar.set_message("Compiling flowchart…");
+    app.vm
+        .status_bar
+        .set_message(format!("Exporting {}…", target.flag()));
     let output = Command::new(&app.settings.matlabc_path)
-        .arg("-emit-matlab")
-        .arg(mflow)
+        .arg(target.flag())
+        .arg(&mflow)
         .output();
     match output {
         Ok(o) if o.status.success() => {
-            let code = String::from_utf8_lossy(&o.stdout);
-            let m_path = mflow.with_extension("m");
-            match std::fs::write(&m_path, code.as_bytes()) {
+            let out_path = mflow.with_extension(target.extension());
+            match std::fs::write(&out_path, &o.stdout) {
                 Ok(()) => {
-                    crate::ui::open_file_path(app, &m_path);
+                    crate::ui::open_file_path(app, &out_path);
                     app.vm
                         .status_bar
-                        .set_message(format!("Generated {}", m_path.display()));
-                    Some(m_path)
+                        .set_message(format!("Generated {}", out_path.display()));
+                    Some(out_path)
                 }
                 Err(e) => {
                     app.vm
                         .console
-                        .log(ConsoleLevel::Error, format!("write .m failed: {e}"));
+                        .log(ConsoleLevel::Error, format!("write artifact failed: {e}"));
                     None
                 }
             }
@@ -1704,7 +1849,9 @@ pub(crate) fn emit_matlab(
             for line in err.lines() {
                 app.vm.console.log(ConsoleLevel::Error, line.to_string());
             }
-            app.vm.status_bar.set_message("Flowchart compile failed");
+            app.vm
+                .status_bar
+                .set_message(format!("Export {} failed", target.flag()));
             None
         }
         Err(e) => {
@@ -1713,5 +1860,28 @@ pub(crate) fn emit_matlab(
                 .log(ConsoleLevel::Error, format!("matlabc: {e}"));
             None
         }
+    }
+}
+
+/// Run `matlabc -emit-matlab` and return the generated source as text (for the
+/// live preview pane). Does not write or open anything; `Err` carries a short
+/// message to show in the pane.
+fn preview_matlab(
+    app: &Rc<AppState>,
+    fc: &Rc<FlowchartViewModel>,
+    path: Option<&Path>,
+) -> Result<String, String> {
+    if !app.settings.matlabc_path.exists() {
+        return Err("matlabc not found — set $MATLABC_PATH to preview".to_string());
+    }
+    let mflow = persist_for_codegen(app, fc, path).ok_or("could not serialize the chart")?;
+    match Command::new(&app.settings.matlabc_path)
+        .arg("-emit-matlab")
+        .arg(&mflow)
+        .output()
+    {
+        Ok(o) if o.status.success() => Ok(String::from_utf8_lossy(&o.stdout).into_owned()),
+        Ok(o) => Err(String::from_utf8_lossy(&o.stderr).into_owned()),
+        Err(e) => Err(format!("matlabc: {e}")),
     }
 }
