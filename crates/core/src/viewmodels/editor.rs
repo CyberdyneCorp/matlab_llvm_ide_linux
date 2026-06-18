@@ -55,15 +55,24 @@ impl EditorViewModel {
     /// it instead of re-reading. Returns the tab id.
     pub fn open_file(&self, fs: &dyn FileSystem, path: &Path) -> std::io::Result<u64> {
         if let Some(existing) = self.tabs.with(|tabs| {
-            tabs.iter().find(|t| t.url.as_deref() == Some(path)).map(|t| t.id)
+            tabs.iter()
+                .find(|t| t.url.as_deref() == Some(path))
+                .map(|t| t.id)
         }) {
             self.active_id.set(Some(existing));
             return Ok(existing);
         }
         let contents = fs.read_to_string(path)?;
-        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        let ext = path.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
-        let tab = EditorTab::text(name, language_label(&ext), contents).with_url(path.to_path_buf());
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let ext = path
+            .extension()
+            .map(|e| e.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let tab =
+            EditorTab::text(name, language_label(&ext), contents).with_url(path.to_path_buf());
         let id = tab.id;
         self.tabs.update(|t| t.push(tab));
         self.active_id.set(Some(id));
@@ -76,7 +85,8 @@ impl EditorViewModel {
 
     pub fn active_tab(&self) -> Option<EditorTab> {
         let active = self.active_id.get()?;
-        self.tabs.with(|t| t.iter().find(|tab| tab.id == active).cloned())
+        self.tabs
+            .with(|t| t.iter().find(|tab| tab.id == active).cloned())
     }
 
     /// Close a tab; if it was active, focus the previous one (or none).
@@ -86,7 +96,10 @@ impl EditorViewModel {
             if let Some(pos) = tabs.iter().position(|t| t.id == id) {
                 tabs.remove(pos);
                 if new_active == Some(id) {
-                    new_active = tabs.get(pos.saturating_sub(1)).or_else(|| tabs.last()).map(|t| t.id);
+                    new_active = tabs
+                        .get(pos.saturating_sub(1))
+                        .or_else(|| tabs.last())
+                        .map(|t| t.id);
                 }
             }
         });
@@ -109,7 +122,10 @@ impl EditorViewModel {
     /// Point `id` at `path` (Save As): updates url + name + language and marks
     /// the tab saved. The caller writes the file to disk.
     pub fn save_as(&self, id: u64, path: &Path) {
-        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         let language = language_label(ext).to_string();
         self.mutate(id, |t| {
@@ -255,8 +271,14 @@ mod tests {
         vm.set_execution_line(a, Some(5));
         vm.set_execution_line(b, Some(9));
         let tabs = vm.tabs.get();
-        assert_eq!(tabs.iter().find(|t| t.id == a).unwrap().execution_line, None);
-        assert_eq!(tabs.iter().find(|t| t.id == b).unwrap().execution_line, Some(9));
+        assert_eq!(
+            tabs.iter().find(|t| t.id == a).unwrap().execution_line,
+            None
+        );
+        assert_eq!(
+            tabs.iter().find(|t| t.id == b).unwrap().execution_line,
+            Some(9)
+        );
         vm.clear_execution_lines();
         assert!(vm.tabs.get().iter().all(|t| t.execution_line.is_none()));
     }

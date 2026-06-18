@@ -35,7 +35,9 @@ impl StateChartViewModel {
     /// Feed one `-emit-trace` line: append the parsed event and update the
     /// active-state set (enter adds, exit removes).
     pub fn feed_line(&self, line: &str) {
-        let Some(event) = parse_chart_event(line) else { return };
+        let Some(event) = parse_chart_event(line) else {
+            return;
+        };
         if let Some(id) = event.entered_state() {
             let id = id.to_string();
             self.active_states.update(|s| {

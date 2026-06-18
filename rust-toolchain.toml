@@ -1,0 +1,5 @@
+[toolchain]
+# Pinned so `cargo fmt`/`cargo clippy` are deterministic locally and in CI.
+# Bump deliberately (and reformat / re-lint in the same commit), never implicitly.
+channel = "1.92.0"
+components = ["rustfmt", "clippy"]

@@ -18,7 +18,12 @@ use crate::app_state::AppState;
 
 /// Open the Preferences dialog as a modal window over `parent`.
 pub fn open(app: &Rc<AppState>, parent: Option<&ApplicationWindow>) {
-    let win = Window::builder().title("Preferences").default_width(440).default_height(360).modal(true).build();
+    let win = Window::builder()
+        .title("Preferences")
+        .default_width(440)
+        .default_height(360)
+        .modal(true)
+        .build();
     win.add_css_class("mf-root");
     if let Some(p) = parent {
         win.set_transient_for(Some(p));
@@ -56,12 +61,20 @@ fn appearance_tab(app: &Rc<AppState>) -> GtkBox {
     v.set_margin_end(16);
 
     // Theme.
-    let theme_dd = DropDown::from_strings(&ThemeId::ALL.iter().map(|t| t.label()).collect::<Vec<_>>());
-    theme_dd.set_selected(ThemeId::ALL.iter().position(|t| *t == app.vm.appearance.theme_id.get()).unwrap_or(0) as u32);
+    let theme_dd =
+        DropDown::from_strings(&ThemeId::ALL.iter().map(|t| t.label()).collect::<Vec<_>>());
+    theme_dd.set_selected(
+        ThemeId::ALL
+            .iter()
+            .position(|t| *t == app.vm.appearance.theme_id.get())
+            .unwrap_or(0) as u32,
+    );
     {
         let app = app.clone();
         theme_dd.connect_selected_notify(move |dd| {
-            app.vm.appearance.set_theme(ThemeId::ALL[dd.selected() as usize]);
+            app.vm
+                .appearance
+                .set_theme(ThemeId::ALL[dd.selected() as usize]);
         });
     }
     {
@@ -75,12 +88,20 @@ fn appearance_tab(app: &Rc<AppState>) -> GtkBox {
     v.append(&field_row("Theme", &theme_dd));
 
     // Accent.
-    let accent_dd = DropDown::from_strings(&Accent::ALL.iter().map(|a| a.label()).collect::<Vec<_>>());
-    accent_dd.set_selected(Accent::ALL.iter().position(|a| *a == app.vm.appearance.accent.get()).unwrap_or(0) as u32);
+    let accent_dd =
+        DropDown::from_strings(&Accent::ALL.iter().map(|a| a.label()).collect::<Vec<_>>());
+    accent_dd.set_selected(
+        Accent::ALL
+            .iter()
+            .position(|a| *a == app.vm.appearance.accent.get())
+            .unwrap_or(0) as u32,
+    );
     {
         let app = app.clone();
         accent_dd.connect_selected_notify(move |dd| {
-            app.vm.appearance.set_accent(Accent::ALL[dd.selected() as usize]);
+            app.vm
+                .appearance
+                .set_accent(Accent::ALL[dd.selected() as usize]);
         });
     }
     {
@@ -137,8 +158,13 @@ fn toolchain_tab(app: &Rc<AppState>) -> GtkBox {
     v.set_margin_start(16);
     v.set_margin_end(16);
     v.append(&path_row("matlabc", &app.settings.matlabc_path));
-    v.append(&path_row("libMatlabRuntime.a", &app.settings.runtime_archive));
-    let note = Label::new(Some("Set $MATLABC_PATH or edit ~/.config/matforge/config.toml to change these."));
+    v.append(&path_row(
+        "libMatlabRuntime.a",
+        &app.settings.runtime_archive,
+    ));
+    let note = Label::new(Some(
+        "Set $MATLABC_PATH or edit ~/.config/matforge/config.toml to change these.",
+    ));
     note.add_css_class("mf-text-muted");
     note.set_halign(gtk::Align::Start);
     note.set_wrap(true);
@@ -153,7 +179,12 @@ fn scale_row(
     prop: matforge_core::observable::Property<f64>,
     on_change: impl Fn(f64) -> f64 + 'static,
 ) -> GtkBox {
-    let scale = Scale::with_range(Orientation::Horizontal, FONT_SCALE_MIN, FONT_SCALE_MAX, 0.05);
+    let scale = Scale::with_range(
+        Orientation::Horizontal,
+        FONT_SCALE_MIN,
+        FONT_SCALE_MAX,
+        0.05,
+    );
     scale.set_value(prop.get());
     scale.set_hexpand(true);
     scale.set_draw_value(false);

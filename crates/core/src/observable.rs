@@ -42,7 +42,9 @@ pub struct Property<T> {
 
 impl<T> Clone for Property<T> {
     fn clone(&self) -> Self {
-        Property { inner: Rc::clone(&self.inner) }
+        Property {
+            inner: Rc::clone(&self.inner),
+        }
     }
 }
 
@@ -76,7 +78,11 @@ impl<T: Clone + 'static> Property<T> {
         let subscribers = {
             let mut inner = self.inner.borrow_mut();
             inner.value = value.clone();
-            inner.subscribers.iter().map(|(_, cb)| Rc::clone(cb)).collect::<Vec<_>>()
+            inner
+                .subscribers
+                .iter()
+                .map(|(_, cb)| Rc::clone(cb))
+                .collect::<Vec<_>>()
         };
         for cb in subscribers {
             cb(&value);
@@ -92,7 +98,11 @@ impl<T: Clone + 'static> Property<T> {
         };
         let subscribers = {
             let inner = self.inner.borrow();
-            inner.subscribers.iter().map(|(_, cb)| Rc::clone(cb)).collect::<Vec<_>>()
+            inner
+                .subscribers
+                .iter()
+                .map(|(_, cb)| Rc::clone(cb))
+                .collect::<Vec<_>>()
         };
         for cb in subscribers {
             cb(&new_value);
