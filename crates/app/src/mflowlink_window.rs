@@ -508,6 +508,9 @@ fn build_model_canvas(vm: &Rc<MflowLinkViewModel>) -> GtkBox {
         let vm = vm.clone();
         let user_pan = user_pan.clone();
         canvas.set_draw_func(move |_a, ctx, w, h| {
+            // In live mode the active block (simulationActiveBlock) gets the
+            // execution halo so you can watch the solver walk the diagram.
+            let active = vm.active_block.get();
             vm.document.with(|doc| {
                 let bounds = flow_render::content_bounds(doc);
                 let mut vp = fit_viewport(bounds, w as f64, h as f64);
@@ -516,10 +519,23 @@ fn build_model_canvas(vm: &Rc<MflowLinkViewModel>) -> GtkBox {
                 let bps = std::collections::BTreeMap::new();
                 let algebraic = doc.algebraic_loop_nodes();
                 flow_render::draw_document(
-                    ctx, w as f64, h as f64, doc, vp, None, &bps, None, &algebraic,
+                    ctx,
+                    w as f64,
+                    h as f64,
+                    doc,
+                    vp,
+                    None,
+                    &bps,
+                    active.as_deref(),
+                    &algebraic,
                 );
             });
         });
+    }
+    // Redraw the model when the active block changes so the halo follows along.
+    {
+        let canvas = canvas.clone();
+        vm.active_block.subscribe(move |_| canvas.queue_draw());
     }
 
     // Middle-button drag pans the model (offset from the pan at drag start).
@@ -631,9 +647,7 @@ fn build_scopes(app: &Rc<AppState>, vm: &Rc<MflowLinkViewModel>, path: Option<Pa
                     return;
                 }
                 for i in 0..n {
-                    let name = vm
-                        .trace
-                        .with(|t| t.signal_name(i).unwrap_or("signal").to_string());
+                    let name = vm.scope_name(i).unwrap_or_else(|| "signal".to_string());
                     tiles.append(&scope_label(&name));
                     let da = DrawingArea::new();
                     da.set_size_request(-1, 130);
@@ -646,10 +660,14 @@ fn build_scopes(app: &Rc<AppState>, vm: &Rc<MflowLinkViewModel>, path: Option<Pa
                     let title = name.clone();
                     let hover_draw = hover.clone();
                     da.set_draw_func(move |_a, ctx, w, h| {
-                        let (mut xs, mut ys) = vm2.trace.with(|t| t.series(idx));
-                        // Only draw up to the playback cursor (live edge while
-                        // collecting; scrubbed by play/step afterwards).
-                        let n = vm2.cursor.get().min(xs.len());
+                        let (mut xs, mut ys) = vm2.scope_series(idx);
+                        // Live mode shows every streamed sample; one-shot CSV
+                        // replay draws only up to the scrubbable playback cursor.
+                        let n = if vm2.live.get() {
+                            xs.len()
+                        } else {
+                            vm2.cursor.get().min(xs.len())
+                        };
                         xs.truncate(n);
                         ys.truncate(n);
                         let fig = PlotFigure::series(

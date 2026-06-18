@@ -3,6 +3,8 @@
 //! `matlabc -simulate` output. The GTK window subscribes to `trace`/`state` and
 //! renders scope tiles; it owns the subprocess and calls the verb methods here.
 
+use std::collections::BTreeMap;
+
 use crate::models::flowchart::FlowchartDocument;
 use crate::observable::Property;
 use crate::services::sim_dap::SimEvent;
@@ -33,6 +35,9 @@ pub struct MflowLinkViewModel {
     pub major_step: Property<i64>,
     /// The block currently being evaluated (drives the active-block halo).
     pub active_block: Property<Option<String>>,
+    /// Live mode: per-edge `(t, value)` samples from `signalSample` events,
+    /// keyed by edge id (insertion-ordered by `BTreeMap`). Feeds the scopes.
+    pub live_signals: Property<BTreeMap<String, Vec<(f64, f64)>>>,
 }
 
 impl MflowLinkViewModel {
@@ -47,6 +52,7 @@ impl MflowLinkViewModel {
             sim_time: Property::new(0.0),
             major_step: Property::new(0),
             active_block: Property::new(None),
+            live_signals: Property::new(BTreeMap::new()),
         }
     }
 
@@ -75,10 +81,14 @@ impl MflowLinkViewModel {
                     self.state.set(SimState::Paused);
                 }
             }
-            // Signal samples feed the live scopes (#53); zero-crossings and
-            // snapshots are surfaced by later slices.
-            SimEvent::Signal { .. } | SimEvent::ZeroCrossing { .. } | SimEvent::Snapshot { .. } => {
+            SimEvent::Signal { edge_id, t, value } => {
+                self.live_signals
+                    .update(|m| m.entry(edge_id.clone()).or_default().push((*t, *value)));
+                // Drive the scope redraw subscription (shared with CSV mode).
+                self.sample_count.update(|c| *c += 1);
             }
+            // Zero-crossings and snapshots are surfaced by later slices.
+            SimEvent::ZeroCrossing { .. } | SimEvent::Snapshot { .. } => {}
         }
     }
 
@@ -160,10 +170,39 @@ impl MflowLinkViewModel {
         self.sim_time.set(0.0);
         self.major_step.set(0);
         self.active_block.set(None);
+        self.live_signals.set(BTreeMap::new());
     }
 
+    /// Number of plotted signals — live edges in live mode, else trace columns.
     pub fn signal_count(&self) -> usize {
-        self.trace.with(SimTrace::signal_count)
+        if self.live.get() {
+            self.live_signals.with(BTreeMap::len)
+        } else {
+            self.trace.with(SimTrace::signal_count)
+        }
+    }
+
+    /// Name of scope signal `i` (edge id in live mode, else trace column).
+    pub fn scope_name(&self, i: usize) -> Option<String> {
+        if self.live.get() {
+            self.live_signals.with(|m| m.keys().nth(i).cloned())
+        } else {
+            self.trace.with(|t| t.signal_name(i).map(str::to_string))
+        }
+    }
+
+    /// `(time, value)` series for scope signal `i`.
+    pub fn scope_series(&self, i: usize) -> (Vec<f64>, Vec<f64>) {
+        if self.live.get() {
+            self.live_signals.with(|m| {
+                m.values()
+                    .nth(i)
+                    .map(|s| s.iter().copied().unzip())
+                    .unwrap_or_default()
+            })
+        } else {
+            self.trace.with(|t| t.series(i))
+        }
     }
 }
 
@@ -304,5 +343,31 @@ mod tests {
             reason: "entry".into(),
         });
         assert_eq!(vm.state.get(), SimState::Idle);
+    }
+
+    #[test]
+    fn live_signal_samples_accumulate_into_scopes() {
+        use crate::services::sim_dap::SimEvent;
+        let vm = vm();
+        vm.start_live();
+        let sig = |e: &str, t, v| SimEvent::Signal {
+            edge_id: e.into(),
+            t,
+            value: v,
+        };
+        vm.on_sim_event(&sig("scope", 0.0, 1.0));
+        vm.on_sim_event(&sig("src", 0.0, 5.0));
+        vm.on_sim_event(&sig("scope", 0.1, 2.0));
+        // Two distinct edges → two scope signals (BTreeMap order: scope, src).
+        assert_eq!(vm.signal_count(), 2);
+        assert_eq!(vm.scope_name(0).as_deref(), Some("scope"));
+        let (xs, ys) = vm.scope_series(0);
+        assert_eq!(xs, vec![0.0, 0.1]);
+        assert_eq!(ys, vec![1.0, 2.0]);
+        // sample_count is bumped so the scope panel redraws.
+        assert_eq!(vm.sample_count.get(), 3);
+        // Reset clears the live buffer.
+        vm.reset();
+        assert_eq!(vm.signal_count(), 0);
     }
 }
