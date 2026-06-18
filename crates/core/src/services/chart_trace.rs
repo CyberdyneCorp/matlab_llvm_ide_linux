@@ -14,6 +14,8 @@
 
 use serde_json::Value;
 
+use super::dap::DapMessage;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ChartEvent {
     StateEnter { id: String },
@@ -56,19 +58,15 @@ impl ChartEvent {
     }
 }
 
-/// Parse one trace line. Returns `None` for blank / non-JSON / malformed lines.
-pub fn parse_chart_event(line: &str) -> Option<ChartEvent> {
-    let line = line.trim();
-    if !line.starts_with('{') {
-        return None;
-    }
-    let v: Value = serde_json::from_str(line).ok()?;
-    let kind = v.get("kind")?.as_str()?;
-    let s = |k: &str| v.get(k).and_then(Value::as_str).map(str::to_string);
-    let i = |k: &str| v.get(k).and_then(Value::as_i64);
-    Some(match kind {
-        "stateEnter" => ChartEvent::StateEnter { id: s("id")? },
-        "stateExit" => ChartEvent::StateExit { id: s("id")? },
+/// Map an event `kind` plus the object carrying its fields to a [`ChartEvent`].
+/// Shared by the one-shot `-emit-trace` line parser and the live `stateChart/*`
+/// DAP-event parser (the fields live at top level on a line, in `body` on DAP).
+fn chart_event(kind: &str, fields: &Value) -> ChartEvent {
+    let s = |k: &str| fields.get(k).and_then(Value::as_str).map(str::to_string);
+    let i = |k: &str| fields.get(k).and_then(Value::as_i64);
+    match kind {
+        "stateEnter" => ChartEvent::StateEnter { id: s("id").unwrap_or_default() },
+        "stateExit" => ChartEvent::StateExit { id: s("id").unwrap_or_default() },
         "transitionFired" => ChartEvent::TransitionFired {
             id: s("id").unwrap_or_default(),
             src: s("src").unwrap_or_default(),
@@ -77,10 +75,29 @@ pub fn parse_chart_event(line: &str) -> Option<ChartEvent> {
         "superStepBegin" => ChartEvent::SuperStepBegin { iteration: i("iteration").unwrap_or(0) },
         "superStepEnd" => ChartEvent::SuperStepEnd {
             iteration: i("iteration").unwrap_or(0),
-            quiescent: v.get("quiescent").and_then(Value::as_bool).unwrap_or(false),
+            quiescent: fields.get("quiescent").and_then(Value::as_bool).unwrap_or(false),
         },
         other => ChartEvent::Other { kind: other.to_string() },
-    })
+    }
+}
+
+/// Parse one `-emit-trace` line. Returns `None` for blank / non-JSON / malformed.
+pub fn parse_chart_event(line: &str) -> Option<ChartEvent> {
+    let line = line.trim();
+    if !line.starts_with('{') {
+        return None;
+    }
+    let v: Value = serde_json::from_str(line).ok()?;
+    let kind = v.get("kind")?.as_str()?;
+    Some(chart_event(kind, &v))
+}
+
+/// Interpret a `stateChart/*` DAP event (from `-simulate --sim-dap` on a chart)
+/// as a [`ChartEvent`]. Returns `None` for non-chart messages.
+pub fn parse_chart_dap_event(msg: &DapMessage) -> Option<ChartEvent> {
+    let DapMessage::Event { event, body } = msg else { return None };
+    let kind = event.strip_prefix("stateChart/")?;
+    Some(chart_event(kind, body))
 }
 
 #[cfg(test)]
@@ -139,5 +156,30 @@ mod tests {
             parse_chart_event(r#"{"kind":"customEvent","foo":1}"#),
             Some(ChartEvent::Other { kind: "customEvent".into() })
         );
+    }
+
+    #[test]
+    fn parses_statechart_dap_events() {
+        use super::super::dap::parse_message;
+        let ev = |body: &str| parse_chart_dap_event(&parse_message(body).unwrap());
+        assert_eq!(
+            ev(r#"{"type":"event","event":"stateChart/stateEnter","body":{"id":"Charge","t":1.0}}"#),
+            Some(ChartEvent::StateEnter { id: "Charge".into() })
+        );
+        assert_eq!(
+            ev(r#"{"type":"event","event":"stateChart/transitionFired","body":{"id":"t","src":"A","dst":"B"}}"#),
+            Some(ChartEvent::TransitionFired { id: "t".into(), src: "A".into(), dst: "B".into() })
+        );
+        assert_eq!(
+            ev(r#"{"type":"event","event":"stateChart/superStepEnd","body":{"iteration":2,"quiescent":true}}"#),
+            Some(ChartEvent::SuperStepEnd { iteration: 2, quiescent: true })
+        );
+        // Non-chart messages are ignored.
+        assert!(ev(r#"{"type":"event","event":"stopped","body":{"reason":"step"}}"#).is_none());
+        assert!(parse_chart_dap_event(
+            &parse_message(r#"{"type":"response","request_seq":1,"command":"x","success":true,"body":{}}"#)
+                .unwrap()
+        )
+        .is_none());
     }
 }

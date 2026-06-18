@@ -11,19 +11,27 @@ use std::rc::Rc;
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, DrawingArea, Label, ListBox, Orientation, ScrolledWindow, Window};
 
+use serde_json::json;
+
 use matforge_core::models::flowchart::FlowchartDocument;
 use matforge_core::models::ConsoleLevel;
+use matforge_core::services::chart_trace::parse_chart_dap_event;
+use matforge_core::services::dap::{parse_message, DapMessage};
 use matforge_core::viewmodels::{SimState, StateChartViewModel};
 
 use crate::app_state::AppState;
 use crate::flow_render::{self, Viewport};
-use crate::process::SimHandle;
+use crate::process::{DapSession, SimHandle};
+
+/// A live `matlabc -simulate --sim-dap` chart session (vs one-shot -emit-trace).
+type LiveSession = Rc<RefCell<Option<DapSession>>>;
 
 /// Open a state-machine window for a state-chart document. `autostart` runs the
 /// trace immediately (used by the `MATFORGE_STATECHART` demo hook).
 pub fn open(app: &Rc<AppState>, document: FlowchartDocument, path: Option<PathBuf>, autostart: bool) {
     let vm = Rc::new(StateChartViewModel::new(document));
     let sim: Rc<RefCell<Option<SimHandle>>> = Rc::new(RefCell::new(None));
+    let dap: LiveSession = Rc::new(RefCell::new(None));
 
     // Publish state for end-to-end tests (no-op unless $MATFORGE_E2E_STATE set).
     {
@@ -50,7 +58,7 @@ pub fn open(app: &Rc<AppState>, document: FlowchartDocument, path: Option<PathBu
 
     let root = GtkBox::new(Orientation::Vertical, 0);
     root.add_css_class("mf-window");
-    root.append(&build_transport(app, &vm, &sim, path.clone()));
+    root.append(&build_transport(app, &vm, &sim, &dap, path.clone()));
 
     let split = gtk::Paned::new(Orientation::Horizontal);
     split.set_wide_handle(true);
@@ -63,9 +71,11 @@ pub fn open(app: &Rc<AppState>, document: FlowchartDocument, path: Option<PathBu
 
     {
         let sim = sim.clone();
+        let dap = dap.clone();
         let vm = vm.clone();
         window.connect_close_request(move |_| {
             *sim.borrow_mut() = None;
+            *dap.borrow_mut() = None;
             vm.reset();
             crate::e2e::clear_statechart_probe();
             gtk::glib::Propagation::Proceed
@@ -82,6 +92,7 @@ fn build_transport(
     app: &Rc<AppState>,
     vm: &Rc<StateChartViewModel>,
     sim: &Rc<RefCell<Option<SimHandle>>>,
+    dap: &LiveSession,
     path: Option<PathBuf>,
 ) -> GtkBox {
     let bar = GtkBox::new(Orientation::Horizontal, 6);
@@ -94,6 +105,12 @@ fn build_transport(
     let play = Button::with_label("▶ Run");
     play.add_css_class("mf-tool");
     play.add_css_class("mf-run");
+    let super_step = Button::with_label("Step Super-Step");
+    super_step.add_css_class("mf-tool");
+    super_step.set_tooltip_text(Some("Fire transitions until quiescent (live)"));
+    let transition = Button::with_label("Step Transition");
+    transition.add_css_class("mf-tool");
+    transition.set_tooltip_text(Some("Fire exactly one transition (live)"));
     let stop = Button::with_label("⏹ Stop");
     stop.add_css_class("mf-tool");
     stop.add_css_class("mf-stop");
@@ -102,26 +119,40 @@ fn build_transport(
     {
         let app = app.clone();
         let vm = vm.clone();
-        let sim = sim.clone();
-        play.connect_clicked(move |_| start_trace(&app, &vm, &sim, path.as_deref()));
+        let dap = dap.clone();
+        play.connect_clicked(move |_| start_live_chart(&app, &vm, &dap, path.as_deref()));
+    }
+    {
+        let dap = dap.clone();
+        super_step.connect_clicked(move |_| send_chart(&dap, "stateChart/stepSuperStep"));
+    }
+    {
+        let dap = dap.clone();
+        transition.connect_clicked(move |_| send_chart(&dap, "stateChart/stepTransition"));
     }
     {
         let vm = vm.clone();
         let sim = sim.clone();
+        let dap = dap.clone();
         stop.connect_clicked(move |_| {
             *sim.borrow_mut() = None;
+            *dap.borrow_mut() = None;
             vm.finish();
         });
     }
     {
         let vm = vm.clone();
         let sim = sim.clone();
+        let dap = dap.clone();
         reset.connect_clicked(move |_| {
             *sim.borrow_mut() = None;
+            *dap.borrow_mut() = None;
             vm.reset();
         });
     }
     bar.append(&play);
+    bar.append(&super_step);
+    bar.append(&transition);
     bar.append(&stop);
     bar.append(&reset);
 
@@ -155,6 +186,79 @@ fn build_transport(
         });
     }
     bar
+}
+
+/// Send a generic DAP request to the live chart session.
+fn send_dap(dap: &LiveSession, command: &str, args: Option<serde_json::Value>) {
+    if let Some(s) = dap.borrow_mut().as_mut() {
+        let frame = s.client.request(command, args);
+        let _ = s.write_frame(&frame);
+    }
+}
+
+/// Send a no-argument `stateChart/*` control request.
+fn send_chart(dap: &LiveSession, command: &str) {
+    send_dap(dap, command, None);
+}
+
+/// Boot a live `matlabc -simulate --sim-dap` chart session: handshake, then fold
+/// the `stateChart/*` event stream into the view model. The transport drives it
+/// with stepSuperStep / stepTransition.
+fn start_live_chart(
+    app: &Rc<AppState>,
+    vm: &Rc<StateChartViewModel>,
+    dap: &LiveSession,
+    path: Option<&Path>,
+) {
+    let file = match path {
+        Some(p) => p.to_path_buf(),
+        None => std::env::temp_dir().join("matforge_chart.mflow"),
+    };
+    let json = match vm.document.with(matforge_core::services::flowchart_codec::encode_string) {
+        Ok(j) => j,
+        Err(e) => return app.vm.console.log(ConsoleLevel::Error, format!("encode: {e}")),
+    };
+    if std::fs::write(&file, json).is_err() {
+        return app.vm.console.log(ConsoleLevel::Error, "could not write chart");
+    }
+    if !app.settings.matlabc_path.exists() {
+        return app.vm.console.log(ConsoleLevel::Error, "matlabc not found");
+    }
+
+    vm.start_live();
+    let vm2 = vm.clone();
+    let dap2 = dap.clone();
+    let program = file.to_string_lossy().into_owned();
+    let started = DapSession::start_simulate(&app.settings.matlabc_path, &file, move |body| {
+        if body == crate::process::DAP_EXIT {
+            vm2.finish();
+            return;
+        }
+        let Some(msg) = parse_message(&body) else { return };
+        match &msg {
+            DapMessage::Response { command, .. } if command.as_str() == "initialize" => {
+                send_dap(&dap2, "launch", Some(json!({ "program": program, "stopOnEntry": true })));
+            }
+            DapMessage::Event { event, .. } if event.as_str() == "initialized" => {
+                send_dap(&dap2, "configurationDone", None);
+            }
+            _ => {
+                if let Some(ev) = parse_chart_dap_event(&msg) {
+                    vm2.apply_event(ev);
+                }
+            }
+        }
+    });
+    match started {
+        Ok(session) => {
+            *dap.borrow_mut() = Some(session);
+            send_dap(dap, "initialize", Some(json!({ "clientID": "matforge", "adapterID": "matlabc" })));
+        }
+        Err(e) => {
+            app.vm.console.log(ConsoleLevel::Error, format!("sim-dap: {e}"));
+            vm.reset();
+        }
+    }
 }
 
 fn start_trace(
