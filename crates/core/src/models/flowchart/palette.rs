@@ -142,18 +142,14 @@ impl NodeCategory {
 /// Every addable block for `schema`, grouped under its category in display order
 /// (empty categories dropped). The structural `Start`/`End` scaffold is excluded
 /// — they already live on the canvas. Drives the Block Library window.
-pub fn library_blocks(
-    schema: super::document::SchemaKind,
-) -> Vec<(NodeCategory, Vec<NodeKind>)> {
+pub fn library_blocks(schema: super::document::SchemaKind) -> Vec<(NodeCategory, Vec<NodeKind>)> {
     NodeCategory::order_for(schema)
         .into_iter()
         .filter_map(|cat| {
             let kinds: Vec<NodeKind> = NodeKind::ALL
                 .iter()
                 .copied()
-                .filter(|k| {
-                    k.category() == cat && !matches!(k, NodeKind::Start | NodeKind::End)
-                })
+                .filter(|k| k.category() == cat && !matches!(k, NodeKind::Start | NodeKind::End))
                 .collect();
             (!kinds.is_empty()).then_some((cat, kinds))
         })
@@ -372,9 +368,9 @@ impl SignalFlowParamSpec {
         }
         match &self.constraint {
             ParamConstraint::Text => Ok(()),
-            ParamConstraint::Number => {
-                parse_real(t).map(|_| ()).ok_or_else(|| format!("“{t}” is not a number"))
-            }
+            ParamConstraint::Number => parse_real(t)
+                .map(|_| ())
+                .ok_or_else(|| format!("“{t}” is not a number")),
             ParamConstraint::Integer { min } => {
                 let v = parse_real(t).ok_or_else(|| format!("“{t}” is not a number"))?;
                 if v.fract() != 0.0 {
@@ -413,7 +409,10 @@ fn parse_real(s: &str) -> Option<f64> {
 
 /// Validate a comma/space-separated list of reals (polynomial coefficients).
 fn validate_coeff_list(s: &str) -> Result<(), String> {
-    let toks: Vec<&str> = s.split([',', ' ', '\t']).filter(|t| !t.is_empty()).collect();
+    let toks: Vec<&str> = s
+        .split([',', ' ', '\t'])
+        .filter(|t| !t.is_empty())
+        .collect();
     if toks.is_empty() {
         return Err("expected at least one coefficient".to_string());
     }
@@ -427,7 +426,10 @@ fn validate_coeff_list(s: &str) -> Result<(), String> {
 
 /// Validate a MATLAB matrix literal (`[1 2; 3 4]`) or a bare scalar/row.
 fn validate_matrix(s: &str) -> Result<(), String> {
-    let inner = s.strip_prefix('[').and_then(|r| r.strip_suffix(']')).unwrap_or(s);
+    let inner = s
+        .strip_prefix('[')
+        .and_then(|r| r.strip_suffix(']'))
+        .unwrap_or(s);
     if inner.trim().is_empty() {
         return Err("matrix is empty".to_string());
     }
@@ -455,14 +457,23 @@ mod tests {
         // Signal-flow shows many blocks across its categories, all signal-flow,
         // ordered with Sources first; no structural Start/End leak in.
         let sig = library_blocks(SchemaKind::SignalFlow);
-        assert!(sig.len() >= 4, "expected several signal categories, got {}", sig.len());
+        assert!(
+            sig.len() >= 4,
+            "expected several signal categories, got {}",
+            sig.len()
+        );
         assert_eq!(sig[0].0, NodeCategory::SignalSources);
         let total: usize = sig.iter().map(|(_, ks)| ks.len()).sum();
-        assert!(total > 6, "library should list more than the curated palette ({total})");
+        assert!(
+            total > 6,
+            "library should list more than the curated palette ({total})"
+        );
         for (cat, kinds) in &sig {
             assert!(cat.is_signal_flow());
             assert!(!kinds.is_empty());
-            assert!(kinds.iter().all(|k| !matches!(k, NodeKind::Start | NodeKind::End)));
+            assert!(kinds
+                .iter()
+                .all(|k| !matches!(k, NodeKind::Start | NodeKind::End)));
         }
 
         // Control-flow and state-chart produce their own non-empty groupings.
@@ -500,16 +511,32 @@ mod tests {
     fn every_category_has_label_accent_and_one_dialect() {
         use NodeCategory::*;
         let all = [
-            ControlFlow, Data, Io, Functions, Matrix, Other,
-            SignalSources, SignalSinks, SignalContinuous, SignalDiscrete,
-            SignalMath, SignalRouting, SignalLookup, SignalComposite,
-            ChartStates, ChartJunctions, ChartFunctions,
+            ControlFlow,
+            Data,
+            Io,
+            Functions,
+            Matrix,
+            Other,
+            SignalSources,
+            SignalSinks,
+            SignalContinuous,
+            SignalDiscrete,
+            SignalMath,
+            SignalRouting,
+            SignalLookup,
+            SignalComposite,
+            ChartStates,
+            ChartJunctions,
+            ChartFunctions,
         ];
         for c in all {
             assert!(!c.label().is_empty(), "{c:?} has no label");
             let _ = c.accent(); // every arm returns a color
-            // Signal/state predicates partition the dialect-specific categories.
-            assert!(!(c.is_signal_flow() && c.is_state_chart()), "{c:?} in two dialects");
+                                // Signal/state predicates partition the dialect-specific categories.
+            assert!(
+                !(c.is_signal_flow() && c.is_state_chart()),
+                "{c:?} in two dialects"
+            );
         }
         // The control-flow categories are neither signal nor chart.
         for c in [ControlFlow, Data, Io, Functions, Matrix, Other] {
@@ -563,7 +590,9 @@ mod tests {
     fn validate_coeff_matrix_signs_enum() {
         assert!(spec(ParamConstraint::CoeffList).validate("1, 2, 3").is_ok());
         assert!(spec(ParamConstraint::CoeffList).validate("1 2 3").is_ok());
-        assert!(spec(ParamConstraint::CoeffList).validate("1, x, 3").is_err());
+        assert!(spec(ParamConstraint::CoeffList)
+            .validate("1, x, 3")
+            .is_err());
         assert!(spec(ParamConstraint::Matrix).validate("[1 2; 3 4]").is_ok());
         assert!(spec(ParamConstraint::Matrix).validate("0").is_ok());
         assert!(spec(ParamConstraint::Matrix).validate("[1 a]").is_err());

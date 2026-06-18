@@ -48,7 +48,10 @@ impl FlowchartDocument {
         if self.schema_kind() != SchemaKind::SignalFlow {
             return std::collections::BTreeSet::new();
         }
-        self.flows.first().map(super::analysis::algebraic_loop_nodes).unwrap_or_default()
+        self.flows
+            .first()
+            .map(super::analysis::algebraic_loop_nodes)
+            .unwrap_or_default()
     }
 
     /// Fresh empty document for the given dialect.
