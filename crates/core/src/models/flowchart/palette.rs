@@ -265,6 +265,16 @@ impl SignalFlowParamSpec {
                 Self::d("lowerLimit", "Lower Limit", -1.0),
             ],
             SignalIntegrator => vec![Self::d("initialCondition", "Initial Condition", 0.0)],
+            // Parallel-form PID: C(s) = Kp + Ki/s + Kd·N/(s+N). Optional output
+            // saturation limits (upperLimit/lowerLimit) are honoured by the
+            // compiler but omitted here — they need "empty = no limit" handling.
+            SignalPid => vec![
+                Self::d("Kp", "Proportional (Kp)", 1.0),
+                Self::d("Ki", "Integral (Ki)", 0.0),
+                Self::d("Kd", "Derivative (Kd)", 0.0),
+                Self::d("N", "Filter coefficient (N)", 100.0),
+                Self::d("initialIntegral", "Initial Integral", 0.0),
+            ],
             SignalTransferFcn => vec![
                 Self::s("num", "Numerator coeffs", "1").coeffs(),
                 Self::s("den", "Denominator coeffs", "1, 1").coeffs(),
@@ -556,6 +566,26 @@ mod tests {
 
         let sum = SignalFlowParamSpec::fields(NodeKind::SignalSum);
         assert_eq!(sum[0].default_value, ParamValue::Str("++".into()));
+
+        // PID exposes the gains + filter coefficient; keys match the compiler's
+        // signal_pid evaluator (docs/mflowlink_blocks.md).
+        let pid = SignalFlowParamSpec::fields(NodeKind::SignalPid);
+        let keys: Vec<&str> = pid.iter().map(|f| f.key).collect();
+        assert_eq!(keys, ["Kp", "Ki", "Kd", "N", "initialIntegral"]);
+        assert!(pid
+            .iter()
+            .all(|f| f.validate(&f.default_value.display_string()).is_ok()));
+    }
+
+    #[test]
+    fn pid_is_continuous_and_not_a_loop_breaker() {
+        // Direct-feedthrough (Kp + Kd·N path), so PID must NOT break a loop.
+        assert!(NodeKind::SignalPid.is_signal_flow());
+        assert_eq!(
+            NodeKind::SignalPid.category(),
+            NodeCategory::SignalContinuous
+        );
+        assert!(!NodeKind::SignalPid.breaks_algebraic_loop());
     }
 
     #[test]
