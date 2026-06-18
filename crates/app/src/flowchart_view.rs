@@ -729,7 +729,9 @@ fn fit_view(fc: &Rc<FlowchartViewModel>, cw: f64, ch: f64) {
 fn analyze_block(app: &Rc<AppState>, node: &FlowNode) {
     use matforge_core::models::{PlotFigure, PlotKind};
     use matforge_core::services::control_analysis::TransferFunction;
-    let Some(tf) = TransferFunction::from_node(node) else { return };
+    let Some(tf) = TransferFunction::from_node(node) else {
+        return;
+    };
     let name = if node.label.is_empty() {
         node.kind.display_name().to_string()
     } else {
@@ -747,10 +749,16 @@ fn analyze_block(app: &Rc<AppState>, node: &FlowNode) {
     let mut idx = app.vm.plots.figures.with(|f| f.len() as i32);
     let mut add = |title: String, xs: Vec<f64>, ys: Vec<f64>| {
         idx += 1;
-        app.vm.plots.add(PlotFigure::series(idx, title, PlotKind::Line2D, xs, ys));
+        app.vm
+            .plots
+            .add(PlotFigure::series(idx, title, PlotKind::Line2D, xs, ys));
     };
     add(format!("{name} — Step response"), st, sy);
-    add(format!("{name} — Bode magnitude dB (x=log10 ω)"), log_w.clone(), mag);
+    add(
+        format!("{name} — Bode magnitude dB (x=log10 ω)"),
+        log_w.clone(),
+        mag,
+    );
     add(format!("{name} — Bode phase deg (x=log10 ω)"), log_w, phase);
     add(format!("{name} — Nyquist (Re vs Im)"), re, im);
     app.vm.toast.show("Added Bode / step / Nyquist to Plots");

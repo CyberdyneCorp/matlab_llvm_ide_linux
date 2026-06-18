@@ -49,7 +49,11 @@ impl FlowNode {
 
     /// A `params` value as its display string, if present.
     pub fn param_str(&self, key: &str) -> Option<String> {
-        self.data.params.as_ref()?.get(key).map(ParamValue::display_string)
+        self.data
+            .params
+            .as_ref()?
+            .get(key)
+            .map(ParamValue::display_string)
     }
 
     /// A `params` value parsed as `f64`, if present and numeric.

@@ -37,14 +37,20 @@ impl Cx {
         Cx { re, im }
     }
     fn mul(self, o: Cx) -> Cx {
-        Cx::new(self.re * o.re - self.im * o.im, self.re * o.im + self.im * o.re)
+        Cx::new(
+            self.re * o.re - self.im * o.im,
+            self.re * o.im + self.im * o.re,
+        )
     }
     fn add(self, o: Cx) -> Cx {
         Cx::new(self.re + o.re, self.im + o.im)
     }
     fn div(self, o: Cx) -> Cx {
         let d = o.re * o.re + o.im * o.im;
-        Cx::new((self.re * o.re + self.im * o.im) / d, (self.im * o.re - self.re * o.im) / d)
+        Cx::new(
+            (self.re * o.re + self.im * o.im) / d,
+            (self.im * o.re - self.re * o.im) / d,
+        )
     }
     fn abs(self) -> f64 {
         self.re.hypot(self.im)
@@ -81,12 +87,7 @@ impl TransferFunction {
 
     /// Bode/Nyquist samples over `points` log-spaced frequencies in
     /// `[w_min, w_max]` rad/s. Phase is unwrapped for a continuous curve.
-    pub fn frequency_response(
-        &self,
-        w_min: f64,
-        w_max: f64,
-        points: usize,
-    ) -> Vec<FreqPoint> {
+    pub fn frequency_response(&self, w_min: f64, w_max: f64, points: usize) -> Vec<FreqPoint> {
         let points = points.max(2);
         let (lo, hi) = (w_min.max(1e-12).log10(), w_max.max(1e-12).log10());
         let mut out = Vec::with_capacity(points);
@@ -144,7 +145,7 @@ impl TransferFunction {
             e[pad + i] = c / lead;
         }
         let feed = e[0]; // D term (non-zero only when deg num == deg den)
-        // Strictly-proper numerator p_k = e_k − D·d_k, k = 1..n.
+                         // Strictly-proper numerator p_k = e_k − D·d_k, k = 1..n.
         let p: Vec<f64> = (1..=order).map(|k| e[k] - feed * d[k]).collect();
 
         let deriv = |x: &[f64], u: f64| -> Vec<f64> {
@@ -193,7 +194,10 @@ impl TransferFunction {
 
 /// Drop leading zero coefficients (so a `"0, 1, 1"` denominator reads as order 2).
 fn trim_leading(coeffs: &[f64]) -> Vec<f64> {
-    let first = coeffs.iter().position(|c| *c != 0.0).unwrap_or(coeffs.len());
+    let first = coeffs
+        .iter()
+        .position(|c| *c != 0.0)
+        .unwrap_or(coeffs.len());
     coeffs[first..].to_vec()
 }
 
@@ -220,7 +224,10 @@ mod tests {
     use std::collections::BTreeMap;
 
     fn tf(num: &[f64], den: &[f64]) -> TransferFunction {
-        TransferFunction { num: num.to_vec(), den: den.to_vec() }
+        TransferFunction {
+            num: num.to_vec(),
+            den: den.to_vec(),
+        }
     }
 
     #[test]
@@ -229,17 +236,37 @@ mod tests {
         let r = tf(&[1.0], &[1.0, 1.0]).frequency_response(0.01, 100.0, 2001);
         let dc = r.first().unwrap();
         assert!(dc.mag_db.abs() < 0.01, "DC mag {} dB", dc.mag_db);
-        let corner = r.iter().min_by(|a, b| (a.w - 1.0).abs().total_cmp(&(b.w - 1.0).abs())).unwrap();
-        assert!((corner.mag_db - -3.0103).abs() < 0.05, "corner mag {}", corner.mag_db);
-        assert!((corner.phase_deg - -45.0).abs() < 0.5, "corner phase {}", corner.phase_deg);
+        let corner = r
+            .iter()
+            .min_by(|a, b| (a.w - 1.0).abs().total_cmp(&(b.w - 1.0).abs()))
+            .unwrap();
+        assert!(
+            (corner.mag_db - -3.0103).abs() < 0.05,
+            "corner mag {}",
+            corner.mag_db
+        );
+        assert!(
+            (corner.phase_deg - -45.0).abs() < 0.5,
+            "corner phase {}",
+            corner.phase_deg
+        );
     }
 
     #[test]
     fn first_order_step_matches_analytic() {
         // 1/(s+1) unit step → 1 − e^{−t}.
         let y = tf(&[1.0], &[1.0, 1.0]).step_response(6.0, 0.001);
-        let at = |t: f64| y.iter().min_by(|a, b| (a.0 - t).abs().total_cmp(&(b.0 - t).abs())).unwrap().1;
-        assert!((at(1.0) - (1.0 - (-1.0_f64).exp())).abs() < 1e-3, "y(1)={}", at(1.0));
+        let at = |t: f64| {
+            y.iter()
+                .min_by(|a, b| (a.0 - t).abs().total_cmp(&(b.0 - t).abs()))
+                .unwrap()
+                .1
+        };
+        assert!(
+            (at(1.0) - (1.0 - (-1.0_f64).exp())).abs() < 1e-3,
+            "y(1)={}",
+            at(1.0)
+        );
         assert!((at(6.0) - 1.0).abs() < 0.01, "y(6)={}", at(6.0));
         assert!(y[0].1.abs() < 1e-9, "y(0)={}", y[0].1);
     }
@@ -266,14 +293,24 @@ mod tests {
             map.insert(k.to_string(), v.clone());
         }
         data.params = Some(map);
-        FlowNode::new("n", kind, "n", kind.default_ports(), data, FlowUi::default())
+        FlowNode::new(
+            "n",
+            kind,
+            "n",
+            kind.default_ports(),
+            data,
+            FlowUi::default(),
+        )
     }
 
     #[test]
     fn from_node_transfer_fcn() {
         let n = node(
             NodeKind::SignalTransferFcn,
-            &[("num", ParamValue::Str("1".into())), ("den", ParamValue::Str("1, 2, 1".into()))],
+            &[
+                ("num", ParamValue::Str("1".into())),
+                ("den", ParamValue::Str("1, 2, 1".into())),
+            ],
         );
         let t = TransferFunction::from_node(&n).unwrap();
         assert_eq!(t.num, vec![1.0]);
