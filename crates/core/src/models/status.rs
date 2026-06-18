@@ -38,8 +38,11 @@ pub enum CenterLayoutMode {
 }
 
 impl CenterLayoutMode {
-    pub const ALL: [CenterLayoutMode; 3] =
-        [CenterLayoutMode::Split, CenterLayoutMode::EditorOnly, CenterLayoutMode::ConsoleOnly];
+    pub const ALL: [CenterLayoutMode; 3] = [
+        CenterLayoutMode::Split,
+        CenterLayoutMode::EditorOnly,
+        CenterLayoutMode::ConsoleOnly,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -133,14 +136,19 @@ mod tests {
         assert_eq!(SearchMode::Content.label(), "In files");
         assert_eq!(SearchMode::Both.label(), "Both");
         assert!(SearchMode::Both.matches_filenames() && SearchMode::Both.matches_content());
-        assert!(SearchMode::Filename.matches_filenames() && !SearchMode::Filename.matches_content());
+        assert!(
+            SearchMode::Filename.matches_filenames() && !SearchMode::Filename.matches_content()
+        );
         assert!(SearchMode::Content.matches_content() && !SearchMode::Content.matches_filenames());
     }
 
     #[test]
     fn search_scope_label() {
         assert_eq!(SearchScope::Project.label(), "Entire project");
-        assert_eq!(SearchScope::Folder(PathBuf::from("/a/b/proj")).label(), "proj");
+        assert_eq!(
+            SearchScope::Folder(PathBuf::from("/a/b/proj")).label(),
+            "proj"
+        );
         // A root-ish path with no file name falls back to the full path.
         assert_eq!(SearchScope::Folder(PathBuf::from("/")).label(), "/");
     }

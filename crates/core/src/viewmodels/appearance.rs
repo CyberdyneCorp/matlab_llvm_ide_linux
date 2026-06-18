@@ -111,8 +111,10 @@ impl AppearanceViewModel {
     ) {
         self.theme_id.set(id);
         self.accent.set(accent);
-        self.font_scale.set(font_scale.clamp(FONT_SCALE_MIN, FONT_SCALE_MAX));
-        self.code_font_scale.set(code_font_scale.clamp(FONT_SCALE_MIN, FONT_SCALE_MAX));
+        self.font_scale
+            .set(font_scale.clamp(FONT_SCALE_MIN, FONT_SCALE_MAX));
+        self.code_font_scale
+            .set(code_font_scale.clamp(FONT_SCALE_MIN, FONT_SCALE_MAX));
         self.code_font_family.set(code_font.into());
         self.bump();
     }

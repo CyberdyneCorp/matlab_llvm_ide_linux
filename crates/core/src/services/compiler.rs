@@ -32,7 +32,10 @@ impl CompilerInvocation {
             args.push("-O".to_string());
         }
         args.push(source.to_string_lossy().into_owned());
-        Some(CompilerInvocation { binary: binary.into(), args })
+        Some(CompilerInvocation {
+            binary: binary.into(),
+            args,
+        })
     }
 
     /// Display form for logging (`matlabc -emit-cpp -O foo.m`).
@@ -113,15 +116,25 @@ pub fn parse_diagnostic(line: &str) -> Option<Diagnostic> {
 pub trait CompilerService {
     /// Run `inv`, streaming each stderr line through `on_log`, returning the
     /// captured stdout + exit code.
-    fn run(&self, inv: &CompilerInvocation, on_log: &mut dyn FnMut(&str)) -> std::io::Result<CompileResult>;
+    fn run(
+        &self,
+        inv: &CompilerInvocation,
+        on_log: &mut dyn FnMut(&str),
+    ) -> std::io::Result<CompileResult>;
 }
 
 /// Real `matlabc` runner via `std::process::Command`.
 pub struct ProcessCompilerService;
 
 impl CompilerService for ProcessCompilerService {
-    fn run(&self, inv: &CompilerInvocation, on_log: &mut dyn FnMut(&str)) -> std::io::Result<CompileResult> {
-        let output = std::process::Command::new(&inv.binary).args(&inv.args).output()?;
+    fn run(
+        &self,
+        inv: &CompilerInvocation,
+        on_log: &mut dyn FnMut(&str),
+    ) -> std::io::Result<CompileResult> {
+        let output = std::process::Command::new(&inv.binary)
+            .args(&inv.args)
+            .output()?;
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
         let stderr_lines: Vec<String> = stderr.lines().map(|l| l.to_string()).collect();
@@ -145,12 +158,19 @@ pub struct FakeCompilerService {
 
 impl FakeCompilerService {
     pub fn new(result: CompileResult) -> FakeCompilerService {
-        FakeCompilerService { result, calls: RefCell::new(Vec::new()) }
+        FakeCompilerService {
+            result,
+            calls: RefCell::new(Vec::new()),
+        }
     }
 }
 
 impl CompilerService for FakeCompilerService {
-    fn run(&self, inv: &CompilerInvocation, on_log: &mut dyn FnMut(&str)) -> std::io::Result<CompileResult> {
+    fn run(
+        &self,
+        inv: &CompilerInvocation,
+        on_log: &mut dyn FnMut(&str),
+    ) -> std::io::Result<CompileResult> {
         self.calls.borrow_mut().push(inv.clone());
         for l in &self.result.stderr_lines {
             on_log(l);
@@ -215,7 +235,9 @@ mod tests {
             DiagnosticLevel::Warning
         );
         assert_eq!(
-            parse_diagnostic("a.m:2:3: note: declared here").unwrap().level,
+            parse_diagnostic("a.m:2:3: note: declared here")
+                .unwrap()
+                .level,
             DiagnosticLevel::Note
         );
     }
@@ -231,7 +253,10 @@ mod tests {
     fn process_service_captures_stdout() {
         // Use `echo` as a stand-in process to exercise the real runner.
         let svc = ProcessCompilerService;
-        let inv = CompilerInvocation { binary: "echo".into(), args: vec!["hello".into()] };
+        let inv = CompilerInvocation {
+            binary: "echo".into(),
+            args: vec!["hello".into()],
+        };
         let mut logs = Vec::new();
         let res = svc.run(&inv, &mut |l| logs.push(l.to_string())).unwrap();
         assert_eq!(res.stdout.trim(), "hello");
@@ -261,7 +286,13 @@ mod tests {
             exit_code: 0,
         };
         let fake = FakeCompilerService::new(result.clone());
-        let inv = CompilerInvocation::emit("m", CompilerTarget::C, OptimizationProfile::O0, Path::new("a.m")).unwrap();
+        let inv = CompilerInvocation::emit(
+            "m",
+            CompilerTarget::C,
+            OptimizationProfile::O0,
+            Path::new("a.m"),
+        )
+        .unwrap();
         let mut logs = Vec::new();
         let got = fake.run(&inv, &mut |l| logs.push(l.to_string())).unwrap();
         assert_eq!(got, result);

@@ -64,7 +64,13 @@ pub struct PlotFigure {
 }
 
 impl PlotFigure {
-    pub fn series(index: i32, title: impl Into<String>, kind: PlotKind, xs: Vec<f64>, ys: Vec<f64>) -> PlotFigure {
+    pub fn series(
+        index: i32,
+        title: impl Into<String>,
+        kind: PlotKind,
+        xs: Vec<f64>,
+        ys: Vec<f64>,
+    ) -> PlotFigure {
         PlotFigure {
             id: next_id(),
             index,
@@ -156,7 +162,12 @@ impl PlotFigure {
         if matches!(self.kind, PlotKind::Bar | PlotKind::Histogram) {
             y_min = y_min.min(0.0); // bars sit on the zero baseline
         }
-        Some(PlotView { x_min, x_max, y_min, y_max })
+        Some(PlotView {
+            x_min,
+            x_max,
+            y_min,
+            y_max,
+        })
     }
 
     /// The data point whose x is closest to `x` (for the hover readout).
@@ -221,7 +232,11 @@ pub struct SurfaceCamera {
 impl Default for SurfaceCamera {
     fn default() -> Self {
         // A 3/4 view that reads clearly as 3-D.
-        SurfaceCamera { azimuth: 0.7, elevation: 0.5, zoom: 1.0 }
+        SurfaceCamera {
+            azimuth: 0.7,
+            elevation: 0.5,
+            zoom: 1.0,
+        }
     }
 }
 
@@ -238,7 +253,10 @@ impl SurfaceCamera {
 
     /// Scale the view, clamped to a sane range.
     pub fn zoom_by(&self, factor: f64) -> SurfaceCamera {
-        SurfaceCamera { zoom: (self.zoom * factor).clamp(0.25, 6.0), ..*self }
+        SurfaceCamera {
+            zoom: (self.zoom * factor).clamp(0.25, 6.0),
+            ..*self
+        }
     }
 
     /// Orthographically project a point in the unit cube (`x`,`y` base plane,
@@ -281,7 +299,13 @@ mod tests {
 
     #[test]
     fn series_figure_defaults() {
-        let f = PlotFigure::series(1, "Figure 1", PlotKind::Line2D, vec![0.0, 1.0], vec![1.0, 2.0]);
+        let f = PlotFigure::series(
+            1,
+            "Figure 1",
+            PlotKind::Line2D,
+            vec![0.0, 1.0],
+            vec![1.0, 2.0],
+        );
         assert_eq!(f.kind, PlotKind::Line2D);
         assert!(!f.is_rendered());
         assert_eq!(f.xs.len(), 2);
@@ -316,7 +340,13 @@ mod tests {
 
     #[test]
     fn auto_view_fits_data_and_interactivity() {
-        let f = PlotFigure::series(1, "L", PlotKind::Line2D, vec![0.0, 1.0, 2.0], vec![3.0, 9.0, 5.0]);
+        let f = PlotFigure::series(
+            1,
+            "L",
+            PlotKind::Line2D,
+            vec![0.0, 1.0, 2.0],
+            vec![3.0, 9.0, 5.0],
+        );
         assert!(f.is_interactive());
         let v = f.auto_view().unwrap();
         assert_eq!((v.x_min, v.x_max), (0.0, 2.0));
@@ -336,7 +366,13 @@ mod tests {
     #[test]
     fn animation_len_by_figure_kind() {
         // Interactive 2-D series: one step per data point.
-        let s = PlotFigure::series(1, "L", PlotKind::Line2D, vec![0.0, 1.0, 2.0], vec![3.0, 9.0, 5.0]);
+        let s = PlotFigure::series(
+            1,
+            "L",
+            PlotKind::Line2D,
+            vec![0.0, 1.0, 2.0],
+            vec![3.0, 9.0, 5.0],
+        );
         assert_eq!(s.animation_len(), 3);
         assert!(!s.is_animated());
 
@@ -351,12 +387,19 @@ mod tests {
         let mut one = PlotFigure::series(3, "P", PlotKind::Rendered, vec![], vec![1.0]);
         one.png_data = Some(vec![1]);
         assert_eq!(one.animation_len(), 0);
-        assert_eq!(PlotFigure::surface(4, "S", vec![vec![0.0, 1.0], vec![1.0, 0.0]]).animation_len(), 0);
+        assert_eq!(
+            PlotFigure::surface(4, "S", vec![vec![0.0, 1.0], vec![1.0, 0.0]]).animation_len(),
+            0
+        );
     }
 
     #[test]
     fn surface_is_interactive_and_orbits() {
-        let grid = vec![vec![0.0, 1.0, 0.0], vec![1.0, 2.0, 1.0], vec![0.0, 1.0, 0.0]];
+        let grid = vec![
+            vec![0.0, 1.0, 0.0],
+            vec![1.0, 2.0, 1.0],
+            vec![0.0, 1.0, 0.0],
+        ];
         let f = PlotFigure::surface(1, "peak", grid);
         assert_eq!(f.kind, PlotKind::Surface3D);
         assert!(f.is_interactive() && f.is_surface());
@@ -389,7 +432,12 @@ mod tests {
 
     #[test]
     fn zoom_pan_and_nearest() {
-        let v = PlotView { x_min: 0.0, x_max: 10.0, y_min: 0.0, y_max: 10.0 };
+        let v = PlotView {
+            x_min: 0.0,
+            x_max: 10.0,
+            y_min: 0.0,
+            y_max: 10.0,
+        };
         // Zoom in (factor 0.5) about (5,5) halves the span, keeps the center.
         let z = v.zoom_at(5.0, 5.0, 0.5);
         assert_eq!((z.x_min, z.x_max), (2.5, 7.5));
@@ -397,7 +445,13 @@ mod tests {
         let p = v.pan_by(2.0, 0.0);
         assert_eq!((p.x_min, p.x_max), (-2.0, 8.0));
 
-        let f = PlotFigure::series(1, "L", PlotKind::Line2D, vec![0.0, 1.0, 2.0], vec![10.0, 20.0, 30.0]);
+        let f = PlotFigure::series(
+            1,
+            "L",
+            PlotKind::Line2D,
+            vec![0.0, 1.0, 2.0],
+            vec![10.0, 20.0, 30.0],
+        );
         assert_eq!(f.nearest(1.4), Some((1.0, 20.0)));
         assert_eq!(f.nearest(1.6), Some((2.0, 30.0)));
     }

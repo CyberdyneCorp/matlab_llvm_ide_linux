@@ -44,12 +44,18 @@ pub enum SimRequest {
     /// Reset to `startTime` and clear the snapshot ring.
     ResetSimulation,
     /// Tune the solver while paused (any subset of fields).
-    ConfigureSolver { rel_tol: Option<f64>, max_step: Option<f64> },
+    ConfigureSolver {
+        rel_tol: Option<f64>,
+        max_step: Option<f64>,
+    },
     /// Replace the set of time breakpoints.
     SetTimeBreakpoints(Vec<TimeBreakpoint>),
     /// Replace the set of signal breakpoints. `source` is the model path the
     /// adapter keys edge ids against.
-    SetSignalBreakpoints { source: String, breakpoints: Vec<SignalBreakpoint> },
+    SetSignalBreakpoints {
+        source: String,
+        breakpoints: Vec<SignalBreakpoint>,
+    },
 }
 
 impl SimRequest {
@@ -85,7 +91,10 @@ impl SimRequest {
                     .collect();
                 ("setTimeBreakpoints", Some(json!({ "times": arr })))
             }
-            SimRequest::SetSignalBreakpoints { source, breakpoints } => {
+            SimRequest::SetSignalBreakpoints {
+                source,
+                breakpoints,
+            } => {
                 let arr: Vec<Value> = breakpoints
                     .iter()
                     .map(|b| match &b.condition {
@@ -127,15 +136,17 @@ pub enum SimEvent {
 
 /// Interpret a decoded [`DapMessage`] as a [`SimEvent`], if it is one.
 pub fn parse_sim_event(msg: &DapMessage) -> Option<SimEvent> {
-    let DapMessage::Event { event, body } = msg else { return None };
+    let DapMessage::Event { event, body } = msg else {
+        return None;
+    };
     match event.as_str() {
         "simulationTime" => Some(SimEvent::Time {
             t: body.get("t")?.as_f64()?,
             major_step: body.get("majorStep").and_then(Value::as_i64).unwrap_or(0),
         }),
-        "simulationActiveBlock" => {
-            Some(SimEvent::ActiveBlock { node_id: body.get("nodeId")?.as_str()?.to_string() })
-        }
+        "simulationActiveBlock" => Some(SimEvent::ActiveBlock {
+            node_id: body.get("nodeId")?.as_str()?.to_string(),
+        }),
         "signalSample" => Some(SimEvent::Signal {
             edge_id: body.get("edgeId")?.as_str()?.to_string(),
             t: body.get("t")?.as_f64()?,
@@ -150,7 +161,11 @@ pub fn parse_sim_event(msg: &DapMessage) -> Option<SimEvent> {
             depth: body.get("depth").and_then(Value::as_i64).unwrap_or(0),
         }),
         "stopped" => Some(SimEvent::Stopped {
-            reason: body.get("reason").and_then(Value::as_str).unwrap_or("").to_string(),
+            reason: body
+                .get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
         }),
         _ => None,
     }
@@ -167,7 +182,10 @@ mod tests {
         // Strip the Content-Length header to get the JSON body.
         let body = frame.split("\r\n\r\n").nth(1).unwrap().to_string();
         let v: Value = serde_json::from_str(&body).unwrap();
-        (v["command"].as_str().unwrap().to_string(), v["arguments"].clone())
+        (
+            v["command"].as_str().unwrap().to_string(),
+            v["arguments"].clone(),
+        )
     }
 
     #[test]
@@ -181,8 +199,10 @@ mod tests {
 
     #[test]
     fn configure_solver_includes_only_set_fields() {
-        let (cmd, args) =
-            frame_command(&SimRequest::ConfigureSolver { rel_tol: Some(1e-4), max_step: None });
+        let (cmd, args) = frame_command(&SimRequest::ConfigureSolver {
+            rel_tol: Some(1e-4),
+            max_step: None,
+        });
         assert_eq!(cmd, "configureSolver");
         assert_eq!(args["relTol"], 1e-4);
         assert!(args.get("maxStep").is_none());
@@ -191,8 +211,14 @@ mod tests {
     #[test]
     fn time_breakpoints_serialize_with_optional_condition() {
         let (cmd, args) = frame_command(&SimRequest::SetTimeBreakpoints(vec![
-            TimeBreakpoint { t: 5.0, condition: None },
-            TimeBreakpoint { t: 7.5, condition: Some("x > 0".into()) },
+            TimeBreakpoint {
+                t: 5.0,
+                condition: None,
+            },
+            TimeBreakpoint {
+                t: 7.5,
+                condition: Some("x > 0".into()),
+            },
         ]));
         assert_eq!(cmd, "setTimeBreakpoints");
         assert_eq!(args["times"][0]["t"], 5.0);
@@ -220,28 +246,51 @@ mod tests {
     #[test]
     fn parses_every_simulation_event() {
         assert_eq!(
-            event(r#"{"type":"event","event":"simulationTime","body":{"t":1.25,"majorStep":1234}}"#),
-            SimEvent::Time { t: 1.25, major_step: 1234 }
+            event(
+                r#"{"type":"event","event":"simulationTime","body":{"t":1.25,"majorStep":1234}}"#
+            ),
+            SimEvent::Time {
+                t: 1.25,
+                major_step: 1234
+            }
         );
         assert_eq!(
             event(r#"{"type":"event","event":"simulationActiveBlock","body":{"nodeId":"gain_1"}}"#),
-            SimEvent::ActiveBlock { node_id: "gain_1".into() }
+            SimEvent::ActiveBlock {
+                node_id: "gain_1".into()
+            }
         );
         assert_eq!(
-            event(r#"{"type":"event","event":"signalSample","body":{"edgeId":"e3","t":1.2,"value":0.42}}"#),
-            SimEvent::Signal { edge_id: "e3".into(), t: 1.2, value: 0.42 }
+            event(
+                r#"{"type":"event","event":"signalSample","body":{"edgeId":"e3","t":1.2,"value":0.42}}"#
+            ),
+            SimEvent::Signal {
+                edge_id: "e3".into(),
+                t: 1.2,
+                value: 0.42
+            }
         );
         assert_eq!(
             event(r#"{"type":"event","event":"zeroCrossing","body":{"nodeId":"sat_1","t":1.2}}"#),
-            SimEvent::ZeroCrossing { node_id: "sat_1".into(), t: 1.2 }
+            SimEvent::ZeroCrossing {
+                node_id: "sat_1".into(),
+                t: 1.2
+            }
         );
         assert_eq!(
-            event(r#"{"type":"event","event":"snapshotTaken","body":{"majorStep":1234,"depth":47}}"#),
-            SimEvent::Snapshot { major_step: 1234, depth: 47 }
+            event(
+                r#"{"type":"event","event":"snapshotTaken","body":{"majorStep":1234,"depth":47}}"#
+            ),
+            SimEvent::Snapshot {
+                major_step: 1234,
+                depth: 47
+            }
         );
         assert_eq!(
             event(r#"{"type":"event","event":"stopped","body":{"reason":"breakpoint"}}"#),
-            SimEvent::Stopped { reason: "breakpoint".into() }
+            SimEvent::Stopped {
+                reason: "breakpoint".into()
+            }
         );
     }
 
@@ -254,7 +303,8 @@ mod tests {
         .unwrap();
         assert!(parse_sim_event(&resp).is_none());
         // An unrelated event is ignored.
-        let other = parse_message(r#"{"type":"event","event":"output","body":{"output":"hi"}}"#).unwrap();
+        let other =
+            parse_message(r#"{"type":"event","event":"output","body":{"output":"hi"}}"#).unwrap();
         assert!(parse_sim_event(&other).is_none());
     }
 }

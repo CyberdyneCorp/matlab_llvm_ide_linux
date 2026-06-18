@@ -100,8 +100,12 @@ pub enum NumericMode {
 }
 
 impl NumericMode {
-    pub const ALL: [NumericMode; 4] =
-        [NumericMode::Dynamic, NumericMode::Strict, NumericMode::Float32, NumericMode::Float64];
+    pub const ALL: [NumericMode; 4] = [
+        NumericMode::Dynamic,
+        NumericMode::Strict,
+        NumericMode::Float32,
+        NumericMode::Float64,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -150,7 +154,12 @@ mod tests {
     #[test]
     fn opt_flag_gate_for_all_profiles() {
         assert!(!OptimizationProfile::O0.passes_o_flag());
-        for o in [OptimizationProfile::O1, OptimizationProfile::O2, OptimizationProfile::O3, OptimizationProfile::Os] {
+        for o in [
+            OptimizationProfile::O1,
+            OptimizationProfile::O2,
+            OptimizationProfile::O3,
+            OptimizationProfile::Os,
+        ] {
             assert!(o.passes_o_flag());
         }
     }

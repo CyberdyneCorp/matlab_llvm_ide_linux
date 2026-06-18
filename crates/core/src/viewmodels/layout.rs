@@ -98,9 +98,12 @@ impl LayoutViewModel {
 
     /// Restore every pane to its default size/visibility.
     pub fn reset(&self) {
-        self.left_sidebar_width.set(crate::theme::metrics::LEFT_SIDEBAR_WIDTH);
-        self.workspace_width.set(crate::theme::metrics::WORKSPACE_COLUMN_WIDTH);
-        self.plots_width.set(crate::theme::metrics::PLOTS_COLUMN_WIDTH);
+        self.left_sidebar_width
+            .set(crate::theme::metrics::LEFT_SIDEBAR_WIDTH);
+        self.workspace_width
+            .set(crate::theme::metrics::WORKSPACE_COLUMN_WIDTH);
+        self.plots_width
+            .set(crate::theme::metrics::PLOTS_COLUMN_WIDTH);
         self.sidebar_visible.set(true);
         self.workspace_visible.set(true);
         self.plots_visible.set(true);
@@ -173,6 +176,9 @@ mod tests {
         vm.reset();
         assert!(vm.workspace_visible.get());
         assert_eq!(vm.center_mode.get(), CenterLayoutMode::Split);
-        assert_eq!(vm.left_sidebar_width.get(), crate::theme::metrics::LEFT_SIDEBAR_WIDTH);
+        assert_eq!(
+            vm.left_sidebar_width.get(),
+            crate::theme::metrics::LEFT_SIDEBAR_WIDTH
+        );
     }
 }

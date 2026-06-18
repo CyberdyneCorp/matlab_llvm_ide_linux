@@ -6,10 +6,11 @@
 pub mod brackets;
 pub mod chart_trace;
 pub mod compiler;
+pub mod control_analysis;
 pub mod dap;
 pub mod filesystem;
-pub mod fuzzy;
 pub mod flowchart_codec;
+pub mod fuzzy;
 pub mod highlighter;
 pub mod markdown;
 pub mod media;
