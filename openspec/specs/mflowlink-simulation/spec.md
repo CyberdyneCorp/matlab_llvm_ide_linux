@@ -1,0 +1,75 @@
+# mflowlink-simulation Specification
+
+## Purpose
+
+The mflowLink simulation window: runs a signal-flow model through `matlabc`
+(one-shot `-simulate` CSV or live `-simulate --sim-dap`) and visualizes the
+streamed `SimTrace` on production-grade scopes, with playback transport. All
+scope math lives in the GTK-free `services::scope` core.
+
+## Requirements
+
+### Requirement: Production overlay scope
+
+The simulation window SHALL render all logged signals on a single overlay scope
+with a legend, stable per-signal colors, grid, and numeric axis ticks, and SHALL
+let the user inspect and reframe the trace. Hovering shows a crosshair with the
+cursor time and each signal's nearest-sample value. The view is driven entirely
+by the `SimTrace` — no compiler involvement.
+
+#### Scenario: Signals overlay with a legend and stable colors
+
+- **WHEN** a run logs more than one signal
+- **THEN** every signal is drawn on one set of axes with a legend, each keeping a
+  fixed palette color across redraws
+
+#### Scenario: Box-zoom pins the visible window
+
+- **WHEN** the user left-drags a rectangle over the plot
+- **THEN** the scope zooms to that data window (both axes pinned)
+
+#### Scenario: Autoscale and manual Y range
+
+- **WHEN** the user clicks **Auto**
+- **THEN** the scope reframes to fit all data; and **WHEN** the user enters a
+  valid **Y min** < **Y max**, the Y axis is pinned to that range
+
+#### Scenario: Export the visible trace and the tile
+
+- **WHEN** the user exports CSV with the X axis pinned to a window
+- **THEN** only the rows whose time falls inside that window are written; and the
+  PNG export writes the rendered scope beside the model file
+
+### Requirement: Playback transport
+
+The simulation window SHALL provide play / pause / step / step-back / restart
+controls. A finished one-shot run replays by scrubbing a playback cursor through
+the trace; a live `--sim-dap` session steps the solver.
+
+#### Scenario: Play animates the playback cursor
+
+- **WHEN** the user presses **Play** on a finished one-shot trace
+- **THEN** the cursor advances through the samples and the scope redraws to it
+
+#### Scenario: Step advances one sample / major step
+
+- **WHEN** the user presses **Step**
+- **THEN** a one-shot replay advances one sample, and a live session requests one
+  major step
+
+### Requirement: Live streaming and breakpoints
+
+In live `--sim-dap` mode the window SHALL stream `signalSample` events into the
+scopes as the solver runs, halo the currently-active block on the model canvas,
+and honor signal-value and simulation-time breakpoints with a snapshot
+indicator.
+
+#### Scenario: Streamed samples appear live
+
+- **WHEN** the solver emits signal samples during a live run
+- **THEN** the scopes extend with each streamed sample without re-running
+
+#### Scenario: A breakpoint pauses the run
+
+- **WHEN** a configured signal-value or simulation-time breakpoint is hit
+- **THEN** the run pauses and the transport reflects the paused state
