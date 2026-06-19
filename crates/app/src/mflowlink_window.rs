@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use gtk::prelude::*;
-use gtk::{Box as GtkBox, Button, DrawingArea, Label, Orientation, ScrolledWindow, Window};
+use gtk::{Box as GtkBox, Button, DrawingArea, Label, Orientation, Window};
 
 use serde_json::json;
 
@@ -873,10 +873,10 @@ fn build_scopes(app: &Rc<AppState>, vm: &Rc<MflowLinkViewModel>, path: Option<Pa
     }
 
     panel.append(&build_scope_controls(app, vm, &da, &view, path));
-    let scroll = ScrolledWindow::new();
-    scroll.set_vexpand(true);
-    scroll.set_child(Some(&da));
-    panel.append(&scroll);
+    // Append the canvas directly: a DrawingArea isn't GtkScrollable, so wrapping
+    // it in a ScrolledWindow gives it a zero-size viewport allocation (the scope
+    // renders into a 0×0 rect and shows blank). It fills the panel via vexpand.
+    panel.append(&da);
 
     // Hover → crosshair readout.
     let motion = gtk::EventControllerMotion::new();
