@@ -139,6 +139,17 @@ editor is hidden and the console — the MATLAB command window / REPL workspace 
 fills the center, matching the reference's "everything is a REPL" feel. Opening a
 file or flowchart restores the editor with the console docked at the bottom.
 
+## Identifier completion (Tab)
+
+Pressing **Tab** while on an identifier completes it from the shared
+[`completion`](../crates/core/src/services/completion.rs) engine — live workspace
+variables and in-scope identifiers first, then MATLAB keywords / built-ins and
+the GPU/Parallel toolbox commands (`gpuArray`, `gather`, `gpuDevice`, `arrayfun`,
+`parfor`, …). It works in the **REPL command line** (extends to the common
+prefix, lists alternatives in the console) and in the **MATLAB code editor**
+(extends inline, or opens a caret-anchored chooser when ambiguous). Off a word,
+Tab still inserts a literal tab.
+
 ## Flowchart editor
 
 Opening a `.mflow` (or the demo charts) shows a three-pane editor:

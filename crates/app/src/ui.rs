@@ -16,6 +16,7 @@ use matforge_core::models::{
     CompilerTarget, ConsoleLevel, NodeFileKind, NumericMode, OptimizationProfile, ProjectNode,
 };
 use matforge_core::services::compiler::DiagnosticLevel;
+use matforge_core::services::completion;
 use matforge_core::services::highlighter::Language;
 use matforge_core::viewmodels::{ActivityItem, DebugState, FlowchartViewModel};
 
@@ -3327,106 +3328,6 @@ fn console_insert_line(
     }
 }
 
-/// Common MATLAB functions/keywords offered by Tab-completion, alongside live
-/// workspace variables and command history.
-const MATLAB_BUILTINS: &[&str] = &[
-    "abs",
-    "acos",
-    "all",
-    "angle",
-    "any",
-    "asin",
-    "atan",
-    "atan2",
-    "axis",
-    "bar",
-    "cat",
-    "ceil",
-    "cell",
-    "clc",
-    "clear",
-    "close",
-    "cos",
-    "cumsum",
-    "det",
-    "diag",
-    "diff",
-    "disp",
-    "dot",
-    "eig",
-    "else",
-    "elseif",
-    "end",
-    "error",
-    "exp",
-    "eye",
-    "fft",
-    "figure",
-    "find",
-    "fix",
-    "fliplr",
-    "flipud",
-    "floor",
-    "for",
-    "fprintf",
-    "function",
-    "grid",
-    "hold",
-    "if",
-    "imag",
-    "inv",
-    "isempty",
-    "isnan",
-    "kron",
-    "legend",
-    "length",
-    "linspace",
-    "load",
-    "log",
-    "log10",
-    "magic",
-    "max",
-    "mean",
-    "median",
-    "min",
-    "mod",
-    "norm",
-    "numel",
-    "ones",
-    "plot",
-    "plot3",
-    "prod",
-    "rand",
-    "randn",
-    "real",
-    "repmat",
-    "reshape",
-    "return",
-    "round",
-    "save",
-    "scatter",
-    "sign",
-    "sin",
-    "size",
-    "sort",
-    "sprintf",
-    "sqrt",
-    "subplot",
-    "sum",
-    "surf",
-    "tan",
-    "title",
-    "transpose",
-    "trace",
-    "while",
-    "who",
-    "whos",
-    "xlabel",
-    "ylabel",
-    "zeros",
-    "zlabel",
-];
-
 /// Tab-complete the identifier left of the caret in the console input. Completes
 /// to the single match, or to the longest common prefix of several (listing them
 /// in the console when the prefix can't grow further).
@@ -3450,8 +3351,10 @@ fn tab_complete(app: &Rc<AppState>, cbuf: &gtk::TextBuffer, input_start: &gtk::T
     if word.is_empty() {
         return;
     }
-    let cands = completion_candidates(app, word);
-    let Some(common) = longest_common_prefix(&cands) else {
+    let dynamic = repl_dynamic_symbols(app, word);
+    let dyn_refs: Vec<&str> = dynamic.iter().map(String::as_str).collect();
+    let cands = completion::candidates(word, &dyn_refs);
+    let Some(common) = completion::longest_common_prefix(&cands) else {
         return;
     };
     if common.len() > word.len() {
@@ -3462,9 +3365,9 @@ fn tab_complete(app: &Rc<AppState>, cbuf: &gtk::TextBuffer, input_start: &gtk::T
     }
 }
 
-/// Completion candidates for `word` (case-insensitive prefix): live workspace
-/// variable names, identifiers seen in command history, then MATLAB built-ins.
-fn completion_candidates(app: &Rc<AppState>, word: &str) -> Vec<String> {
+/// Dynamic completion symbols for the REPL: live workspace variable names plus
+/// identifiers seen in command history (case-insensitively matching `word`).
+fn repl_dynamic_symbols(app: &Rc<AppState>, word: &str) -> Vec<String> {
     let lw = word.to_lowercase();
     let mut set: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     app.vm.workspace.variables.with(|vs| {
@@ -3483,29 +3386,7 @@ fn completion_candidates(app: &Rc<AppState>, word: &str) -> Vec<String> {
             }
         }
     });
-    for b in MATLAB_BUILTINS {
-        if b.starts_with(&lw) {
-            set.insert((*b).to_string());
-        }
-    }
     set.into_iter().collect()
-}
-
-/// The longest common prefix of `items`, or `None` if empty.
-fn longest_common_prefix(items: &[String]) -> Option<String> {
-    let first = items.first()?;
-    let mut len = first.len();
-    for s in &items[1..] {
-        len = first
-            .char_indices()
-            .zip(s.char_indices())
-            .take_while(|((_, a), (_, b))| a == b)
-            .map(|((i, c), _)| i + c.len_utf8())
-            .last()
-            .unwrap_or(0)
-            .min(len);
-    }
-    Some(first[..len].to_string())
 }
 
 /// Find the first `path:line[:col]` source reference in a console line (the form
@@ -5050,40 +4931,6 @@ fn pick_folder(window: &ApplicationWindow, app: &Rc<AppState>) {
             }
         }
     });
-}
-
-#[cfg(test)]
-mod completion_tests {
-    use super::longest_common_prefix;
-
-    fn v(xs: &[&str]) -> Vec<String> {
-        xs.iter().map(|s| s.to_string()).collect()
-    }
-
-    #[test]
-    fn single_candidate_completes_fully() {
-        assert_eq!(
-            longest_common_prefix(&v(&["zeros"])).as_deref(),
-            Some("zeros")
-        );
-    }
-
-    #[test]
-    fn many_candidates_yield_common_prefix() {
-        assert_eq!(
-            longest_common_prefix(&v(&["plot", "plot3", "plotyy"])).as_deref(),
-            Some("plot")
-        );
-        assert_eq!(
-            longest_common_prefix(&v(&["sin", "size", "sign"])).as_deref(),
-            Some("si")
-        );
-    }
-
-    #[test]
-    fn empty_is_none() {
-        assert_eq!(longest_common_prefix(&[]), None);
-    }
 }
 
 #[cfg(test)]
