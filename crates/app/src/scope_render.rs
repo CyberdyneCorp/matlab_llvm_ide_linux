@@ -30,7 +30,8 @@ pub fn plot_rect(w: f64, h: f64) -> (f64, f64, f64, f64) {
 }
 
 fn set_rgb(ctx: &cairo::Context, c: Rgb) {
-    ctx.set_source_rgb(c.r as f64, c.g as f64, c.b as f64);
+    let (r, g, b) = c.to_unit();
+    ctx.set_source_rgb(r, g, b);
 }
 
 fn fmt_num(v: f64) -> String {
@@ -196,11 +197,7 @@ fn draw_crosshair(
     let cursor_x = x0 + (hx - px) / pw * (x1 - x0);
     let mut lines: Vec<(String, (f64, f64, f64))> = vec![(
         format!("t = {}", fmt_num(cursor_x)),
-        (
-            tokens.text_primary.r as f64,
-            tokens.text_primary.g as f64,
-            tokens.text_primary.b as f64,
-        ),
+        tokens.text_primary.to_unit(),
     )];
     for s in series {
         if let Some(v) = nearest_value(s.points, cursor_x) {
@@ -234,4 +231,51 @@ fn nearest_value(points: &[(f64, f64)], x: f64) -> Option<f64> {
                 .unwrap_or(std::cmp::Ordering::Equal)
         })
         .map(|&(_, v)| v)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use matforge_core::theme::ThemeTokens;
+
+    /// Read the center-pixel `(r, g, b)` of a freshly rendered overlay.
+    fn background_pixel(tokens: ThemeTokens) -> (u8, u8, u8) {
+        crate::theme_css::set_current(tokens);
+        let (w, h) = (80i32, 60i32);
+        let mut surface = cairo::ImageSurface::create(cairo::Format::ARgb32, w, h).unwrap();
+        {
+            let ctx = cairo::Context::new(&surface).unwrap();
+            // No series: the visible pixels are the card background fill.
+            draw_overlay(
+                &ctx,
+                w as f64,
+                h as f64,
+                &[],
+                (0.0, 1.0, 0.0, 1.0),
+                None,
+                None,
+            );
+        }
+        surface.flush();
+        let stride = surface.stride() as usize;
+        let data = surface.data().unwrap();
+        // ARGB32 is little-endian premultiplied: bytes are [B, G, R, A].
+        let off = (h as usize / 2) * stride + (w as usize / 2) * 4;
+        (data[off + 2], data[off + 1], data[off])
+    }
+
+    #[test]
+    fn background_uses_normalized_card_color_not_clamped_white() {
+        // Regression: `set_rgb` must divide u8 channels by 255. Passing raw 0..255
+        // to cairo's `set_source_rgb` clamps every channel to 1.0, painting the
+        // whole scope white — background, grid, ticks and legend text vanish.
+        let card = ThemeTokens::midnight().card;
+        let (r, g, b) = background_pixel(ThemeTokens::midnight());
+        assert_eq!(
+            (r, g, b),
+            (card.r, card.g, card.b),
+            "scope background should be the card color, not clamped white",
+        );
+        assert_ne!((r, g, b), (255, 255, 255), "background clamped to white");
+    }
 }

@@ -43,6 +43,13 @@ use services_impl::{GtkClipboard, NoopFilePicker};
 const APP_ID: &str = "org.matlab_llvm.MatForge";
 
 fn main() -> glib::ExitCode {
+    // Headless scope export: simulate a model and render the overlay scope to a
+    // PNG (`<model>.scope-preview.png`), then exit — verifies the scope visuals
+    // without a display, and useful for docs / regression snapshots.
+    if let Ok(m) = std::env::var("MATFORGE_SCOPE_PNG") {
+        return render_scope_preview(std::path::Path::new(&m));
+    }
+
     let app_id = std::env::var("MATFORGE_APP_ID").unwrap_or_else(|_| APP_ID.to_string());
     let app = Application::builder().application_id(app_id).build();
     app.connect_startup(|_| {
@@ -50,6 +57,84 @@ fn main() -> glib::ExitCode {
     });
     app.connect_activate(build_main_window);
     app.run()
+}
+
+/// One previewed signal: display name, stable color, and its `(time, value)` points.
+type PreviewSignal = (String, (f64, f64, f64), Vec<(f64, f64)>);
+
+/// Run `matlabc -simulate <mflow>`, fold the CSV into a `SimTrace`, and render
+/// the production overlay scope to `<mflow>.scope-preview.png` — the exact
+/// `scope_render` the mflowLink window uses, offscreen.
+fn render_scope_preview(mflow: &std::path::Path) -> glib::ExitCode {
+    use matforge_core::services::scope::{signal_color, ScopeView};
+    use matforge_core::services::sim_trace::SimTrace;
+    use matforge_core::theme::{ThemeId, ThemeTokens};
+
+    let settings = Settings::from_env();
+    let output = std::process::Command::new(&settings.matlabc_path)
+        .arg("-simulate")
+        .arg(mflow)
+        .output();
+    let Ok(output) = output else {
+        eprintln!("scope preview: failed to run matlabc");
+        return glib::ExitCode::FAILURE;
+    };
+    let mut trace = SimTrace::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        trace.feed_line(line);
+    }
+
+    theme_css::set_current(ThemeTokens::for_id(ThemeId::Midnight));
+
+    let data: Vec<PreviewSignal> = (0..trace.signal_count())
+        .map(|i| {
+            let (xs, ys) = trace.series(i);
+            let pts: Vec<(f64, f64)> = xs.iter().zip(&ys).map(|(&x, &y)| (x, y)).collect();
+            let name = trace.signal_name(i).unwrap_or("signal").to_string();
+            (name, signal_color(i), pts)
+        })
+        .collect();
+    let points: Vec<Vec<(f64, f64)>> = data.iter().map(|d| d.2.clone()).collect();
+    let window = ScopeView::default().resolve(&points);
+    let series: Vec<scope_render::ScopeSeries> = data
+        .iter()
+        .map(|(name, color, pts)| scope_render::ScopeSeries {
+            name,
+            color: *color,
+            points: pts,
+        })
+        .collect();
+
+    let (w, h) = (720, 400);
+    let surface = match gtk::cairo::ImageSurface::create(gtk::cairo::Format::ARgb32, w, h) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("scope preview: surface error: {e}");
+            return glib::ExitCode::FAILURE;
+        }
+    };
+    if let Ok(ctx) = gtk::cairo::Context::new(&surface) {
+        scope_render::draw_overlay(&ctx, w as f64, h as f64, &series, window, None, None);
+    }
+    let dest = mflow.with_extension("scope-preview.png");
+    let result = std::fs::File::create(&dest)
+        .map_err(|e| e.to_string())
+        .and_then(|mut f| surface.write_to_png(&mut f).map_err(|e| e.to_string()));
+    match result {
+        Ok(()) => {
+            println!(
+                "scope preview: wrote {} ({} signals, {} samples)",
+                dest.display(),
+                trace.signal_count(),
+                trace.series(0).0.len()
+            );
+            glib::ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("scope preview: {e}");
+            glib::ExitCode::FAILURE
+        }
+    }
 }
 
 fn build_main_window(app: &Application) {
