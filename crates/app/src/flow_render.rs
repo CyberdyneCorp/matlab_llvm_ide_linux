@@ -33,12 +33,27 @@ fn node_rect(node: &FlowNode) -> (f64, f64, f64, f64) {
 
 fn port_point(node: &FlowNode, port: &str) -> (f64, f64) {
     let (x, y, w, h) = node_rect(node);
-    match node.kind.port_anchor(port) {
-        Some(PortAnchor::Top) => (x + w / 2.0, y),
-        Some(PortAnchor::Bottom) => (x + w / 2.0, y + h),
-        Some(PortAnchor::Left) => (x, y + h / 2.0),
-        Some(PortAnchor::Right) => (x + w, y + h / 2.0),
-        None => (x + w / 2.0, y + h),
+    let Some(anchor) = node.kind.port_anchor(port) else {
+        return (x + w / 2.0, y + h);
+    };
+    // Spread ports that share a face evenly along it so multiple inputs/outputs
+    // (e.g. an integrator's in / reset / init) don't collapse onto one point.
+    let same_face: Vec<&str> = node
+        .ports
+        .inputs
+        .iter()
+        .chain(node.ports.outputs.iter())
+        .map(|p| p.id.as_str())
+        .filter(|id| node.kind.port_anchor(id) == Some(anchor))
+        .collect();
+    let count = same_face.len().max(1);
+    let index = same_face.iter().position(|id| *id == port).unwrap_or(0);
+    let frac = (index as f64 + 1.0) / (count as f64 + 1.0);
+    match anchor {
+        PortAnchor::Top => (x + w * frac, y),
+        PortAnchor::Bottom => (x + w * frac, y + h),
+        PortAnchor::Left => (x, y + h * frac),
+        PortAnchor::Right => (x + w, y + h * frac),
     }
 }
 
@@ -600,8 +615,42 @@ fn set_rgb(ctx: &cairo::Context, c: Rgb) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use matforge_core::models::flowchart::SchemaKind;
+    use matforge_core::models::flowchart::{FlowPort, FlowPorts, FlowUi, NodeData, SchemaKind};
     use matforge_core::viewmodels::FlowchartViewModel;
+
+    #[test]
+    fn ports_sharing_a_face_are_spread_not_collapsed() {
+        // An integrator with three left inputs (in / reset / init) must place
+        // them at three distinct points down its left face, not one shared point.
+        let node = FlowNode::new(
+            "vel",
+            NodeKind::SignalIntegrator,
+            "",
+            FlowPorts {
+                inputs: vec![
+                    FlowPort::new("in"),
+                    FlowPort::new("reset"),
+                    FlowPort::new("init"),
+                ],
+                outputs: vec![FlowPort::new("out")],
+            },
+            NodeData::default(),
+            FlowUi::at(FlowPosition { x: 0.0, y: 0.0 }),
+        );
+        let (x, y, w, h) = node_rect(&node);
+        let p_in = port_point(&node, "in");
+        let p_reset = port_point(&node, "reset");
+        let p_init = port_point(&node, "init");
+        // All on the left face, ordered top→bottom, and distinct.
+        for p in [p_in, p_reset, p_init] {
+            assert_eq!(p.0, x, "left-face ports stay on the left edge");
+        }
+        assert!(p_in.1 < p_reset.1 && p_reset.1 < p_init.1);
+        assert!((p_reset.1 - (y + h / 2.0)).abs() < 1e-9); // middle of three
+                                                           // The lone output stays centered on the right face.
+        let p_out = port_point(&node, "out");
+        assert_eq!(p_out, (x + w, y + h / 2.0));
+    }
 
     #[test]
     fn point_segment_distance_handles_endpoints_and_interior() {
