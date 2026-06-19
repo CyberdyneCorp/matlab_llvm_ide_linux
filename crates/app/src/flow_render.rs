@@ -9,7 +9,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use gtk::cairo;
 
 use matforge_core::models::flowchart::{
-    FlowNode, FlowPosition, FlowchartDocument, NodeKind, NodeShape, PortAnchor, StateDecomposition,
+    FlowEdge, FlowNode, FlowPosition, FlowchartDocument, NodeKind, NodeShape, PortAnchor,
+    StateDecomposition,
 };
 use matforge_core::models::BreakpointConfig;
 use matforge_core::theme::Rgb;
@@ -87,20 +88,16 @@ pub fn draw_document(
         ctx.restore().ok();
         return;
     };
-    let by_id: BTreeMap<&str, &FlowNode> = flow.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
-    let obstacles: Vec<(f64, f64, f64, f64)> = flow.nodes.iter().map(node_rect).collect();
-
-    // Edges first (under nodes).
-    for edge in &flow.edges {
-        let (Some(from), Some(to)) = (
-            by_id.get(edge.from.node.as_str()),
-            by_id.get(edge.to.node.as_str()),
-        ) else {
-            continue;
-        };
-        let pts = route_edge(from, &edge.from.port, to, &edge.to.port, &obstacles);
-        let is_selected = selected_edge == Some(edge.id.as_str());
-        draw_polyline(ctx, &pts, is_selected);
+    // Edges first (under nodes), then the fan-out junction dots.
+    let (routes, junctions) = route_flow(&flow.nodes, &flow.edges);
+    for (id, pts) in &routes {
+        let is_selected = selected_edge == Some(id.as_str());
+        draw_polyline(ctx, pts, is_selected);
+    }
+    set_rgb(ctx, crate::theme_css::current().text_secondary);
+    for j in &junctions {
+        ctx.arc(j.0, j.1, 3.0, 0.0, std::f64::consts::TAU);
+        ctx.fill().ok();
     }
 
     // Hierarchy: which states have children, each parent's decomposition, and
@@ -353,14 +350,16 @@ fn simplify(raw: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
 
 /// Orthogonal route for an edge between two ports, avoiding node bodies. The
 /// wire leaves the source and enters the target along their port normals, then
-/// takes the first candidate path that clears every other node. Shared by the
-/// renderer and the hit-test so a click follows exactly the drawn line.
+/// takes the first candidate path that clears every other node. `lane` pushes
+/// the detour lanes further out so unrelated signals don't share one. Returns
+/// the raw corner list (`route_flow` simplifies it for drawing/hit-testing).
 fn route_edge(
     from: &FlowNode,
     from_port: &str,
     to: &FlowNode,
     to_port: &str,
     obstacles: &[(f64, f64, f64, f64)],
+    lane: f64,
 ) -> Vec<(f64, f64)> {
     let start = port_point(from, from_port);
     let end = port_point(to, to_port);
@@ -387,10 +386,10 @@ fn route_edge(
         .collect();
 
     let (mx, my) = ((a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0);
-    let top = infl.iter().map(|r| r.1).fold(a.1.min(b.1), f64::min) - ROUTE_LANE;
-    let bot = infl.iter().map(|r| r.1 + r.3).fold(a.1.max(b.1), f64::max) + ROUTE_LANE;
-    let left = infl.iter().map(|r| r.0).fold(a.0.min(b.0), f64::min) - ROUTE_LANE;
-    let right = infl.iter().map(|r| r.0 + r.2).fold(a.0.max(b.0), f64::max) + ROUTE_LANE;
+    let top = infl.iter().map(|r| r.1).fold(a.1.min(b.1), f64::min) - ROUTE_LANE - lane;
+    let bot = infl.iter().map(|r| r.1 + r.3).fold(a.1.max(b.1), f64::max) + ROUTE_LANE + lane;
+    let left = infl.iter().map(|r| r.0).fold(a.0.min(b.0), f64::min) - ROUTE_LANE - lane;
+    let right = infl.iter().map(|r| r.0 + r.2).fold(a.0.max(b.0), f64::max) + ROUTE_LANE + lane;
 
     // Candidate bend-lists between the two stub points, by aesthetic preference.
     let candidates: [Vec<(f64, f64)>; 8] = [
@@ -413,11 +412,94 @@ fn route_edge(
             let mut full = vec![start];
             full.extend(path);
             full.push(end);
-            return simplify(full);
+            return full;
         }
     }
     // Nothing clear: fall back to the simple midpoint jog.
-    simplify(vec![start, a, (mx, a.1), (mx, b.1), b, end])
+    vec![start, a, (mx, a.1), (mx, b.1), b, end]
+}
+
+/// Per-net lane spacing: how far apart unrelated signals' detour lanes sit.
+const ROUTE_LANE_GAP: f64 = 12.0;
+
+/// Last vertex shared by every route in `routes` (their branch point), if they
+/// share more than just the source port. Used to place a fan-out junction dot.
+fn last_common_vertex(routes: &[&Vec<(f64, f64)>]) -> Option<(f64, f64)> {
+    let first = routes.first()?;
+    let close = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).abs() < 1e-6 && (a.1 - b.1).abs() < 1e-6;
+    let mut last = None;
+    let mut i = 0;
+    while let Some(&p) = first.get(i) {
+        if routes
+            .iter()
+            .all(|r| r.get(i).is_some_and(|&q| close(p, q)))
+        {
+            last = Some(p);
+            i += 1;
+        } else {
+            break;
+        }
+    }
+    // A real branch only if they ran together past the source port + stub.
+    (i >= 2).then_some(last).flatten()
+}
+
+/// A routed edge: its id and the world-space corner points of its wire.
+type Route = (String, Vec<(f64, f64)>);
+/// A routed edge tagged with its source `(node, port)` net, for grouping.
+type SourcedRoute<'a> = (String, (&'a str, &'a str), Vec<(f64, f64)>);
+
+/// Route every edge of a flow, giving each net (source port) its own detour
+/// lane so unrelated signals don't overlap, and returning the branch-point
+/// junctions for nets that fan out. Shared by the renderer and the hit-test.
+fn route_flow(nodes: &[FlowNode], edges: &[FlowEdge]) -> (Vec<Route>, Vec<(f64, f64)>) {
+    let by_id: BTreeMap<&str, &FlowNode> = nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+    let obstacles: Vec<(f64, f64, f64, f64)> = nodes.iter().map(node_rect).collect();
+
+    // Each distinct source port is a net; index them in first-seen order so each
+    // gets a distinct detour lane.
+    let mut nets: Vec<(&str, &str)> = Vec::new();
+    for e in edges {
+        let key = (e.from.node.as_str(), e.from.port.as_str());
+        if !nets.contains(&key) {
+            nets.push(key);
+        }
+    }
+
+    let mut raw: Vec<SourcedRoute> = Vec::new();
+    for e in edges {
+        let (Some(from), Some(to)) = (
+            by_id.get(e.from.node.as_str()),
+            by_id.get(e.to.node.as_str()),
+        ) else {
+            continue;
+        };
+        let src = (e.from.node.as_str(), e.from.port.as_str());
+        let lane = nets.iter().position(|k| *k == src).unwrap_or(0) as f64 * ROUTE_LANE_GAP;
+        let pts = route_edge(from, &e.from.port, to, &e.to.port, &obstacles, lane);
+        raw.push((e.id.clone(), src, pts));
+    }
+
+    // Fan-out junction: a dot where a net's branches part ways.
+    let mut junctions = Vec::new();
+    for net in &nets {
+        let group: Vec<&Vec<(f64, f64)>> = raw
+            .iter()
+            .filter(|(_, s, _)| s == net)
+            .map(|(_, _, p)| p)
+            .collect();
+        if group.len() > 1 {
+            if let Some(j) = last_common_vertex(&group) {
+                junctions.push(j);
+            }
+        }
+    }
+
+    let routes = raw
+        .into_iter()
+        .map(|(id, _, pts)| (id, simplify(pts)))
+        .collect();
+    (routes, junctions)
 }
 
 /// Distance from point `p` to the line segment `a`–`b`.
@@ -442,23 +524,15 @@ pub fn edge_hit_test(
     tol: f64,
 ) -> Option<String> {
     let flow = doc.flows.get(flow_index)?;
-    let by_id: BTreeMap<&str, &FlowNode> = flow.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
-    let obstacles: Vec<(f64, f64, f64, f64)> = flow.nodes.iter().map(node_rect).collect();
     let p = (world.x, world.y);
+    let (routes, _) = route_flow(&flow.nodes, &flow.edges);
     let mut hit = None;
-    for edge in &flow.edges {
-        let (Some(from), Some(to)) = (
-            by_id.get(edge.from.node.as_str()),
-            by_id.get(edge.to.node.as_str()),
-        ) else {
-            continue;
-        };
-        let pts = route_edge(from, &edge.from.port, to, &edge.to.port, &obstacles);
+    for (id, pts) in &routes {
         let near = pts
             .windows(2)
             .any(|s| point_segment_distance(p, s[0], s[1]) <= tol);
         if near {
-            hit = Some(edge.id.clone());
+            hit = Some(id.clone());
         }
     }
     hit
@@ -704,8 +778,79 @@ fn set_rgb(ctx: &cairo::Context, c: Rgb) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use matforge_core::models::flowchart::{FlowPort, FlowPorts, FlowUi, NodeData, SchemaKind};
+    use matforge_core::models::flowchart::{
+        EdgeEndpoint, EdgeKind, FlowPort, FlowPorts, FlowUi, NodeData, SchemaKind,
+    };
     use matforge_core::viewmodels::FlowchartViewModel;
+
+    fn gain(id: &str, x: f64, y: f64) -> FlowNode {
+        FlowNode::new(
+            id,
+            NodeKind::SignalGain,
+            "",
+            NodeKind::SignalGain.default_ports(),
+            NodeData::default(),
+            FlowUi::at(FlowPosition { x, y }),
+        )
+    }
+
+    fn data_edge(id: &str, fnode: &str, tnode: &str) -> FlowEdge {
+        FlowEdge::new(
+            id,
+            EdgeKind::Data,
+            EdgeEndpoint::new(fnode, "out"),
+            EdgeEndpoint::new(tnode, "in"),
+        )
+    }
+
+    #[test]
+    fn fan_out_source_gets_one_junction_unrelated_nets_get_none() {
+        // src.out feeds two targets → exactly one branch junction.
+        let nodes = vec![
+            gain("src", 0.0, 100.0),
+            gain("a", 320.0, 0.0),
+            gain("b", 320.0, 200.0),
+        ];
+        let edges = vec![data_edge("e1", "src", "a"), data_edge("e2", "src", "b")];
+        let (routes, junctions) = route_flow(&nodes, &edges);
+        assert_eq!(routes.len(), 2);
+        assert_eq!(junctions.len(), 1, "a fan-out should emit one junction");
+
+        // Two separate single-sink nets share no source → no junction.
+        let nodes = vec![
+            gain("p", 0.0, 0.0),
+            gain("q", 0.0, 200.0),
+            gain("a", 320.0, 0.0),
+            gain("b", 320.0, 200.0),
+        ];
+        let edges = vec![data_edge("e1", "p", "a"), data_edge("e2", "q", "b")];
+        let (_, junctions) = route_flow(&nodes, &edges);
+        assert!(
+            junctions.is_empty(),
+            "unrelated nets must not be junctioned"
+        );
+    }
+
+    #[test]
+    fn lane_offset_pushes_a_detour_further_out() {
+        // `to` sits left of `from` (a feedback wire): the route must detour
+        // around both bodies. A larger lane pushes that detour further out so
+        // unrelated signals don't share it.
+        let from = gain("from", 200.0, 0.0);
+        let to = gain("to", 0.0, 0.0);
+        let obstacles: Vec<(f64, f64, f64, f64)> =
+            [&from, &to].iter().map(|n| node_rect(n)).collect();
+        let r0 = route_edge(&from, "out", &to, "in", &obstacles, 0.0);
+        let r1 = route_edge(&from, "out", &to, "in", &obstacles, 40.0);
+        assert_ne!(r0, r1, "lane offset should change the route");
+
+        // The wires detour below the nodes; the larger lane sits further down.
+        let max_y = |r: &[(f64, f64)]| r.iter().map(|p| p.1).fold(f64::NEG_INFINITY, f64::max);
+        assert!(
+            max_y(&r1) > max_y(&r0) + 30.0,
+            "a larger lane should push the detour further out",
+        );
+    }
 
     #[test]
     fn ports_sharing_a_face_are_spread_not_collapsed() {
@@ -763,7 +908,7 @@ mod tests {
             .map(|n| node_rect(n))
             .collect();
 
-        let pts = route_edge(&from, "out", &to, "in", &obstacles);
+        let pts = route_edge(&from, "out", &to, "in", &obstacles, 0.0);
 
         // Endpoints are the real ports, and no segment crosses the blocker
         // (inflated by the routing clearance).
@@ -805,7 +950,7 @@ mod tests {
             let from = flow.nodes.iter().find(|n| n.id == edge.from.node).unwrap();
             let to = flow.nodes.iter().find(|n| n.id == edge.to.node).unwrap();
             let obstacles: Vec<(f64, f64, f64, f64)> = flow.nodes.iter().map(node_rect).collect();
-            let pts = route_edge(from, &edge.from.port, to, &edge.to.port, &obstacles);
+            let pts = route_edge(from, &edge.from.port, to, &edge.to.port, &obstacles, 0.0);
             // A point on the middle of the first routed segment is a hit.
             let mid = ((pts[0].0 + pts[1].0) / 2.0, (pts[0].1 + pts[1].1) / 2.0);
             let hit = edge_hit_test(doc, 0, FlowPosition { x: mid.0, y: mid.1 }, 3.0);
