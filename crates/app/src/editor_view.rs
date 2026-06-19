@@ -14,9 +14,11 @@ use std::rc::Rc;
 
 use gtk::prelude::*;
 use gtk::{
-    cairo, Box as GtkBox, DrawingArea, Orientation, ScrolledWindow, TextView, TextWindowType,
+    cairo, Box as GtkBox, DrawingArea, Label, ListBox, Orientation, Popover, ScrolledWindow,
+    TextBuffer, TextView, TextWindowType,
 };
 
+use matforge_core::services::completion;
 use matforge_core::services::highlighter::Language;
 
 use crate::app_state::AppState;
@@ -179,24 +181,34 @@ pub fn build_code_view(
     }
     gutter.add_controller(click);
 
-    // F9 toggles a breakpoint at the cursor line.
+    // F9 toggles a breakpoint at the cursor line; Tab completes the identifier
+    // under the cursor (MATLAB code) — falling back to a literal tab off a word.
     let keys = gtk::EventControllerKey::new();
     {
         let app = app.clone();
         let buffer = buffer.clone();
         let gutter3 = gutter.clone();
-        keys.connect_key_pressed(move |_c, keyval, _code, _state| {
-            if keyval == gtk::gdk::Key::F9 {
+        let view2 = view.clone();
+        keys.connect_key_pressed(move |_c, keyval, _code, state| {
+            use gtk::gdk::{Key, ModifierType};
+            if keyval == Key::F9 {
                 let it = buffer.iter_at_offset(buffer.cursor_position());
                 app.vm
                     .editor
                     .toggle_breakpoint(tab_id, it.line() as usize + 1);
                 app.refresh_breakpoints();
                 gutter3.queue_draw();
-                gtk::glib::Propagation::Stop
-            } else {
-                gtk::glib::Propagation::Proceed
+                return gtk::glib::Propagation::Stop;
             }
+            let plain = !state.intersects(ModifierType::CONTROL_MASK | ModifierType::ALT_MASK);
+            if keyval == Key::Tab
+                && plain
+                && language == Language::Matlab
+                && tab_complete(&app, &view2, &buffer)
+            {
+                return gtk::glib::Propagation::Stop;
+            }
+            gtk::glib::Propagation::Proceed
         });
     }
     view.add_controller(keys);
@@ -221,6 +233,124 @@ pub fn build_code_view(
         return build_markdown_container(&buffer, hbox);
     }
     hbox
+}
+
+/// Tab-complete the identifier under the cursor. Returns `true` when the cursor
+/// is on a word (the key is consumed even if there's nothing to insert), `false`
+/// to let a literal tab through. A single/common-prefix match completes inline;
+/// several ambiguous matches open a caret-anchored chooser popover.
+fn tab_complete(app: &Rc<AppState>, view: &TextView, buffer: &TextBuffer) -> bool {
+    let cur = buffer.iter_at_offset(buffer.cursor_position());
+    let mut line_start = cur;
+    line_start.set_line_offset(0);
+    let before = buffer.text(&line_start, &cur, false).to_string();
+    let (_, word) = completion::token_at(&before, before.len());
+    if word.is_empty() {
+        return false; // not on a word → allow the default tab (indent)
+    }
+    let word = word.to_string();
+    let dynamic = editor_dynamic_symbols(app, buffer, &word);
+    let dyn_refs: Vec<&str> = dynamic.iter().map(String::as_str).collect();
+    let cands = completion::candidates(&word, &dyn_refs);
+    let chars = word.chars().count() as i32;
+    match cands.len() {
+        0 => {}
+        1 => replace_word(buffer, chars, &cands[0]),
+        _ => {
+            let common = completion::longest_common_prefix(&cands).unwrap_or_default();
+            if common.len() > word.len() {
+                replace_word(buffer, chars, &common);
+            } else {
+                show_completion_popover(view, chars, &cands);
+            }
+        }
+    }
+    true
+}
+
+/// Dynamic completion symbols for the editor: live workspace variable names plus
+/// identifiers already present in the buffer (case-insensitively matching the
+/// typed prefix; the prefix itself is dropped so it never suggests itself).
+fn editor_dynamic_symbols(app: &Rc<AppState>, buffer: &TextBuffer, prefix: &str) -> Vec<String> {
+    let lp = prefix.to_lowercase();
+    let mut set: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    app.vm.workspace.variables.with(|vs| {
+        for v in vs {
+            if v.name.to_lowercase().starts_with(&lp) {
+                set.insert(v.name.clone());
+            }
+        }
+    });
+    let text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false);
+    for tok in text.split(|c: char| !(c.is_alphanumeric() || c == '_')) {
+        if tok.len() > 1 && tok.to_lowercase().starts_with(&lp) {
+            set.insert(tok.to_string());
+        }
+    }
+    set.remove(prefix);
+    set.into_iter().collect()
+}
+
+/// Replace the `char_len`-character identifier ending at the cursor with `text`.
+fn replace_word(buffer: &TextBuffer, char_len: i32, text: &str) {
+    let off = buffer.cursor_position();
+    let mut start = buffer.iter_at_offset(off);
+    start.backward_chars(char_len);
+    let mut end = buffer.iter_at_offset(off);
+    buffer.delete(&mut start, &mut end);
+    buffer.insert(&mut start, text);
+}
+
+/// Show a chooser popover anchored at the caret; picking a row replaces the
+/// `char_len`-character partial word with the chosen completion.
+fn show_completion_popover(view: &TextView, char_len: i32, cands: &[String]) {
+    let buffer = view.buffer();
+    let list = ListBox::new();
+    list.add_css_class("mf-completions");
+    for c in cands {
+        let row = Label::new(Some(c));
+        row.set_halign(gtk::Align::Start);
+        row.set_xalign(0.0);
+        row.set_margin_start(6);
+        row.set_margin_end(12);
+        list.append(&row);
+    }
+    let scroll = ScrolledWindow::new();
+    scroll.set_propagate_natural_height(true);
+    scroll.set_max_content_height(200);
+    scroll.set_min_content_width(160);
+    scroll.set_child(Some(&list));
+
+    let pop = Popover::new();
+    pop.set_parent(view);
+    pop.set_has_arrow(false);
+    pop.set_position(gtk::PositionType::Bottom);
+    pop.set_child(Some(&scroll));
+
+    // Anchor just below the caret.
+    let it = buffer.iter_at_offset(buffer.cursor_position());
+    let loc = view.cursor_locations(Some(&it)).0;
+    let (wx, wy) =
+        view.buffer_to_window_coords(TextWindowType::Text, loc.x(), loc.y() + loc.height());
+    pop.set_pointing_to(Some(&gtk::gdk::Rectangle::new(wx, wy, 1, 1)));
+
+    {
+        let cands = cands.to_vec();
+        let view = view.clone();
+        let pop = pop.clone();
+        list.connect_row_activated(move |_l, row| {
+            if let Some(c) = cands.get(row.index() as usize) {
+                replace_word(&view.buffer(), char_len, c);
+            }
+            pop.popdown();
+            view.grab_focus();
+        });
+    }
+    if let Some(first) = list.row_at_index(0) {
+        list.select_row(Some(&first));
+    }
+    pop.popup();
+    list.grab_focus();
 }
 
 /// Wrap a Markdown editor in a header (Edit · Split · Preview toggle) plus a

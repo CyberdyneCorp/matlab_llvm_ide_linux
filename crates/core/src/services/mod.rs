@@ -7,6 +7,7 @@ pub mod brackets;
 pub mod chart_trace;
 pub mod codegen;
 pub mod compiler;
+pub mod completion;
 pub mod control_analysis;
 pub mod dap;
 pub mod filesystem;
