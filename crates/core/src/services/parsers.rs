@@ -25,8 +25,12 @@ pub fn parse_workspace(text: &str) -> Vec<WorkspaceVariable> {
         }
         let name = tokens[0];
         let size = tokens[1];
-        // Reject rows whose "size" isn't a dimension descriptor.
-        if !(size.contains('x') || size.contains('\u{00d7}') || size == "scalar") {
+        // Reject rows whose "size" isn't a dimension descriptor — except "?",
+        // which matlabc emits for variables it cannot introspect yet (e.g. a
+        // `gpuArray`, whose `class`/`size` also crash the REPL). Keep those so
+        // the variable is still listed instead of vanishing from the workspace.
+        let unknown = size == "?";
+        if !(size.contains('x') || size.contains('\u{00d7}') || size == "scalar" || unknown) {
             continue;
         }
         // token[2] integer → Bytes present (4-col); else it's the Class (3-col).
@@ -38,10 +42,12 @@ pub fn parse_workspace(text: &str) -> Vec<WorkspaceVariable> {
         } else {
             (0, tokens[2])
         };
-        out.push(
-            WorkspaceVariable::new(name, dtype_for(class), size, bytes)
-                .with_preview(format!("{size} {class}")),
-        );
+        let preview = if unknown {
+            "value not introspectable (e.g. gpuArray)".to_string()
+        } else {
+            format!("{size} {class}")
+        };
+        out.push(WorkspaceVariable::new(name, dtype_for(class), size, bytes).with_preview(preview));
     }
     out
 }
@@ -58,6 +64,8 @@ fn dtype_for(class: &str) -> DType {
         "categorical" => DType::Categorical,
         "datetime" => DType::Datetime,
         "duration" => DType::Duration,
+        // matlabc reports an unintrospectable class (e.g. gpuArray) as "?".
+        "?" => DType::Object("unknown".into()),
         _ if lower.starts_with("int") || lower.starts_with("uint") => DType::Int32,
         _ if lower.contains("complex") => DType::Complex,
         _ => DType::Double,
@@ -161,6 +169,25 @@ mod tests {
         assert_eq!(vars.len(), 1);
         assert_eq!(vars[0].name, "b");
         assert_eq!(vars[0].dtype, DType::Logical);
+    }
+
+    #[test]
+    fn keeps_uninstrospectable_rows_e_g_gpuarray() {
+        // matlabc emits "?" for size and class of a gpuArray (it cannot
+        // introspect it). The row must still appear in the workspace rather than
+        // be dropped — regression for "can't even detect a gpuArray".
+        let text = "  Name   Size   Class\n\
+                    A      3x3    double\n\
+                    Ag     ?      ?";
+        let vars = parse_workspace(text);
+        assert_eq!(vars.len(), 2);
+        let ag = &vars[1];
+        assert_eq!(ag.name, "Ag");
+        assert_eq!(ag.size, "?");
+        assert_eq!(ag.dtype, DType::Object("unknown".into()));
+        assert!(ag.preview.contains("gpuArray"));
+        // Unknown types are not probed as matrices (a `disp` would also crash).
+        assert!(!ag.dtype.is_inspectable_matrix());
     }
 
     #[test]
