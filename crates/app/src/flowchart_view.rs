@@ -71,6 +71,8 @@ pub fn build_flowchart_view(
     let canvas = DrawingArea::new();
     canvas.set_hexpand(true);
     canvas.set_vexpand(true);
+    // Focusable so the canvas can receive Delete/Backspace key presses.
+    canvas.set_focusable(true);
 
     // Endpoints (world coords) of the edge being dragged, drawn as a rubber band.
     #[allow(clippy::type_complexity)]
@@ -93,6 +95,7 @@ pub fn build_flowchart_view(
             let flow_index = fc.current_flow_index();
             fc.document.with(|doc| {
                 let sel = fc.selected_id.get();
+                let sel_edge = fc.selected_edge.get();
                 let exec = fc.execution_node.get();
                 fc.node_breakpoints.with(|bps| {
                     flow_render::draw_document(
@@ -103,6 +106,7 @@ pub fn build_flowchart_view(
                         flow_index,
                         vp,
                         sel.as_deref(),
+                        sel_edge.as_deref(),
                         bps,
                         exec.as_deref(),
                         &algebraic,
@@ -163,6 +167,29 @@ pub fn build_flowchart_view(
         });
     }
 
+    // Redraw when the selected connection changes.
+    {
+        let c = canvas.clone();
+        fc.selected_edge.subscribe(move |_| c.queue_draw());
+    }
+
+    // Delete / Backspace removes the current selection (node or connection).
+    let keys = gtk::EventControllerKey::new();
+    {
+        let fc = fc.clone();
+        let canvas2 = canvas.clone();
+        keys.connect_key_pressed(move |_c, key, _code, _state| {
+            if matches!(key, gtk::gdk::Key::Delete | gtk::gdk::Key::BackSpace) {
+                fc.delete_selected();
+                canvas2.queue_draw();
+                gtk::glib::Propagation::Stop
+            } else {
+                gtk::glib::Propagation::Proceed
+            }
+        });
+    }
+    canvas.add_controller(keys);
+
     // Click to select (clears selection when clicking empty canvas). Left button
     // only, so the middle-button pan gesture below has the diagram to itself.
     let click = gtk::GestureClick::new();
@@ -178,7 +205,21 @@ pub fn build_flowchart_view(
             let world = flow_render::screen_to_world(vp, x, y);
             let idx = fc.current_flow_index();
             let hit = fc.document.with(|d| flow_render::hit_test(d, idx, world));
-            fc.select(hit);
+            if let Some(id) = hit {
+                fc.select(Some(id));
+            } else {
+                // No node under the cursor: try to pick a connection. The
+                // tolerance is ~6px on screen, scaled into world units.
+                let tol = 6.0 / vp.zoom.max(0.01);
+                let edge = fc
+                    .document
+                    .with(|d| flow_render::edge_hit_test(d, idx, world, tol));
+                match edge {
+                    Some(eid) => fc.select_edge(Some(eid)),
+                    None => fc.select(None),
+                }
+            }
+            canvas2.grab_focus();
             canvas2.queue_draw();
         });
     }

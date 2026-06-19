@@ -52,6 +52,7 @@ pub fn draw_document(
     flow_index: usize,
     vp: Viewport,
     selected: Option<&str>,
+    selected_edge: Option<&str>,
     breakpoints: &BTreeMap<String, BreakpointConfig>,
     exec_node: Option<&str>,
     algebraic: &BTreeSet<String>,
@@ -83,7 +84,14 @@ pub fn draw_document(
         };
         let start = port_point(from, &edge.from.port);
         let end = port_point(to, &edge.to.port);
-        draw_edge(ctx, from.kind.port_anchor(&edge.from.port), start, end);
+        let is_selected = selected_edge == Some(edge.id.as_str());
+        draw_edge(
+            ctx,
+            from.kind.port_anchor(&edge.from.port),
+            start,
+            end,
+            is_selected,
+        );
     }
 
     // Hierarchy: which states have children, each parent's decomposition, and
@@ -281,33 +289,104 @@ pub fn draw_document(
     ctx.restore().ok();
 }
 
-fn draw_edge(
-    ctx: &cairo::Context,
+/// The manhattan routing for an edge as four world-space points
+/// `[start, bend1, bend2, end]`. Shared by the renderer and the hit-test so a
+/// click follows exactly the drawn line.
+fn edge_polyline(
     from_anchor: Option<PortAnchor>,
     start: (f64, f64),
     end: (f64, f64),
-) {
-    set_rgb(ctx, crate::theme_css::current().text_secondary);
-    ctx.set_line_width(1.4);
-    ctx.move_to(start.0, start.1);
+) -> [(f64, f64); 4] {
     let horizontal = matches!(
         from_anchor,
         Some(PortAnchor::Left) | Some(PortAnchor::Right)
     );
     if horizontal {
         let mid_x = (start.0 + end.0) / 2.0;
-        ctx.line_to(mid_x, start.1);
-        ctx.line_to(mid_x, end.1);
+        [start, (mid_x, start.1), (mid_x, end.1), end]
     } else {
         let mid_y = (start.1 + end.1) / 2.0;
-        ctx.line_to(start.0, mid_y);
-        ctx.line_to(end.0, mid_y);
+        [start, (start.0, mid_y), (end.0, mid_y), end]
     }
-    ctx.line_to(end.0, end.1);
+}
+
+/// Distance from point `p` to the line segment `a`–`b`.
+fn point_segment_distance(p: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let len2 = dx * dx + dy * dy;
+    let t = if len2 == 0.0 {
+        0.0
+    } else {
+        (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / len2).clamp(0.0, 1.0)
+    };
+    let (cx, cy) = (a.0 + t * dx, a.1 + t * dy);
+    ((p.0 - cx).powi(2) + (p.1 - cy).powi(2)).sqrt()
+}
+
+/// The id of the edge whose routed line passes within `tol` world units of
+/// `world`, if any. Topmost (last-drawn) edge wins on overlap.
+pub fn edge_hit_test(
+    doc: &FlowchartDocument,
+    flow_index: usize,
+    world: FlowPosition,
+    tol: f64,
+) -> Option<String> {
+    let flow = doc.flows.get(flow_index)?;
+    let by_id: BTreeMap<&str, &FlowNode> = flow.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+    let p = (world.x, world.y);
+    let mut hit = None;
+    for edge in &flow.edges {
+        let (Some(from), Some(to)) = (
+            by_id.get(edge.from.node.as_str()),
+            by_id.get(edge.to.node.as_str()),
+        ) else {
+            continue;
+        };
+        let pts = edge_polyline(
+            from.kind.port_anchor(&edge.from.port),
+            port_point(from, &edge.from.port),
+            port_point(to, &edge.to.port),
+        );
+        let near = pts
+            .windows(2)
+            .any(|s| point_segment_distance(p, s[0], s[1]) <= tol);
+        if near {
+            hit = Some(edge.id.clone());
+        }
+    }
+    hit
+}
+
+fn draw_edge(
+    ctx: &cairo::Context,
+    from_anchor: Option<PortAnchor>,
+    start: (f64, f64),
+    end: (f64, f64),
+    selected: bool,
+) {
+    let tokens = crate::theme_css::current();
+    let color = if selected {
+        tokens.blue
+    } else {
+        tokens.text_secondary
+    };
+    set_rgb(ctx, color);
+    ctx.set_line_width(if selected { 2.6 } else { 1.4 });
+    let pts = edge_polyline(from_anchor, start, end);
+    ctx.move_to(pts[0].0, pts[0].1);
+    for q in &pts[1..] {
+        ctx.line_to(q.0, q.1);
+    }
     ctx.stroke().ok();
     // Arrowhead.
-    set_rgb(ctx, crate::theme_css::current().text_secondary);
-    ctx.arc(end.0, end.1, 2.5, 0.0, std::f64::consts::TAU);
+    set_rgb(ctx, color);
+    ctx.arc(
+        end.0,
+        end.1,
+        if selected { 3.5 } else { 2.5 },
+        0.0,
+        std::f64::consts::TAU,
+    );
     ctx.fill().ok();
 }
 
@@ -516,4 +595,54 @@ pub fn palette_kinds(doc: &FlowchartDocument) -> Vec<NodeKind> {
 fn set_rgb(ctx: &cairo::Context, c: Rgb) {
     let (r, g, b) = c.to_unit();
     ctx.set_source_rgb(r, g, b);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use matforge_core::models::flowchart::SchemaKind;
+    use matforge_core::viewmodels::FlowchartViewModel;
+
+    #[test]
+    fn point_segment_distance_handles_endpoints_and_interior() {
+        let a = (0.0, 0.0);
+        let b = (10.0, 0.0);
+        // Perpendicular drop onto the interior.
+        assert!((point_segment_distance((5.0, 3.0), a, b) - 3.0).abs() < 1e-9);
+        // Past an endpoint clamps to the endpoint.
+        assert!((point_segment_distance((-4.0, 0.0), a, b) - 4.0).abs() < 1e-9);
+        // Degenerate (zero-length) segment is the point distance.
+        assert!((point_segment_distance((3.0, 4.0), a, a) - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn edge_hit_test_picks_the_routed_line_and_misses_empty_space() {
+        let vm = FlowchartViewModel::empty("D", SchemaKind::ControlFlow);
+        vm.move_node("main_start", 0.0, 0.0);
+        vm.move_node("main_end", 240.0, 120.0);
+        vm.document.with(|doc| {
+            let flow = &doc.flows[0];
+            let edge = &flow.edges[0];
+            let from = flow.nodes.iter().find(|n| n.id == edge.from.node).unwrap();
+            let to = flow.nodes.iter().find(|n| n.id == edge.to.node).unwrap();
+            let start = port_point(from, &edge.from.port);
+            let end = port_point(to, &edge.to.port);
+            let pts = edge_polyline(from.kind.port_anchor(&edge.from.port), start, end);
+            // A point on the middle of the first routed segment is a hit.
+            let mid = ((pts[0].0 + pts[1].0) / 2.0, (pts[0].1 + pts[1].1) / 2.0);
+            let hit = edge_hit_test(doc, 0, FlowPosition { x: mid.0, y: mid.1 }, 3.0);
+            assert_eq!(hit.as_deref(), Some(edge.id.as_str()));
+            // A point far from any routed segment misses.
+            let miss = edge_hit_test(
+                doc,
+                0,
+                FlowPosition {
+                    x: start.0,
+                    y: start.1 + 400.0,
+                },
+                3.0,
+            );
+            assert!(miss.is_none());
+        });
+    }
 }

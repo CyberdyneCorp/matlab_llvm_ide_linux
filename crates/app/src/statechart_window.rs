@@ -396,6 +396,7 @@ fn build_chart_canvas(vm: &Rc<StateChartViewModel>) -> GtkBox {
                     0,
                     vp,
                     None,
+                    None,
                     &bps,
                     revealed.as_deref(),
                     &algebraic,

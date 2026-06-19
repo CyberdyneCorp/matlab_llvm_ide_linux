@@ -34,6 +34,9 @@ pub struct TransitionRow {
 pub struct FlowchartViewModel {
     pub document: Property<FlowchartDocument>,
     pub selected_id: Property<Option<String>>,
+    /// The currently selected edge/connection, if any. Mutually exclusive with
+    /// [`selected_id`]: selecting a node clears this and vice-versa.
+    pub selected_edge: Property<Option<String>>,
     pub is_dirty: Property<bool>,
     pub zoom: Property<f64>,
     pub pan: Property<(f64, f64)>,
@@ -53,6 +56,7 @@ impl FlowchartViewModel {
         FlowchartViewModel {
             document: Property::new(document),
             selected_id: Property::new(None),
+            selected_edge: Property::new(None),
             is_dirty: Property::new(false),
             zoom: Property::new(1.0),
             pan: Property::new((0.0, 0.0)),
@@ -378,8 +382,12 @@ impl FlowchartViewModel {
         self.is_dirty.set(true);
     }
 
+    /// Delete the current selection: the selected connection if one is picked,
+    /// otherwise the selected node.
     pub fn delete_selected(&self) {
-        if let Some(id) = self.selected_id.get() {
+        if let Some(edge_id) = self.selected_edge.get() {
+            self.delete_edge(&edge_id);
+        } else if let Some(id) = self.selected_id.get() {
             self.delete_node(&id);
         }
     }
@@ -518,6 +526,9 @@ impl FlowchartViewModel {
                 flow.edges.retain(|e| e.id != edge_id);
             }
         });
+        if self.selected_edge.get().as_deref() == Some(edge_id) {
+            self.selected_edge.set(None);
+        }
         self.is_dirty.set(true);
     }
 
@@ -678,7 +689,19 @@ impl FlowchartViewModel {
     }
 
     pub fn select(&self, id: Option<String>) {
+        if id.is_some() && self.selected_edge.get().is_some() {
+            self.selected_edge.set(None);
+        }
         self.selected_id.set(id);
+    }
+
+    /// Select a connection/edge by id (or clear with `None`). Clears any node
+    /// selection so the two stay mutually exclusive.
+    pub fn select_edge(&self, edge_id: Option<String>) {
+        if edge_id.is_some() && self.selected_id.get().is_some() {
+            self.selected_id.set(None);
+        }
+        self.selected_edge.set(edge_id);
     }
 
     pub fn set_zoom(&self, zoom: f64) {
@@ -1229,6 +1252,31 @@ mod tests {
         vm.delete_node("main_start");
         assert_eq!(vm.node_count(), 1);
         assert_eq!(vm.edge_count(), 0); // edge removed with the node
+    }
+
+    #[test]
+    fn select_and_delete_connection() {
+        let vm = FlowchartViewModel::empty("D", SchemaKind::ControlFlow);
+        // The entry flow ships with main_start --edge--> main_end.
+        let edge_id = vm.document.with(|d| d.flows[0].edges[0].id.clone());
+        assert_eq!(vm.edge_count(), 1);
+
+        // Selecting an edge selects it and clears any node selection.
+        vm.select(Some("main_start".into()));
+        vm.select_edge(Some(edge_id.clone()));
+        assert_eq!(vm.selected_edge.get(), Some(edge_id.clone()));
+        assert_eq!(vm.selected_id.get(), None);
+
+        // Selecting a node clears the edge selection (mutually exclusive).
+        vm.select(Some("main_end".into()));
+        assert_eq!(vm.selected_edge.get(), None);
+
+        // delete_selected on a selected edge removes the connection, not a node.
+        vm.select_edge(Some(edge_id));
+        vm.delete_selected();
+        assert_eq!(vm.edge_count(), 0);
+        assert_eq!(vm.node_count(), 2);
+        assert_eq!(vm.selected_edge.get(), None);
     }
 
     #[test]

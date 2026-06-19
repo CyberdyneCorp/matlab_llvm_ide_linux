@@ -680,6 +680,7 @@ fn build_model_canvas(vm: &Rc<MflowLinkViewModel>) -> GtkBox {
                     0,
                     vp,
                     None,
+                    None,
                     &bps,
                     active.as_deref(),
                     &algebraic,
