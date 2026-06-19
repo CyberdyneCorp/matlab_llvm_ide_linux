@@ -88,6 +88,7 @@ pub fn draw_document(
         return;
     };
     let by_id: BTreeMap<&str, &FlowNode> = flow.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+    let obstacles: Vec<(f64, f64, f64, f64)> = flow.nodes.iter().map(node_rect).collect();
 
     // Edges first (under nodes).
     for edge in &flow.edges {
@@ -97,16 +98,9 @@ pub fn draw_document(
         ) else {
             continue;
         };
-        let start = port_point(from, &edge.from.port);
-        let end = port_point(to, &edge.to.port);
+        let pts = route_edge(from, &edge.from.port, to, &edge.to.port, &obstacles);
         let is_selected = selected_edge == Some(edge.id.as_str());
-        draw_edge(
-            ctx,
-            from.kind.port_anchor(&edge.from.port),
-            start,
-            end,
-            is_selected,
-        );
+        draw_polyline(ctx, &pts, is_selected);
     }
 
     // Hierarchy: which states have children, each parent's decomposition, and
@@ -304,25 +298,126 @@ pub fn draw_document(
     ctx.restore().ok();
 }
 
-/// The manhattan routing for an edge as four world-space points
-/// `[start, bend1, bend2, end]`. Shared by the renderer and the hit-test so a
-/// click follows exactly the drawn line.
-fn edge_polyline(
-    from_anchor: Option<PortAnchor>,
-    start: (f64, f64),
-    end: (f64, f64),
-) -> [(f64, f64); 4] {
-    let horizontal = matches!(
-        from_anchor,
-        Some(PortAnchor::Left) | Some(PortAnchor::Right)
-    );
-    if horizontal {
-        let mid_x = (start.0 + end.0) / 2.0;
-        [start, (mid_x, start.1), (mid_x, end.1), end]
-    } else {
-        let mid_y = (start.1 + end.1) / 2.0;
-        [start, (start.0, mid_y), (end.0, mid_y), end]
+/// A wire leaves/enters a port straight for this length before turning.
+const ROUTE_STUB: f64 = 16.0;
+/// Clearance kept between a routed wire and a node body.
+const ROUTE_CLEAR: f64 = 8.0;
+/// Offset of a detour lane past the bounding box of all nodes.
+const ROUTE_LANE: f64 = 22.0;
+
+fn anchor_dir(a: PortAnchor) -> (f64, f64) {
+    match a {
+        PortAnchor::Top => (0.0, -1.0),
+        PortAnchor::Bottom => (0.0, 1.0),
+        PortAnchor::Left => (-1.0, 0.0),
+        PortAnchor::Right => (1.0, 0.0),
     }
+}
+
+/// Whether the axis-aligned segment `p`–`q` intersects rect `(x, y, w, h)`.
+fn seg_hits_rect(p: (f64, f64), q: (f64, f64), r: (f64, f64, f64, f64)) -> bool {
+    let (rx, ry, rw, rh) = r;
+    let (sx0, sx1) = (p.0.min(q.0), p.0.max(q.0));
+    let (sy0, sy1) = (p.1.min(q.1), p.1.max(q.1));
+    sx1 >= rx && sx0 <= rx + rw && sy1 >= ry && sy0 <= ry + rh
+}
+
+fn path_clear(pts: &[(f64, f64)], obstacles: &[(f64, f64, f64, f64)]) -> bool {
+    pts.windows(2)
+        .all(|s| !obstacles.iter().any(|r| seg_hits_rect(s[0], s[1], *r)))
+}
+
+/// Drop duplicate and collinear points so the polyline has only real corners.
+fn simplify(raw: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
+    let close = |a: f64, b: f64| (a - b).abs() < 1e-6;
+    let mut out: Vec<(f64, f64)> = Vec::with_capacity(raw.len());
+    for p in raw {
+        match out.last() {
+            Some(&l) if close(l.0, p.0) && close(l.1, p.1) => {}
+            _ => out.push(p),
+        }
+    }
+    let mut i = 1;
+    while i + 1 < out.len() {
+        let (a, b, c) = (out[i - 1], out[i], out[i + 1]);
+        let collinear =
+            (close(a.0, b.0) && close(b.0, c.0)) || (close(a.1, b.1) && close(b.1, c.1));
+        if collinear {
+            out.remove(i);
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
+/// Orthogonal route for an edge between two ports, avoiding node bodies. The
+/// wire leaves the source and enters the target along their port normals, then
+/// takes the first candidate path that clears every other node. Shared by the
+/// renderer and the hit-test so a click follows exactly the drawn line.
+fn route_edge(
+    from: &FlowNode,
+    from_port: &str,
+    to: &FlowNode,
+    to_port: &str,
+    obstacles: &[(f64, f64, f64, f64)],
+) -> Vec<(f64, f64)> {
+    let start = port_point(from, from_port);
+    let end = port_point(to, to_port);
+    let sd = anchor_dir(
+        from.kind
+            .port_anchor(from_port)
+            .unwrap_or(PortAnchor::Right),
+    );
+    let ed = anchor_dir(to.kind.port_anchor(to_port).unwrap_or(PortAnchor::Left));
+    let a = (start.0 + sd.0 * ROUTE_STUB, start.1 + sd.1 * ROUTE_STUB);
+    let b = (end.0 + ed.0 * ROUTE_STUB, end.1 + ed.1 * ROUTE_STUB);
+
+    // Inflate obstacles by the clearance; the a→…→b path is tested against these.
+    let infl: Vec<(f64, f64, f64, f64)> = obstacles
+        .iter()
+        .map(|&(x, y, w, h)| {
+            (
+                x - ROUTE_CLEAR,
+                y - ROUTE_CLEAR,
+                w + 2.0 * ROUTE_CLEAR,
+                h + 2.0 * ROUTE_CLEAR,
+            )
+        })
+        .collect();
+
+    let (mx, my) = ((a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0);
+    let top = infl.iter().map(|r| r.1).fold(a.1.min(b.1), f64::min) - ROUTE_LANE;
+    let bot = infl.iter().map(|r| r.1 + r.3).fold(a.1.max(b.1), f64::max) + ROUTE_LANE;
+    let left = infl.iter().map(|r| r.0).fold(a.0.min(b.0), f64::min) - ROUTE_LANE;
+    let right = infl.iter().map(|r| r.0 + r.2).fold(a.0.max(b.0), f64::max) + ROUTE_LANE;
+
+    // Candidate bend-lists between the two stub points, by aesthetic preference.
+    let candidates: [Vec<(f64, f64)>; 8] = [
+        vec![(mx, a.1), (mx, b.1)],       // vertical jog at the midpoint
+        vec![(a.0, my), (b.0, my)],       // horizontal jog at the midpoint
+        vec![(b.0, a.1)],                 // across then in
+        vec![(a.0, b.1)],                 // out then across
+        vec![(a.0, bot), (b.0, bot)],     // detour under everything
+        vec![(a.0, top), (b.0, top)],     // detour over everything
+        vec![(right, a.1), (right, b.1)], // detour around the right
+        vec![(left, a.1), (left, b.1)],   // detour around the left
+    ];
+
+    for bends in candidates {
+        let mut path = Vec::with_capacity(bends.len() + 2);
+        path.push(a);
+        path.extend(bends);
+        path.push(b);
+        if path_clear(&path, &infl) {
+            let mut full = vec![start];
+            full.extend(path);
+            full.push(end);
+            return simplify(full);
+        }
+    }
+    // Nothing clear: fall back to the simple midpoint jog.
+    simplify(vec![start, a, (mx, a.1), (mx, b.1), b, end])
 }
 
 /// Distance from point `p` to the line segment `a`–`b`.
@@ -348,6 +443,7 @@ pub fn edge_hit_test(
 ) -> Option<String> {
     let flow = doc.flows.get(flow_index)?;
     let by_id: BTreeMap<&str, &FlowNode> = flow.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+    let obstacles: Vec<(f64, f64, f64, f64)> = flow.nodes.iter().map(node_rect).collect();
     let p = (world.x, world.y);
     let mut hit = None;
     for edge in &flow.edges {
@@ -357,11 +453,7 @@ pub fn edge_hit_test(
         ) else {
             continue;
         };
-        let pts = edge_polyline(
-            from.kind.port_anchor(&edge.from.port),
-            port_point(from, &edge.from.port),
-            port_point(to, &edge.to.port),
-        );
+        let pts = route_edge(from, &edge.from.port, to, &edge.to.port, &obstacles);
         let near = pts
             .windows(2)
             .any(|s| point_segment_distance(p, s[0], s[1]) <= tol);
@@ -372,13 +464,11 @@ pub fn edge_hit_test(
     hit
 }
 
-fn draw_edge(
-    ctx: &cairo::Context,
-    from_anchor: Option<PortAnchor>,
-    start: (f64, f64),
-    end: (f64, f64),
-    selected: bool,
-) {
+fn draw_polyline(ctx: &cairo::Context, pts: &[(f64, f64)], selected: bool) {
+    if pts.len() < 2 {
+        return;
+    }
+    let end = *pts.last().unwrap();
     let tokens = crate::theme_css::current();
     let color = if selected {
         tokens.blue
@@ -387,13 +477,12 @@ fn draw_edge(
     };
     set_rgb(ctx, color);
     ctx.set_line_width(if selected { 2.6 } else { 1.4 });
-    let pts = edge_polyline(from_anchor, start, end);
     ctx.move_to(pts[0].0, pts[0].1);
     for q in &pts[1..] {
         ctx.line_to(q.0, q.1);
     }
     ctx.stroke().ok();
-    // Arrowhead.
+    // Arrowhead at the destination port.
     set_rgb(ctx, color);
     ctx.arc(
         end.0,
@@ -653,6 +742,47 @@ mod tests {
     }
 
     #[test]
+    fn route_avoids_a_node_sitting_between_the_ports() {
+        // from --> to, with a blocker sitting where the direct mid-jog would
+        // cross. The router must pick a path that clears the blocking node.
+        let mk = |id: &str, x: f64, y: f64| {
+            FlowNode::new(
+                id,
+                NodeKind::SignalGain,
+                "",
+                NodeKind::SignalGain.default_ports(),
+                NodeData::default(),
+                FlowUi::at(FlowPosition { x, y }),
+            )
+        };
+        let from = mk("from", 0.0, 0.0);
+        let to = mk("to", 400.0, 160.0);
+        let blocker = mk("blk", 180.0, 0.0);
+        let obstacles: Vec<(f64, f64, f64, f64)> = [&from, &to, &blocker]
+            .iter()
+            .map(|n| node_rect(n))
+            .collect();
+
+        let pts = route_edge(&from, "out", &to, "in", &obstacles);
+
+        // Endpoints are the real ports, and no segment crosses the blocker
+        // (inflated by the routing clearance).
+        assert_eq!(pts.first().copied(), Some(port_point(&from, "out")));
+        assert_eq!(pts.last().copied(), Some(port_point(&to, "in")));
+        let (bx, by, bw, bh) = node_rect(&blocker);
+        let infl = (
+            bx - ROUTE_CLEAR,
+            by - ROUTE_CLEAR,
+            bw + 2.0 * ROUTE_CLEAR,
+            bh + 2.0 * ROUTE_CLEAR,
+        );
+        assert!(
+            pts.windows(2).all(|s| !seg_hits_rect(s[0], s[1], infl)),
+            "routed wire must not pass through the blocking node: {pts:?}",
+        );
+    }
+
+    #[test]
     fn point_segment_distance_handles_endpoints_and_interior() {
         let a = (0.0, 0.0);
         let b = (10.0, 0.0);
@@ -674,14 +804,14 @@ mod tests {
             let edge = &flow.edges[0];
             let from = flow.nodes.iter().find(|n| n.id == edge.from.node).unwrap();
             let to = flow.nodes.iter().find(|n| n.id == edge.to.node).unwrap();
-            let start = port_point(from, &edge.from.port);
-            let end = port_point(to, &edge.to.port);
-            let pts = edge_polyline(from.kind.port_anchor(&edge.from.port), start, end);
+            let obstacles: Vec<(f64, f64, f64, f64)> = flow.nodes.iter().map(node_rect).collect();
+            let pts = route_edge(from, &edge.from.port, to, &edge.to.port, &obstacles);
             // A point on the middle of the first routed segment is a hit.
             let mid = ((pts[0].0 + pts[1].0) / 2.0, (pts[0].1 + pts[1].1) / 2.0);
             let hit = edge_hit_test(doc, 0, FlowPosition { x: mid.0, y: mid.1 }, 3.0);
             assert_eq!(hit.as_deref(), Some(edge.id.as_str()));
             // A point far from any routed segment misses.
+            let start = port_point(from, &edge.from.port);
             let miss = edge_hit_test(
                 doc,
                 0,
