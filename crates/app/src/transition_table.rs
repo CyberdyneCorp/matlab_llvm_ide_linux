@@ -93,9 +93,10 @@ pub fn open(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>) {
 
 /// The chart's `State` nodes as `(id, display label)` pairs for the dropdowns.
 fn state_list(fc: &Rc<FlowchartViewModel>) -> Vec<(String, String)> {
+    let idx = fc.current_flow_index();
     fc.document.with(|d| {
         d.flows
-            .first()
+            .get(idx)
             .map(|f| {
                 f.nodes
                     .iter()

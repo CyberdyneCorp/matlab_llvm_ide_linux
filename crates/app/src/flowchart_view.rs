@@ -1425,8 +1425,9 @@ fn reparent_on_drop(fc: &Rc<FlowchartViewModel>, id: &str) {
     let mut exclude = fc.descendants(id);
     exclude.insert(id.to_string());
 
+    let idx = fc.current_flow_index();
     let target = fc.document.with(|d| {
-        d.flows.first().and_then(|flow| {
+        d.flows.get(idx).and_then(|flow| {
             flow.nodes
                 .iter()
                 .filter(|n| n.kind == NodeKind::State && !exclude.contains(&n.id))

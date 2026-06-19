@@ -209,15 +209,25 @@ impl FlowchartViewModel {
     /// State nodes flagged by the action linter (id → first error message).
     /// Drives the inspector message and the canvas warning outline.
     pub fn action_lint_nodes(&self) -> std::collections::BTreeMap<String, String> {
-        self.document.with(|d| d.action_lint_nodes())
+        let idx = self.current_flow_index();
+        self.document.with(|d| {
+            if d.schema_kind() != SchemaKind::StateChart {
+                return std::collections::BTreeMap::new();
+            }
+            d.flows
+                .get(idx)
+                .map(flowchart::state_action_errors)
+                .unwrap_or_default()
+        })
     }
 
     /// State nodes flagged by the hierarchy linter (history-on-AND, execution
     /// order collisions), each mapped to its first error message.
     pub fn hierarchy_errors(&self) -> std::collections::BTreeMap<String, String> {
+        let idx = self.current_flow_index();
         self.document.with(|d| {
             d.flows
-                .first()
+                .get(idx)
                 .map(flowchart::hierarchy_errors)
                 .unwrap_or_default()
         })
@@ -225,9 +235,10 @@ impl FlowchartViewModel {
 
     /// Transitive descendants of a state node.
     pub fn descendants(&self, id: &str) -> std::collections::BTreeSet<String> {
+        let idx = self.current_flow_index();
         self.document.with(|d| {
             d.flows
-                .first()
+                .get(idx)
                 .map(|f| flowchart::descendants(f, id))
                 .unwrap_or_default()
         })
@@ -242,10 +253,11 @@ impl FlowchartViewModel {
         if current.as_deref() == new_parent {
             return false;
         }
+        let idx = self.current_flow_index();
         if let Some(parent) = new_parent {
             let cyclic = self.document.with(|d| {
                 d.flows
-                    .first()
+                    .get(idx)
                     .is_some_and(|f| flowchart::is_descendant(f, child, parent))
             });
             if cyclic {
@@ -254,7 +266,7 @@ impl FlowchartViewModel {
         }
         self.push_undo();
         self.document.update(|d| {
-            if let Some(flow) = d.flows.first_mut() {
+            if let Some(flow) = d.flows.get_mut(idx) {
                 if let Some(node) = flow.nodes.iter_mut().find(|n| n.id == child) {
                     node.parent = new_parent.map(|s| s.to_string());
                 }
@@ -290,8 +302,9 @@ impl FlowchartViewModel {
     /// Re-wrap every compound state around its children (a manual "fit").
     pub fn autosize_compounds(&self) {
         self.push_undo();
+        let idx = self.current_flow_index();
         self.document.update(|d| {
-            if let Some(flow) = d.flows.first_mut() {
+            if let Some(flow) = d.flows.get_mut(idx) {
                 flowchart::autosize_compounds(flow);
             }
         });
@@ -320,9 +333,10 @@ impl FlowchartViewModel {
     /// The chart's symbol table (data / events / messages), or an empty table if
     /// the document defines none. State-chart documents only.
     pub fn chart_symbols(&self) -> ChartSymbols {
+        let idx = self.current_flow_index();
         self.document.with(|d| {
             d.flows
-                .first()
+                .get(idx)
                 .and_then(|f| f.symbols.clone())
                 .unwrap_or_default()
         })
@@ -332,8 +346,9 @@ impl FlowchartViewModel {
     /// dirty. An all-empty table is stored as `None` so it serializes away.
     pub fn set_chart_symbols(&self, symbols: ChartSymbols) {
         self.push_undo();
+        let idx = self.current_flow_index();
         self.document.update(|d| {
-            if let Some(flow) = d.flows.first_mut() {
+            if let Some(flow) = d.flows.get_mut(idx) {
                 flow.symbols = if symbols.is_empty() {
                     None
                 } else {
@@ -422,8 +437,9 @@ impl FlowchartViewModel {
     /// All `Transition` edges as table rows, ordered by priority then edge id
     /// (so the table is stable). Drives the state-transition table editor.
     pub fn transition_rows(&self) -> Vec<TransitionRow> {
+        let idx = self.current_flow_index();
         self.document.with(|d| {
-            let Some(flow) = d.flows.first() else {
+            let Some(flow) = d.flows.get(idx) else {
                 return Vec::new();
             };
             let mut rows: Vec<TransitionRow> = flow
@@ -458,8 +474,9 @@ impl FlowchartViewModel {
             EdgeEndpoint::new(src, "out"),
             EdgeEndpoint::new(dst, "in"),
         );
+        let idx = self.current_flow_index();
         self.document.update(|d| {
-            if let Some(flow) = d.flows.first_mut() {
+            if let Some(flow) = d.flows.get_mut(idx) {
                 flow.edges.push(edge);
             }
         });
@@ -478,8 +495,9 @@ impl FlowchartViewModel {
         priority: Option<u32>,
     ) {
         self.push_undo();
+        let idx = self.current_flow_index();
         self.document.update(|d| {
-            if let Some(flow) = d.flows.first_mut() {
+            if let Some(flow) = d.flows.get_mut(idx) {
                 if let Some(edge) = flow.edges.iter_mut().find(|e| e.id == edge_id) {
                     edge.from.node = src.to_string();
                     edge.to.node = dst.to_string();
@@ -494,8 +512,9 @@ impl FlowchartViewModel {
     /// Delete an edge by id. One undo step.
     pub fn delete_edge(&self, edge_id: &str) {
         self.push_undo();
+        let idx = self.current_flow_index();
         self.document.update(|d| {
-            if let Some(flow) = d.flows.first_mut() {
+            if let Some(flow) = d.flows.get_mut(idx) {
                 flow.edges.retain(|e| e.id != edge_id);
             }
         });
@@ -624,8 +643,9 @@ impl FlowchartViewModel {
             },
             FlowUi::at(FlowPosition { x, y }),
         );
+        let idx = self.current_flow_index();
         self.document.update(|d| {
-            if let Some(flow) = d.flows.first_mut() {
+            if let Some(flow) = d.flows.get_mut(idx) {
                 flow.nodes.push(node);
             }
         });
@@ -1609,5 +1629,52 @@ mod tests {
 
         // Unknown library → no instance.
         assert!(vm.instantiate_library("nope", 0.0, 0.0).is_none());
+    }
+
+    #[test]
+    fn editors_target_the_current_sub_flow() {
+        use crate::models::flowchart::{ChartSymbol, Flow, FlowKind, FlowSignature};
+        // A state chart with the root flow plus one empty sub-flow.
+        let mut doc = FlowchartDocument::empty("Chart", SchemaKind::StateChart);
+        doc.flows.push(Flow::new(
+            "sub",
+            FlowKind::Function,
+            "Sub",
+            FlowSignature::default(),
+            vec![],
+            vec![],
+            None,
+        ));
+        let vm = FlowchartViewModel::from_document(doc);
+
+        // Descend into the sub-flow (index 1).
+        vm.nav_stack.set(vec![0, 1]);
+        assert_eq!(vm.current_flow_index(), 1);
+
+        // Node, transition, and symbol edits all land in the sub-flow.
+        let a = vm.add_node(NodeKind::State, 0.0, 0.0);
+        let b = vm.add_node(NodeKind::State, 100.0, 0.0);
+        assert_eq!(vm.node_count(), 2);
+        vm.add_transition(&a, &b);
+        assert_eq!(vm.transition_rows().len(), 1);
+        vm.set_chart_symbols(ChartSymbols {
+            data: Some(vec![ChartSymbol {
+                name: "x".into(),
+                scope: None,
+                symbol_type: None,
+                units: None,
+                trigger: None,
+                initial: None,
+            }]),
+            events: None,
+            messages: None,
+        });
+        assert!(!vm.chart_symbols().is_empty());
+
+        // Back at the root, none of those edits are visible.
+        vm.nav_stack.set(vec![0]);
+        assert_eq!(vm.node_count(), 0);
+        assert!(vm.transition_rows().is_empty());
+        assert!(vm.chart_symbols().is_empty());
     }
 }
