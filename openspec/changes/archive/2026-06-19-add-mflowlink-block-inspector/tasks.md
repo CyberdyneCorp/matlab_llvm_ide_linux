@@ -22,5 +22,5 @@
 
 ## 5. Verify
 - [x] 5.1 `cargo test` (382 tests green), `cargo fmt`, `cargo clippy` (changed files clean)
-- [ ] 5.2 Manual smoke: bad coeff → inline error; feedthrough loop → amber outline
+- [x] 5.2 Manual smoke: bad coeff → inline error; feedthrough loop → amber outline
 </content>

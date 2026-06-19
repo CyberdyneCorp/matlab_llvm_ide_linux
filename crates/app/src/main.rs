@@ -60,6 +60,8 @@ fn build_main_window(app: &Application) {
         .default_height(980)
         .build();
     window.add_css_class("mf-root");
+    // App icon (installed into the icon search path by `icons::install`).
+    window.set_icon_name(Some(icons::APP));
     window.set_size_request(1440, 820);
 
     let settings = Settings::from_env();

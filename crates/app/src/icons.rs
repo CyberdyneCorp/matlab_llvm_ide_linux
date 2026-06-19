@@ -50,10 +50,28 @@ pub fn install() {
             let _ = f.write_all(svg.as_bytes());
         }
     }
+
+    // The application icon (window decorations / taskbar / alt-tab). Written
+    // under `apps/` as both `matforge` (the `.desktop` `Icon=`) and the
+    // application-id, so GTK resolves it whichever the window manager keys on.
+    const APP_SVG: &str = include_str!("../resources/matforge.svg");
+    let apps = dir.join("hicolor/scalable/apps");
+    if std::fs::create_dir_all(&apps).is_ok() {
+        for name in ["matforge", crate::APP_ID] {
+            if let Ok(mut f) = std::fs::File::create(apps.join(format!("{name}.svg"))) {
+                let _ = f.write_all(APP_SVG.as_bytes());
+            }
+        }
+    }
+
     if let Some(display) = gtk::gdk::Display::default() {
         gtk::IconTheme::for_display(&display).add_search_path(&dir);
     }
 }
+
+/// The application-icon name to set on windows (resolved from the search path
+/// registered by [`install`]).
+pub const APP: &str = crate::APP_ID;
 
 /// Resolved icon name for each toolbar/activity concept (Adwaita where it
 /// exists, our custom names otherwise).
