@@ -88,9 +88,9 @@ impl MflowLinkViewModel {
                     self.stop_reason.set(Some(reason.clone()));
                 }
             }
-            SimEvent::Signal { edge_id, t, value } => {
+            SimEvent::Signal { block_id, t, value } => {
                 self.live_signals
-                    .update(|m| m.entry(edge_id.clone()).or_default().push((*t, *value)));
+                    .update(|m| m.entry(block_id.clone()).or_default().push((*t, *value)));
                 // Drive the scope redraw subscription (shared with CSV mode).
                 self.sample_count.update(|c| *c += 1);
             }
@@ -362,8 +362,8 @@ mod tests {
         use crate::services::sim_dap::SimEvent;
         let vm = vm();
         vm.start_live();
-        let sig = |e: &str, t, v| SimEvent::Signal {
-            edge_id: e.into(),
+        let sig = |b: &str, t, v| SimEvent::Signal {
+            block_id: b.into(),
             t,
             value: v,
         };

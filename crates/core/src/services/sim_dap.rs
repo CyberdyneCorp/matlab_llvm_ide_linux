@@ -124,14 +124,36 @@ pub enum SimEvent {
     Time { t: f64, major_step: i64 },
     /// The block currently being evaluated (drives the active-block halo).
     ActiveBlock { node_id: String },
-    /// A logged signal sample on an edge (feeds the live scopes).
-    Signal { edge_id: String, t: f64, value: f64 },
+    /// A logged signal sample on a block (feeds the live scopes).
+    Signal {
+        block_id: String,
+        t: f64,
+        value: f64,
+    },
     /// A zero-crossing was located on a block.
-    ZeroCrossing { node_id: String, t: f64 },
+    ZeroCrossing { block_id: String, t: f64 },
     /// A snapshot was pushed to the step-back ring.
     Snapshot { major_step: i64, depth: i64 },
     /// The run stopped (entry / breakpoint / step / pause / crossing).
     Stopped { reason: String },
+}
+
+/// The block identifier from a signal/sample body: `blockId` (current) or the
+/// legacy `edgeId` spelling.
+fn block_or_edge_id(body: &Value) -> Option<String> {
+    body.get("blockId")
+        .or_else(|| body.get("edgeId"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+/// The block identifier from a zero-crossing body: `blockId` (current) or the
+/// legacy `nodeId` spelling.
+fn block_or_node_id(body: &Value) -> Option<String> {
+    body.get("blockId")
+        .or_else(|| body.get("nodeId"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
 }
 
 /// Interpret a decoded [`DapMessage`] as a [`SimEvent`], if it is one.
@@ -148,12 +170,14 @@ pub fn parse_sim_event(msg: &DapMessage) -> Option<SimEvent> {
             node_id: body.get("nodeId")?.as_str()?.to_string(),
         }),
         "signalSample" => Some(SimEvent::Signal {
-            edge_id: body.get("edgeId")?.as_str()?.to_string(),
+            // The simulator keys samples by `blockId`; accept the legacy
+            // `edgeId` spelling too so old streams still parse.
+            block_id: block_or_edge_id(body)?,
             t: body.get("t")?.as_f64()?,
             value: body.get("value")?.as_f64()?,
         }),
         "zeroCrossing" => Some(SimEvent::ZeroCrossing {
-            node_id: body.get("nodeId")?.as_str()?.to_string(),
+            block_id: block_or_node_id(body)?,
             t: body.get("t")?.as_f64()?,
         }),
         "snapshotTaken" => Some(SimEvent::Snapshot {
@@ -262,18 +286,18 @@ mod tests {
         );
         assert_eq!(
             event(
-                r#"{"type":"event","event":"signalSample","body":{"edgeId":"e3","t":1.2,"value":0.42}}"#
+                r#"{"type":"event","event":"signalSample","body":{"blockId":"scope_1","t":1.2,"value":0.42}}"#
             ),
             SimEvent::Signal {
-                edge_id: "e3".into(),
+                block_id: "scope_1".into(),
                 t: 1.2,
                 value: 0.42
             }
         );
         assert_eq!(
-            event(r#"{"type":"event","event":"zeroCrossing","body":{"nodeId":"sat_1","t":1.2}}"#),
+            event(r#"{"type":"event","event":"zeroCrossing","body":{"blockId":"sat_1","t":1.2}}"#),
             SimEvent::ZeroCrossing {
-                node_id: "sat_1".into(),
+                block_id: "sat_1".into(),
                 t: 1.2
             }
         );
@@ -292,6 +316,26 @@ mod tests {
                 reason: "breakpoint".into()
             }
         );
+    }
+
+    #[test]
+    fn signal_sample_reads_block_id_keeping_legacy_edge_id() {
+        // Regression: the simulator emits `signalSample` keyed by `blockId`. The
+        // parser previously required `edgeId`, so every sample was dropped and
+        // the live scope stayed empty. Both spellings must now parse.
+        let block = event(
+            r#"{"type":"event","event":"signalSample","body":{"blockId":"scope_1","t":2.0,"value":1.5}}"#,
+        );
+        let legacy = event(
+            r#"{"type":"event","event":"signalSample","body":{"edgeId":"scope_1","t":2.0,"value":1.5}}"#,
+        );
+        let expected = SimEvent::Signal {
+            block_id: "scope_1".into(),
+            t: 2.0,
+            value: 1.5,
+        };
+        assert_eq!(block, expected);
+        assert_eq!(legacy, expected);
     }
 
     #[test]
