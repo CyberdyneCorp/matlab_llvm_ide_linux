@@ -391,16 +391,23 @@ fn route_edge(
     let left = infl.iter().map(|r| r.0).fold(a.0.min(b.0), f64::min) - ROUTE_LANE - lane;
     let right = infl.iter().map(|r| r.0 + r.2).fold(a.0.max(b.0), f64::max) + ROUTE_LANE + lane;
 
+    // Detour risers are pushed out along each port's normal by the lane, so two
+    // nets' U-shaped detours nest instead of sharing a vertical/horizontal run.
+    let (rax, rbx) = (a.0 + sd.0 * lane, b.0 + ed.0 * lane);
+    let (ray, rby) = (a.1 + sd.1 * lane, b.1 + ed.1 * lane);
+
     // Candidate bend-lists between the two stub points, by aesthetic preference.
+    // Every riser uses the lane-shifted coordinates so no two nets share a run;
+    // at lane 0 these collapse back to the plain jogs.
     let candidates: [Vec<(f64, f64)>; 8] = [
-        vec![(mx, a.1), (mx, b.1)],       // vertical jog at the midpoint
-        vec![(a.0, my), (b.0, my)],       // horizontal jog at the midpoint
-        vec![(b.0, a.1)],                 // across then in
-        vec![(a.0, b.1)],                 // out then across
-        vec![(a.0, bot), (b.0, bot)],     // detour under everything
-        vec![(a.0, top), (b.0, top)],     // detour over everything
-        vec![(right, a.1), (right, b.1)], // detour around the right
-        vec![(left, a.1), (left, b.1)],   // detour around the left
+        vec![(mx, a.1), (mx, b.1)], // vertical jog at the midpoint
+        vec![(rax, a.1), (rax, my), (rbx, my), (rbx, b.1)], // horizontal jog at the midpoint
+        vec![(rbx, a.1), (rbx, b.1)], // across then in
+        vec![(rax, a.1), (rax, b.1)], // out then across
+        vec![(rax, a.1), (rax, bot), (rbx, bot), (rbx, b.1)], // detour under everything
+        vec![(rax, a.1), (rax, top), (rbx, top), (rbx, b.1)], // detour over everything
+        vec![(a.0, ray), (right, ray), (right, rby), (b.0, rby)], // around the right
+        vec![(a.0, ray), (left, ray), (left, rby), (b.0, rby)], // around the left
     ];
 
     for bends in candidates {
@@ -801,6 +808,69 @@ mod tests {
             EdgeEndpoint::new(fnode, "out"),
             EdgeEndpoint::new(tnode, "in"),
         )
+    }
+
+    /// Whether two axis-aligned polylines share any overlapping collinear run.
+    fn segments_overlap(p: &[(f64, f64)], q: &[(f64, f64)]) -> bool {
+        let close = |x: f64, y: f64| (x - y).abs() < 1e-6;
+        let one = |a0: (f64, f64), a1: (f64, f64), b0: (f64, f64), b1: (f64, f64)| {
+            if close(a0.0, a1.0) && close(b0.0, b1.0) && close(a0.0, b0.0) {
+                let (ay0, ay1) = (a0.1.min(a1.1), a0.1.max(a1.1));
+                let (by0, by1) = (b0.1.min(b1.1), b0.1.max(b1.1));
+                return ay0.max(by0) < ay1.min(by1) - 1e-6;
+            }
+            if close(a0.1, a1.1) && close(b0.1, b1.1) && close(a0.1, b0.1) {
+                let (ax0, ax1) = (a0.0.min(a1.0), a0.0.max(a1.0));
+                let (bx0, bx1) = (b0.0.min(b1.0), b0.0.max(b1.0));
+                return ax0.max(bx0) < ax1.min(bx1) - 1e-6;
+            }
+            false
+        };
+        p.windows(2)
+            .any(|sp| q.windows(2).any(|sq| one(sp[0], sp[1], sq[0], sq[1])))
+    }
+
+    #[test]
+    fn distinct_feedback_nets_do_not_overlap() {
+        // Two sources to the right feed two left-side ports of one target, both
+        // forced to detour back. Their wires must not share a vertical run.
+        let target = FlowNode::new(
+            "t",
+            NodeKind::SignalIntegrator,
+            "",
+            FlowPorts {
+                inputs: vec![
+                    FlowPort::new("in"),
+                    FlowPort::new("reset"),
+                    FlowPort::new("init"),
+                ],
+                outputs: vec![FlowPort::new("out")],
+            },
+            NodeData::default(),
+            FlowUi::at(FlowPosition { x: 0.0, y: 0.0 }),
+        );
+        let nodes = vec![target, gain("s1", 400.0, 0.0), gain("s2", 400.0, 220.0)];
+        let edges = vec![
+            FlowEdge::new(
+                "e1",
+                EdgeKind::Data,
+                EdgeEndpoint::new("s1", "out"),
+                EdgeEndpoint::new("t", "reset"),
+            ),
+            FlowEdge::new(
+                "e2",
+                EdgeKind::Data,
+                EdgeEndpoint::new("s2", "out"),
+                EdgeEndpoint::new("t", "init"),
+            ),
+        ];
+        let (routes, _) = route_flow(&nodes, &edges);
+        let r1 = &routes.iter().find(|(id, _)| id == "e1").unwrap().1;
+        let r2 = &routes.iter().find(|(id, _)| id == "e2").unwrap().1;
+        assert!(
+            !segments_overlap(r1, r2),
+            "distinct feedback wires must not overlap:\n  {r1:?}\n  {r2:?}",
+        );
     }
 
     #[test]
