@@ -353,14 +353,14 @@ fn simplify(raw: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
 /// takes the first candidate path that clears every other node. `lane` pushes
 /// the detour lanes further out so unrelated signals don't share one. Returns
 /// the raw corner list (`route_flow` simplifies it for drawing/hit-testing).
-fn route_edge(
+fn edge_candidates(
     from: &FlowNode,
     from_port: &str,
     to: &FlowNode,
     to_port: &str,
     obstacles: &[(f64, f64, f64, f64)],
     lane: f64,
-) -> Vec<(f64, f64)> {
+) -> Vec<Vec<(f64, f64)>> {
     let start = port_point(from, from_port);
     let end = port_point(to, to_port);
     let sd = anchor_dir(
@@ -391,26 +391,35 @@ fn route_edge(
     let left = infl.iter().map(|r| r.0).fold(a.0.min(b.0), f64::min) - ROUTE_LANE - lane;
     let right = infl.iter().map(|r| r.0 + r.2).fold(a.0.max(b.0), f64::max) + ROUTE_LANE + lane;
 
-    // Detour risers are pushed out along each port's normal by the lane, so two
-    // nets' U-shaped detours nest instead of sharing a vertical/horizontal run.
-    let (rax, rbx) = (a.0 + sd.0 * lane, b.0 + ed.0 * lane);
-    let (ray, rby) = (a.1 + sd.1 * lane, b.1 + ed.1 * lane);
+    // Push the target-side riser out by the lane so each net's *exit* keeps its
+    // own column (out of neighbours'). The source side stays at the stub by
+    // default; `route_flow` nudges it outward (the k>0 variants below) only when
+    // needed to clear a peer wire. At lane 0 / k 0 these are the plain jogs.
+    let rbx = b.0 + ed.0 * lane;
+    let rby = b.1 + ed.1 * lane;
 
-    // Candidate bend-lists between the two stub points, by aesthetic preference.
-    // Every riser uses the lane-shifted coordinates so no two nets share a run;
-    // at lane 0 these collapse back to the plain jogs.
-    let candidates: [Vec<(f64, f64)>; 8] = [
-        vec![(mx, a.1), (mx, b.1)], // vertical jog at the midpoint
-        vec![(rax, a.1), (rax, my), (rbx, my), (rbx, b.1)], // horizontal jog at the midpoint
-        vec![(rbx, a.1), (rbx, b.1)], // across then in
-        vec![(rax, a.1), (rax, b.1)], // out then across
-        vec![(rax, a.1), (rax, bot), (rbx, bot), (rbx, b.1)], // detour under everything
-        vec![(rax, a.1), (rax, top), (rbx, top), (rbx, b.1)], // detour over everything
-        vec![(a.0, ray), (right, ray), (right, rby), (b.0, rby)], // around the right
-        vec![(a.0, ray), (left, ray), (left, rby), (b.0, rby)], // around the left
+    let mut bend_lists: Vec<Vec<(f64, f64)>> = vec![
+        vec![(mx, a.1), (mx, b.1)],             // vertical jog at the midpoint
+        vec![(a.0, my), (rbx, my), (rbx, b.1)], // horizontal jog at the midpoint
+        vec![(rbx, a.1), (rbx, b.1)],           // across then in
+        vec![(a.0, b.1)],                       // out then across
     ];
+    // Vertical detours, with the source riser at a few outward offsets so stacked
+    // sources can take separate columns.
+    for k in 0..3 {
+        let sx = a.0 + sd.0 * k as f64 * ROUTE_LANE_GAP;
+        bend_lists.push(vec![(sx, a.1), (sx, bot), (rbx, bot), (rbx, b.1)]);
+        bend_lists.push(vec![(sx, a.1), (sx, top), (rbx, top), (rbx, b.1)]);
+    }
+    // Horizontal detours, with the source riser at a few outward offsets.
+    for k in 0..3 {
+        let sy = a.1 + sd.1 * k as f64 * ROUTE_LANE_GAP;
+        bend_lists.push(vec![(a.0, sy), (right, sy), (right, rby), (b.0, rby)]);
+        bend_lists.push(vec![(a.0, sy), (left, sy), (left, rby), (b.0, rby)]);
+    }
 
-    for bends in candidates {
+    let mut out: Vec<Vec<(f64, f64)>> = Vec::new();
+    for bends in bend_lists {
         let mut path = Vec::with_capacity(bends.len() + 2);
         path.push(a);
         path.extend(bends);
@@ -419,11 +428,45 @@ fn route_edge(
             let mut full = vec![start];
             full.extend(path);
             full.push(end);
-            return full;
+            out.push(full);
         }
     }
-    // Nothing clear: fall back to the simple midpoint jog.
-    vec![start, a, (mx, a.1), (mx, b.1), b, end]
+    if out.is_empty() {
+        out.push(vec![start, a, (mx, a.1), (mx, b.1), b, end]);
+    }
+    out
+}
+
+/// The preferred (first) route for an edge, ignoring other wires (test helper).
+#[cfg(test)]
+fn route_edge(
+    from: &FlowNode,
+    from_port: &str,
+    to: &FlowNode,
+    to_port: &str,
+    obstacles: &[(f64, f64, f64, f64)],
+    lane: f64,
+) -> Vec<(f64, f64)> {
+    edge_candidates(from, from_port, to, to_port, obstacles, lane)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| vec![port_point(from, from_port), port_point(to, to_port)])
+}
+
+/// Whether two axis-aligned segments lie on the same line and overlap.
+fn collinear_overlap(a0: (f64, f64), a1: (f64, f64), b0: (f64, f64), b1: (f64, f64)) -> bool {
+    let close = |x: f64, y: f64| (x - y).abs() < 1e-6;
+    if close(a0.0, a1.0) && close(b0.0, b1.0) && close(a0.0, b0.0) {
+        let lo = a0.1.min(a1.1).max(b0.1.min(b1.1));
+        let hi = a0.1.max(a1.1).min(b0.1.max(b1.1));
+        return lo < hi - 1e-6;
+    }
+    if close(a0.1, a1.1) && close(b0.1, b1.1) && close(a0.1, b0.1) {
+        let lo = a0.0.min(a1.0).max(b0.0.min(b1.0));
+        let hi = a0.0.max(a1.0).min(b0.0.max(b1.0));
+        return lo < hi - 1e-6;
+    }
+    false
 }
 
 /// Per-net lane spacing: how far apart unrelated signals' detour lanes sit.
@@ -455,6 +498,8 @@ fn last_common_vertex(routes: &[&Vec<(f64, f64)>]) -> Option<(f64, f64)> {
 type Route = (String, Vec<(f64, f64)>);
 /// A routed edge tagged with its source `(node, port)` net, for grouping.
 type SourcedRoute<'a> = (String, (&'a str, &'a str), Vec<(f64, f64)>);
+/// An already-placed wire segment tagged with the net that owns it.
+type PlacedSegment<'a> = ((&'a str, &'a str), ((f64, f64), (f64, f64)));
 
 /// Route every edge of a flow, giving each net (source port) its own detour
 /// lane so unrelated signals don't overlap, and returning the branch-point
@@ -473,7 +518,11 @@ fn route_flow(nodes: &[FlowNode], edges: &[FlowEdge]) -> (Vec<Route>, Vec<(f64, 
         }
     }
 
+    // Greedily route each edge, preferring the candidate path that shares no run
+    // with wires already placed for *other* nets (same-net branches may share a
+    // trunk — that's the fan-out junction).
     let mut raw: Vec<SourcedRoute> = Vec::new();
+    let mut placed: Vec<PlacedSegment> = Vec::new();
     for e in edges {
         let (Some(from), Some(to)) = (
             by_id.get(e.from.node.as_str()),
@@ -483,7 +532,24 @@ fn route_flow(nodes: &[FlowNode], edges: &[FlowEdge]) -> (Vec<Route>, Vec<(f64, 
         };
         let src = (e.from.node.as_str(), e.from.port.as_str());
         let lane = nets.iter().position(|k| *k == src).unwrap_or(0) as f64 * ROUTE_LANE_GAP;
-        let pts = route_edge(from, &e.from.port, to, &e.to.port, &obstacles, lane);
+        let candidates = edge_candidates(from, &e.from.port, to, &e.to.port, &obstacles, lane);
+        let pts = candidates
+            .into_iter()
+            .min_by_key(|path| {
+                path.windows(2)
+                    .map(|s| {
+                        placed
+                            .iter()
+                            .filter(|(net, _)| *net != src)
+                            .filter(|(_, o)| collinear_overlap(s[0], s[1], o.0, o.1))
+                            .count()
+                    })
+                    .sum::<usize>()
+            })
+            .unwrap_or_default();
+        for s in pts.windows(2) {
+            placed.push((src, (s[0], s[1])));
+        }
         raw.push((e.id.clone(), src, pts));
     }
 
