@@ -223,9 +223,13 @@ fn build_transport(
     {
         let vm = vm.clone();
         let dap = dap.clone();
+        let stop_timer = stop_timer.clone();
         back.connect_clicked(move |_| {
+            stop_timer();
             if vm.live.get() {
                 send_sim(&dap, &SimRequest::StepBackMajor);
+            } else {
+                vm.step_back();
             }
         });
     }

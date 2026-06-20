@@ -74,8 +74,10 @@ impl MflowLinkViewModel {
     pub fn on_sim_event(&self, ev: &SimEvent) {
         match ev {
             SimEvent::Time { t, major_step } => {
-                self.sim_time.set(*t);
+                // Set the step first: the clock label is bound to `sim_time` and
+                // reads `major_step` in the same callback, so it must be current.
                 self.major_step.set(*major_step);
+                self.sim_time.set(*t);
             }
             SimEvent::ActiveBlock { node_id } => {
                 self.active_block.set(Some(node_id.clone()));
@@ -89,8 +91,16 @@ impl MflowLinkViewModel {
                 }
             }
             SimEvent::Signal { block_id, t, value } => {
-                self.live_signals
-                    .update(|m| m.entry(block_id.clone()).or_default().push((*t, *value)));
+                self.live_signals.update(|m| {
+                    let series = m.entry(block_id.clone()).or_default();
+                    // A sample at or before the last one means the run rewound
+                    // (step-back / reset): drop the now-invalid future samples
+                    // so the scope trace stays monotonic in time.
+                    if series.last().is_some_and(|&(lt, _)| *t <= lt) {
+                        series.retain(|&(st, _)| st < *t);
+                    }
+                    series.push((*t, *value));
+                });
                 // Drive the scope redraw subscription (shared with CSV mode).
                 self.sample_count.update(|c| *c += 1);
             }
@@ -110,6 +120,11 @@ impl MflowLinkViewModel {
     pub fn step(&self) {
         let total = self.total_samples();
         self.cursor.update(|c| *c = (*c + 1).min(total));
+    }
+
+    /// Move the playback cursor back one sample (clamped at the start).
+    pub fn step_back(&self) {
+        self.cursor.update(|c| *c = c.saturating_sub(1));
     }
 
     /// Move the playback cursor to `n` (clamped).
@@ -251,6 +266,25 @@ mod tests {
     }
 
     #[test]
+    fn cursor_steps_forward_and_back_clamped() {
+        let vm = vm();
+        vm.start();
+        vm.feed_line("t,scope");
+        for r in ["0.0,1.0", "0.1,2.0", "0.2,3.0"] {
+            vm.feed_line(r);
+        }
+        vm.set_cursor(0);
+        vm.step();
+        vm.step();
+        assert_eq!(vm.cursor.get(), 2);
+        vm.step_back();
+        assert_eq!(vm.cursor.get(), 1);
+        vm.step_back();
+        vm.step_back(); // clamps at 0, no underflow
+        assert_eq!(vm.cursor.get(), 0);
+    }
+
+    #[test]
     fn pause_resume_transitions() {
         let vm = vm();
         vm.start();
@@ -381,6 +415,49 @@ mod tests {
         // Reset clears the live buffer.
         vm.reset();
         assert_eq!(vm.signal_count(), 0);
+    }
+
+    #[test]
+    fn step_counter_is_current_when_the_clock_updates() {
+        use crate::services::sim_dap::SimEvent;
+        let vm = vm();
+        vm.start_live();
+        // The clock label is bound to `sim_time` and reads `major_step` in the
+        // same callback; the step must already be set when the clock fires.
+        let captured = std::rc::Rc::new(std::cell::Cell::new(-1i64));
+        let c = captured.clone();
+        let step = vm.major_step.clone();
+        vm.sim_time.subscribe(move |_| c.set(step.get()));
+        vm.on_sim_event(&SimEvent::Time {
+            t: 0.05,
+            major_step: 5,
+        });
+        assert_eq!(captured.get(), 5);
+    }
+
+    #[test]
+    fn stepping_back_truncates_the_live_trace() {
+        use crate::services::sim_dap::SimEvent;
+        let vm = vm();
+        vm.start_live();
+        let sig = |t, v| SimEvent::Signal {
+            block_id: "scope".into(),
+            t,
+            value: v,
+        };
+        // Step forward to t = 0.0, 0.1, 0.2.
+        vm.on_sim_event(&sig(0.0, 0.0));
+        vm.on_sim_event(&sig(0.1, 1.0));
+        vm.on_sim_event(&sig(0.2, 2.0));
+        assert_eq!(vm.scope_series(0).0, vec![0.0, 0.1, 0.2]);
+        // Step back to t = 0.1: the future sample (t = 0.2) is dropped, not
+        // appended out of order, so the trace stays monotonic.
+        vm.on_sim_event(&sig(0.1, 1.0));
+        assert_eq!(vm.scope_series(0).0, vec![0.0, 0.1]);
+        assert_eq!(vm.scope_series(0).1, vec![0.0, 1.0]);
+        // A sample back at t = 0.0 collapses the trace to a single point.
+        vm.on_sim_event(&sig(0.0, 0.0));
+        assert_eq!(vm.scope_series(0).0, vec![0.0]);
     }
 
     #[test]
