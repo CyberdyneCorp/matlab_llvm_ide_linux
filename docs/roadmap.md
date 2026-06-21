@@ -31,6 +31,23 @@ draws plots — all driven by the tested MVVM core.
 > locals work. Covered by the `dap_reaches_stopped_at_breakpoint` integration
 > test (gated on a real `matlabc`).
 
+## Recently shipped (signal-flow / mflowLink)
+
+* **mflowLink editor & simulation** — `▶ Simulate` window with live `--sim-dap`
+  transport (Play / Pause / **Step** / **Step Back** / Restart), the production
+  overlay scope, and snapshot step-back that truncates the live trace correctly.
+* **Wire routing** — orthogonal routing that avoids node bodies, fan-out junction
+  dots, and per-net lanes so unrelated signals never overlap; click-to-select and
+  Delete a wire.
+* **MATLAB Function block** — double-click opens a MATLAB source editor; ports
+  follow the function signature (`u1..uN` → `out`).
+* **Editor block library** tracks the simulator, including the **MPC Controller**
+  and the From Workspace / n-D Lookup / If / Switch-Case Action / custom blocks.
+* **Breakpoints** — per-wire signal breakpoints (persist on the edge, marker on
+  the canvas, installed against the source block on a live run).
+* **Robustness** — new wires/blocks get collision-free ids (no duplicate-edge-id
+  on save), and multi-input ports spread along a block face instead of collapsing.
+
 ## Remaining (architecture in place; UI to build)
 
 These have their **models + view models complete and tested**; what remains is
@@ -38,10 +55,7 @@ the GTK view + transport wiring:
 
 | Phase | What | Foundation ready |
 |-------|------|------------------|
-| P9+ | Flowchart inspector (per-kind fields), emitted-MATLAB preview, edge-drawing by drag, per-node breakpoint toggling | `FlowchartViewModel`, `SignalFlowParamSpec`, codec |
 | P10+ | Plots: heatmap + 3D surface, runtime-PNG blit (needs cairo `png` feature), drag-workspace-var→figure | `PlotsViewModel`, `MatrixView` |
-| P11 | mflowLink signal-flow standalone window (simulation transport, scopes) | signal-flow node kinds, solver/snapshot config models |
-| P12 | mStateflow state-chart standalone window | state/junction/chart node kinds, chart symbols model |
 | — | Watch box, function/data breakpoint panels (DAP plumbing done), Save As / find-results UI | respective view models |
 
 ## Editor refinements (deferred)

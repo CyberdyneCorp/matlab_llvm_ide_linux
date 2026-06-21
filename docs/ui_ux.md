@@ -163,6 +163,12 @@ through the tested [`FlowchartViewModel`](../crates/core/src/viewmodels/flowchar
   always frames the chart; scroll to zoom, drag a node body to move it, and drag
   from a node's output port to another node to draw a control edge (a dashed
   rubber band follows the cursor and snaps to the target's nearest input port).
+  Wires route **orthogonally around node bodies** (never through them), a
+  **junction dot** marks where a fan-out net branches, and unrelated signals take
+  separate lanes so they never overlap. **Click a wire** to select it (it
+  highlights) and **Delete** to remove it; new nodes and wires get ids that never
+  collide with the loaded model's. Ports that share a face (an Integrator's
+  `in`/`reset`/`init`, a MATLAB Function block's `u1..uN`) spread down that face.
 * **Inspector** (right): edits the selected block — its label plus the fields that
   matter for its kind (assignment target/expression, `if`/`while` condition, `for`
   loop variable/iterable, signal-flow block parameters, …) and a
@@ -190,11 +196,23 @@ through the tested [`FlowchartViewModel`](../crates/core/src/viewmodels/flowchar
   a block ▸ **Extract to Subsystem** moves it into a fresh sub-flow, rerouting its
   wires through inport / outport blocks and leaving a linked subsystem node in its
   place.
-* **Library ▾** (signal flow) lists the document's `kind: library` flows; picking
-  one inserts a **masked block** — a subsystem node linked to the library
-  (`library_id`) whose `${name}` mask parameters appear in the inspector. The
-  inspector's **Mask parameters** section edits those values and shows a live
-  `${name}` → value **expansion preview** of the library flow.
+* **MATLAB Function block** (signal flow): **double-click** the block to open a
+  MATLAB-highlighted **source editor** on its `function … = name(u1, …) … end`
+  body (seeded from the single-line expression when there's no body). The block's
+  **ports follow the function signature** — `u1..uN` for the header arity plus a
+  single `out` — and editing the body re-derives them, dropping wires to ports
+  that disappear.
+* **Wire breakpoints** (signal flow): **right-click a wire** to set a signal
+  breakpoint condition (`value > 0`, `abs(value) >= 1`). The condition persists on
+  the edge, the wire shows a red marker, and the breakpoint is installed against
+  the wire's source block when the model is simulated live.
+* **Library ▾** (signal flow) offers every block the simulator implements —
+  including the **MPC Controller**, From Workspace, n-D Lookup, If / Switch-Case
+  Action subsystems, and the custom block — and lists the document's
+  `kind: library` flows; picking one inserts a **masked block** — a subsystem node
+  linked to the library (`library_id`) whose `${name}` mask parameters appear in
+  the inspector. The inspector's **Mask parameters** section edits those values and
+  shows a live `${name}` → value **expansion preview** of the library flow.
 * **Save** writes the `.mflow` back to disk; **Compile** lowers the chart to MATLAB
   via `matlabc -emit-matlab`, writes the generated `.m` beside it, and opens it in
   the editor.
@@ -232,3 +250,13 @@ canvas beside a production **overlay scope** backed by the streamed `SimTrace`:
   **Auto** to autoscale, or pin a manual **Y min / Y max**.
 * **Export** — **CSV** writes the *visible* trace (the pinned time window) and
   **PNG** writes the rendered scope, both beside the model file.
+* **Transport** — **Play / Pause / Step / Back / Restart**. A finished one-shot
+  run scrubs a playback cursor through the trace; a live `--sim-dap` session steps
+  the solver. **Step Back** rewinds the solver one major step and **truncates the
+  live trace** to that time (no samples linger past the rewound cursor); the step
+  counter and clock stay in sync.
+* **Breakpoints** — the **Breakpoints…** popover sets time breakpoints and a
+  signal breakpoint on a chosen wire (watched on its **source block**'s output);
+  any **per-wire breakpoints** carried by the model are installed automatically
+  when the live session starts. A hit pauses the run with a snapshot indicator,
+  and the active block is haloed on the model canvas.
