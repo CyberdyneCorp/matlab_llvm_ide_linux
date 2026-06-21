@@ -69,6 +69,22 @@ impl FlowchartDocument {
         self.flows.iter().find(|f| f.id == id)
     }
 
+    /// `(source_block, condition)` for every wire that carries a signal
+    /// breakpoint — the breakpoints to install when simulating. The simulator
+    /// watches the wire's source-block output, so a wire's breakpoint is keyed
+    /// by `edge.from.node`.
+    pub fn signal_breakpoints(&self) -> Vec<(String, String)> {
+        self.flows
+            .iter()
+            .flat_map(|f| f.edges.iter())
+            .filter_map(|e| {
+                e.breakpoint
+                    .as_ref()
+                    .map(|c| (e.from.node.clone(), c.clone()))
+            })
+            .collect()
+    }
+
     /// Fresh empty document for the given dialect.
     pub fn empty(name: &str, kind: SchemaKind) -> FlowchartDocument {
         match kind {

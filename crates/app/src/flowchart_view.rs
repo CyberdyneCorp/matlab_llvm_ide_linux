@@ -335,6 +335,17 @@ pub fn build_flowchart_view(
                 pop.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
                 pop.popup();
                 canvas2.queue_draw();
+            } else {
+                // Right-clicking a wire opens its signal-breakpoint editor.
+                let tol = 6.0 / vp.zoom.max(0.01);
+                if let Some(eid) = fc
+                    .document
+                    .with(|d| flow_render::edge_hit_test(d, idx, world, tol))
+                {
+                    fc.select_edge(Some(eid.clone()));
+                    open_edge_breakpoint_popover(&fc, &eid, &canvas2, x, y);
+                    canvas2.queue_draw();
+                }
             }
         });
     }
@@ -1547,6 +1558,78 @@ fn append_mask_editor(body: &GtkBox, fc: &Rc<FlowchartViewModel>, node: &FlowNod
     body.append(&pv_title);
     body.append(&preview);
     refresh();
+}
+
+/// A small popover (anchored at the right-click point) for setting or clearing
+/// the signal-breakpoint condition on a wire. The breakpoint persists on the
+/// `FlowEdge` and is installed when the model is simulated.
+fn open_edge_breakpoint_popover(
+    fc: &Rc<FlowchartViewModel>,
+    edge_id: &str,
+    canvas: &DrawingArea,
+    x: f64,
+    y: f64,
+) {
+    let pop = gtk::Popover::new();
+    pop.set_parent(canvas);
+    pop.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+    pop.connect_closed(|p| p.unparent());
+
+    let col = GtkBox::new(Orientation::Vertical, 6);
+    col.set_margin_top(8);
+    col.set_margin_bottom(8);
+    col.set_margin_start(8);
+    col.set_margin_end(8);
+    let lbl = Label::new(Some("Signal breakpoint — pause when:"));
+    lbl.add_css_class("mf-col-title");
+    lbl.set_halign(gtk::Align::Start);
+    col.append(&lbl);
+
+    let entry = Entry::new();
+    entry.set_placeholder_text(Some("value > 0   /   abs(value) >= 1"));
+    if let Some(c) = fc.edge_breakpoint(edge_id) {
+        entry.set_text(&c);
+    }
+    entry.set_hexpand(true);
+    col.append(&entry);
+
+    let row = GtkBox::new(Orientation::Horizontal, 6);
+    let set = Button::with_label("Set");
+    set.add_css_class("mf-compile-cta");
+    let clear = Button::with_label("Clear");
+    row.append(&set);
+    row.append(&clear);
+    col.append(&row);
+    pop.set_child(Some(&col));
+
+    {
+        let fc = fc.clone();
+        let id = edge_id.to_string();
+        let canvas = canvas.clone();
+        let pop = pop.clone();
+        let entry2 = entry.clone();
+        set.connect_clicked(move |_| {
+            fc.set_edge_breakpoint(&id, Some(entry2.text().to_string()));
+            canvas.queue_draw();
+            pop.popdown();
+        });
+    }
+    {
+        let fc = fc.clone();
+        let id = edge_id.to_string();
+        let canvas = canvas.clone();
+        let pop = pop.clone();
+        clear.connect_clicked(move |_| {
+            fc.set_edge_breakpoint(&id, None);
+            canvas.queue_draw();
+            pop.popdown();
+        });
+    }
+    entry.connect_activate({
+        let set = set.clone();
+        move |_| set.emit_clicked()
+    });
+    pop.popup();
 }
 
 fn build_inspector_body(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>) -> ScrolledWindow {

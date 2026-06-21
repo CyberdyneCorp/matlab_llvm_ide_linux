@@ -568,6 +568,23 @@ fn start_live_simulation(
             }
             DapMessage::Event { event, .. } if event.as_str() == "initialized" => {
                 send_dap(&dap2, "configurationDone", None);
+                // Install the model's persistent per-wire signal breakpoints.
+                let bps = vm2.document.with(|d| d.signal_breakpoints());
+                if !bps.is_empty() {
+                    send_sim(
+                        &dap2,
+                        &SimRequest::SetSignalBreakpoints {
+                            source: program.clone(),
+                            breakpoints: bps
+                                .into_iter()
+                                .map(|(block_id, condition)| sim_dap::SignalBreakpoint {
+                                    block_id,
+                                    condition: Some(condition),
+                                })
+                                .collect(),
+                        },
+                    );
+                }
             }
             _ => {
                 if let Some(ev) = sim_dap::parse_sim_event(&msg) {

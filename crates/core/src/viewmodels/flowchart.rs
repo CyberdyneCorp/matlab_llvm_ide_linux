@@ -532,6 +532,40 @@ impl FlowchartViewModel {
         self.is_dirty.set(true);
     }
 
+    /// Set or clear the signal-breakpoint condition on a wire (`None`, or an
+    /// empty/whitespace condition, clears it).
+    pub fn set_edge_breakpoint(&self, edge_id: &str, condition: Option<String>) {
+        let cond = condition
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        let idx = self.current_flow_index();
+        let mut changed = false;
+        self.document.update(|d| {
+            if let Some(flow) = d.flows.get_mut(idx) {
+                if let Some(e) = flow.edges.iter_mut().find(|e| e.id == edge_id) {
+                    if e.breakpoint != cond {
+                        e.breakpoint = cond.clone();
+                        changed = true;
+                    }
+                }
+            }
+        });
+        if changed {
+            self.is_dirty.set(true);
+        }
+    }
+
+    /// The breakpoint condition on a wire, if any.
+    pub fn edge_breakpoint(&self, edge_id: &str) -> Option<String> {
+        let idx = self.current_flow_index();
+        self.document.with(|d| {
+            d.flows
+                .get(idx)
+                .and_then(|f| f.edges.iter().find(|e| e.id == edge_id))
+                .and_then(|e| e.breakpoint.clone())
+        })
+    }
+
     /// Enter the sub-flow of a subsystem node (resolved by its `data.flow_id`).
     /// Returns false when the node has no linked sub-flow in the document.
     pub fn enter_subflow(&self, node_id: &str) -> bool {
@@ -1277,6 +1311,29 @@ mod tests {
         assert_eq!(vm.edge_count(), 0);
         assert_eq!(vm.node_count(), 2);
         assert_eq!(vm.selected_edge.get(), None);
+    }
+
+    #[test]
+    fn edge_breakpoints_persist_and_collect_by_source_block() {
+        let vm = FlowchartViewModel::empty("D", SchemaKind::ControlFlow);
+        let (edge_id, src) = vm.document.with(|d| {
+            let e = &d.flows[0].edges[0];
+            (e.id.clone(), e.from.node.clone())
+        });
+        assert!(vm.edge_breakpoint(&edge_id).is_none());
+
+        vm.set_edge_breakpoint(&edge_id, Some("value > 0".into()));
+        assert_eq!(vm.edge_breakpoint(&edge_id).as_deref(), Some("value > 0"));
+        // Collected for the simulator, keyed by the wire's source block.
+        assert_eq!(
+            vm.document.with(|d| d.signal_breakpoints()),
+            vec![(src, "value > 0".to_string())]
+        );
+
+        // An empty/whitespace condition clears the breakpoint.
+        vm.set_edge_breakpoint(&edge_id, Some("   ".into()));
+        assert!(vm.edge_breakpoint(&edge_id).is_none());
+        assert!(vm.document.with(|d| d.signal_breakpoints()).is_empty());
     }
 
     #[test]

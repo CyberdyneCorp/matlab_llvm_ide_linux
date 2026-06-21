@@ -21,6 +21,10 @@ pub struct FlowEdge {
     pub waypoints: Option<Vec<FlowPosition>>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub data: Option<EdgeData>,
+    /// A signal breakpoint condition on this wire (`value > 0`, `abs(value) >= 1`),
+    /// watched on the wire's source-block output during a live simulation.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub breakpoint: Option<String>,
 }
 
 impl FlowEdge {
@@ -33,6 +37,7 @@ impl FlowEdge {
             label: None,
             waypoints: None,
             data: None,
+            breakpoint: None,
         }
     }
 }
@@ -187,7 +192,23 @@ mod tests {
         let json = serde_json::to_string(&e).unwrap();
         assert!(!json.contains("label"));
         assert!(!json.contains("waypoints"));
+        assert!(!json.contains("breakpoint"));
         assert!(json.contains("\"from\""));
+    }
+
+    #[test]
+    fn edge_breakpoint_roundtrips() {
+        let mut e = FlowEdge::new(
+            "e1",
+            EdgeKind::Data,
+            EdgeEndpoint::new("a", "out"),
+            EdgeEndpoint::new("b", "in"),
+        );
+        e.breakpoint = Some("value > 0.5".into());
+        let json = serde_json::to_string(&e).unwrap();
+        assert!(json.contains("\"breakpoint\":\"value > 0.5\""));
+        let back: FlowEdge = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.breakpoint.as_deref(), Some("value > 0.5"));
     }
 
     #[test]
