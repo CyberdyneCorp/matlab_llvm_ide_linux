@@ -69,13 +69,30 @@ editor interactions through `MATFORGE_FLOW_OP` (`select-edge`, `delete-edge`,
 `set-edge-bp`, `grow-matlab`), one operation per launch, so it exercises the real
 view-model paths and the canvas redraw without needing the simulator.
 
-> **CI and the compiler.** The GitHub Actions `e2e` job runs this harness under
-> `xvfb`, but the runner does **not** build or install `matlabc`. Every
-> **Needs `matlabc`** scenario therefore *skips* in CI; only the compiler-free
-> scenarios (search, breakpoints, explorer, flowchart editor, signal editor
-> features) actually execute there. Run the full suite locally — with
-> `$MATLABC_PATH` pointing at a built `matlabc` — to cover the simulate / debug /
-> REPL paths end to end.
+## CI and the compiler
+
+Two GitHub Actions lanes run this harness:
+
+| Workflow | Triggers | `matlabc` | Covers |
+|----------|----------|:---:|--------|
+| `ci.yml` → `e2e` job | every push / PR | **no** | compiler-free scenarios only (search, breakpoints, explorer, flowchart editor, signal editor features); **Needs `matlabc`** scenarios *skip* |
+| `e2e-matlabc.yml` | nightly + manual `workflow_dispatch` | **yes** | the full suite — builds the real `matlabc` from the public `matlab_llvm` repo and runs with `$MATLABC_PATH` set, so simulate / debug / REPL / compile **actually execute** |
+
+The `e2e-matlabc` lane checks out the public `matlab_llvm` repo, reuses its
+`setup-llvm` composite action to fetch a **prebuilt LLVM 22 tarball** (~30s),
+builds the `matlabc` target (ccache-cached, ~5–15 min warm), then runs the e2e
+suite headlessly with `LD_LIBRARY_PATH=/opt/llvm/lib`.
+
+> **Prerequisite for fast runs.** `setup-llvm`'s 30s path needs the LLVM
+> toolchain tarball published as a `matlab_llvm` release
+> (`toolchain-<llvm-tag>`). Run that repo's `build-llvm-toolchain.yml` once
+> (manual dispatch) to publish it. Until then, the first `e2e-matlabc` run falls
+> back to a ~2h LLVM source build (then cached). This lane is kept off
+> push / PR precisely because of that build cost — dispatch it on demand, or let
+> the nightly run it.
+
+You can always run the full suite **locally** with `$MATLABC_PATH` pointing at a
+built `matlabc` to cover the simulate / debug / REPL paths end to end.
 
 > **Local display note:** the `Ctrl+F` find-in-files scenario relies on a
 > keyboard *accelerator*, which needs a window manager to route focus; it passes

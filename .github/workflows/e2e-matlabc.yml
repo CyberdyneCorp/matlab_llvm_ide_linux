@@ -1,0 +1,101 @@
+name: e2e (matlabc)
+
+# Heavy lane: builds the real `matlabc` compiler from the public matlab_llvm
+# repo and runs the full headless e2e suite with $MATLABC_PATH set, so the
+# matlabc-gated scenarios (mflowLink simulate, mStateflow trace, REPL, compile,
+# debug, plots) actually EXECUTE instead of skipping the way they do in the fast
+# `ci.yml` e2e job.
+#
+# Not wired to pull_request/push: the matlabc build is minutes even with a warm
+# ccache, so it runs on a nightly schedule + on demand rather than gating PRs.
+#
+# PREREQUISITE for fast (~30s) LLVM setup: the matlab_llvm repo must have
+# published its LLVM toolchain tarball — run its `build-llvm-toolchain.yml` once
+# (manual workflow_dispatch). Without that release asset, the setup-llvm action
+# falls back to a ~2h LLVM-22 source build on the first run here (then cached via
+# actions/cache for subsequent runs).
+
+on:
+  workflow_dispatch:
+    inputs:
+      compiler-ref:
+        description: 'matlab_llvm git ref to build (branch, tag, or SHA)'
+        required: false
+        default: 'main'
+  schedule:
+    # Nightly at 05:00 UTC — after the compiler repo's own 04:00 lane, so a
+    # freshly published toolchain tarball is available.
+    - cron: '0 5 * * *'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  e2e-matlabc:
+    name: end-to-end with matlabc
+    runs-on: ubuntu-24.04
+    # Headroom for a cold LLVM build on the very first run (no tarball / no
+    # cache). Warm runs finish in ~15-20 min.
+    timeout-minutes: 180
+    steps:
+      - name: Checkout IDE
+        uses: actions/checkout@v4
+
+      - name: Checkout matlab_llvm compiler
+        uses: actions/checkout@v4
+        with:
+          repository: leonardoaraujosantos/matlab_llvm
+          ref: ${{ github.event.inputs.compiler-ref || 'main' }}
+          path: _compiler
+
+      - name: Set up LLVM 22 + matlabc build deps
+        uses: ./_compiler/.github/actions/setup-llvm
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-ide-matlabc-${{ github.sha }}
+          restore-keys: |
+            ccache-ide-matlabc-
+
+      - name: Build matlabc
+        working-directory: _compiler
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DMATLAB_LLVM_WITH_MLIR=ON \
+            -DMATLAB_LLVM_WITH_PLOT=ON \
+            -DLLVM_DIR="$LLVM_DIR" \
+            -DMLIR_DIR="$MLIR_DIR"
+          cmake --build build --target matlabc -j
+
+      - uses: dtolnay/rust-toolchain@1.92.0
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install GTK 4 + headless X + harness deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev pkg-config xvfb dbus-x11 python3-pip
+          pip install --user -r e2e/requirements.txt
+
+      - name: Build matforge
+        run: cargo build -p matforge
+
+      - name: Sanity-check matlabc runs
+        env:
+          LD_LIBRARY_PATH: /opt/llvm/lib
+        run: |
+          MATLABC="$GITHUB_WORKSPACE/_compiler/build/matlabc"
+          test -x "$MATLABC" || { echo "::error::matlabc was not built at $MATLABC"; exit 1; }
+          "$MATLABC" --version || "$MATLABC" --help | head -1 || true
+
+      - name: Run e2e with matlabc
+        env:
+          # The harness reads $MATLABC_PATH; the matlabc-gated scenarios now run.
+          MATLABC_PATH: ${{ github.workspace }}/_compiler/build/matlabc
+          # matlabc dylib-links the LLVM 22 runtime under /opt/llvm.
+          LD_LIBRARY_PATH: /opt/llvm/lib
+        run: dbus-run-session -- xvfb-run -a python3 e2e/run_e2e.py
