@@ -1902,7 +1902,10 @@ fn open_matlab_fcn_editor(fc: &Rc<FlowchartViewModel>, node_id: &str, canvas: &D
     view.set_bottom_margin(6);
     view.set_left_margin(8);
     view.set_right_margin(8);
-    view.add_css_class("mf-action-editor");
+    // Match the main code editor's dark background + code foreground (the old
+    // `mf-action-editor` class was undefined, so the view fell back to GTK's
+    // light default — a white box in a dark IDE).
+    view.add_css_class("mf-code");
     let buffer = view.buffer();
     buffer.set_enable_undo(true);
     buffer.set_text(&initial);
