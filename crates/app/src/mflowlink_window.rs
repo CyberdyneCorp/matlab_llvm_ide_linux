@@ -148,7 +148,7 @@ fn build_transport(
             }
         }
     };
-    // Model path the sim-DAP adapter keys signal-breakpoint edge ids against.
+    // Model path the sim-DAP adapter resolves signal breakpoints against.
     let source: String = path
         .as_ref()
         .map(|p| p.to_string_lossy().into_owned())
@@ -403,14 +403,26 @@ fn open_breakpoints_popover(
     let cond = entry("abs(value) > 1e3");
     let rtol = entry("relTol e.g. 1e-4");
     let mstep = entry("maxStep e.g. 0.01");
-    let edges: Vec<String> = vm.document.with(|d| {
+    // Each wire is offered as "src → dst"; the breakpoint watches the wire's
+    // source block (the simulator keys signal breakpoints by source block id).
+    let wires: Vec<(String, String)> = vm.document.with(|d| {
         d.flows
             .first()
-            .map(|f| f.edges.iter().map(|e| e.id.clone()).collect())
+            .map(|f| {
+                f.edges
+                    .iter()
+                    .map(|e| {
+                        (
+                            format!("{} → {}", e.from.node, e.to.node),
+                            e.from.node.clone(),
+                        )
+                    })
+                    .collect()
+            })
             .unwrap_or_default()
     });
     let edge_dd =
-        gtk::DropDown::from_strings(&edges.iter().map(String::as_str).collect::<Vec<_>>());
+        gtk::DropDown::from_strings(&wires.iter().map(|(l, _)| l.as_str()).collect::<Vec<_>>());
 
     let grid = gtk::Grid::new();
     grid.set_row_spacing(6);
@@ -421,7 +433,7 @@ fn open_breakpoints_popover(
     grid.set_margin_end(10);
     let rows: [(&str, &gtk::Widget); 5] = [
         ("Time bps (s)", times.upcast_ref()),
-        ("Signal edge", edge_dd.upcast_ref()),
+        ("Break on wire", edge_dd.upcast_ref()),
         ("Condition", cond.upcast_ref()),
         ("relTol", rtol.upcast_ref()),
         ("maxStep", mstep.upcast_ref()),
@@ -452,16 +464,16 @@ fn open_breakpoints_popover(
                 .collect();
             send_sim(&dap, &SimRequest::SetTimeBreakpoints(ts));
 
-            // Signal breakpoint — selected edge + value condition.
+            // Signal breakpoint — the selected wire's source block + condition.
             let condition = cond.text().to_string();
             if !condition.trim().is_empty() {
-                if let Some(edge_id) = edges.get(edge_dd.selected() as usize) {
+                if let Some((_, block_id)) = wires.get(edge_dd.selected() as usize) {
                     send_sim(
                         &dap,
                         &SimRequest::SetSignalBreakpoints {
                             source: source.clone(),
                             breakpoints: vec![SignalBreakpoint {
-                                edge_id: edge_id.clone(),
+                                block_id: block_id.clone(),
                                 condition: Some(condition),
                             }],
                         },
