@@ -138,6 +138,69 @@ pub fn lint_action(src: &str) -> Option<String> {
     })
 }
 
+/// The input/output ports a MATLAB Function block should expose, derived from
+/// its source. The simulator binds inputs positionally on ports `u1..uN` and
+/// returns a single value on `out`, so the inputs follow the function's arity
+/// (the count of header parameters, or the highest `uN` used in an expression).
+///
+/// `function_body` wins when present (matching the simulator); otherwise the
+/// single-line `expression` is scanned for `u1`, `u2`, … references.
+pub fn matlab_fcn_ports(function_body: &str, expression: &str) -> (Vec<String>, Vec<String>) {
+    let arity = function_header_arity(function_body)
+        .or_else(|| expression_u_arity(expression))
+        .unwrap_or(1)
+        .clamp(1, 16);
+    let inputs = (1..=arity).map(|i| format!("u{i}")).collect();
+    (inputs, vec!["out".to_string()])
+}
+
+/// Number of parameters in the first `function … = name(p1, p2, …)` header,
+/// or `None` if there is no parseable header.
+fn function_header_arity(body: &str) -> Option<usize> {
+    let after_fn = body.split_once("function")?.1;
+    // The parameter list is the first parenthesised group on the header line.
+    let line = after_fn.split('\n').next()?;
+    let open = line.find('(')?;
+    let close = line[open..].find(')')? + open;
+    let inside = line[open + 1..close].trim();
+    if inside.is_empty() {
+        return Some(0);
+    }
+    Some(inside.split(',').filter(|p| !p.trim().is_empty()).count())
+}
+
+/// Highest `N` referenced as a `uN` identifier in an expression (1-based), or
+/// `None` if no `uN` appears.
+fn expression_u_arity(expr: &str) -> Option<usize> {
+    let bytes = expr.as_bytes();
+    let mut max = 0usize;
+    let mut i = 0;
+    while i < bytes.len() {
+        // A `u` that starts an identifier (not preceded by a word char).
+        let prev_word = i > 0 && (bytes[i - 1].is_ascii_alphanumeric() || bytes[i - 1] == b'_');
+        if bytes[i] == b'u' && !prev_word {
+            let mut j = i + 1;
+            while j < bytes.len() && bytes[j].is_ascii_digit() {
+                j += 1;
+            }
+            if j > i + 1 {
+                // `u` followed by digits, and not glued to a longer identifier.
+                let trailing_word =
+                    j < bytes.len() && (bytes[j].is_ascii_alphabetic() || bytes[j] == b'_');
+                if !trailing_word {
+                    if let Ok(n) = expr[i + 1..j].parse::<usize>() {
+                        max = max.max(n);
+                    }
+                }
+            }
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+    (max > 0).then_some(max)
+}
+
 /// Parse an on-event editor body (one `EVENT: action` per line) into the
 /// canonical event→action map. Blank lines and lines without a colon are
 /// skipped; a leading `on ` keyword is tolerated (`on Tick: x = x + 1`).
@@ -644,5 +707,30 @@ mod tests {
         assert_eq!(tree[0].children[0].id, "a");
         assert_eq!(tree[0].children[0].children[0].id, "a1");
         assert_eq!(tree[1].id, "top2");
+    }
+
+    #[test]
+    fn matlab_fcn_ports_follow_the_function_header() {
+        // Body header arity wins, single `out`.
+        let (i, o) = matlab_fcn_ports("function y = f(u1, u2)\n y = u1+u2;\nend", "");
+        assert_eq!(i, vec!["u1", "u2"]);
+        assert_eq!(o, vec!["out"]);
+        // Three params, names don't matter (positional u1..u3).
+        let (i, _) = matlab_fcn_ports("function [r] = g(a, b, c)\n r=a;\nend", "");
+        assert_eq!(i, vec!["u1", "u2", "u3"]);
+        // No-arg function → at least one input (clamped to 1).
+        let (i, _) = matlab_fcn_ports("function y = z()\n y = 0;\nend", "");
+        assert_eq!(i, vec!["u1"]);
+    }
+
+    #[test]
+    fn matlab_fcn_ports_fall_back_to_expression_u_refs() {
+        // Highest uN in the expression sets the arity.
+        let (i, o) = matlab_fcn_ports("", "u1 * sin(2*pi*t) + sqrt(abs(u2)) - 1.0");
+        assert_eq!(i, vec!["u1", "u2"]);
+        assert_eq!(o, vec!["out"]);
+        // `u10` is not confused with `u1`; a glued identifier (`u1x`) is ignored.
+        assert_eq!(matlab_fcn_ports("", "u3 + u10").0.len(), 10);
+        assert_eq!(matlab_fcn_ports("", "u1x + 1").0, vec!["u1"]); // no uN → default 1
     }
 }
