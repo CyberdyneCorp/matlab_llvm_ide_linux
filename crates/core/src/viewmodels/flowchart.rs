@@ -85,6 +85,29 @@ impl FlowchartViewModel {
         n
     }
 
+    /// A fresh `<prefix><n>` id that collides with no existing node or edge id
+    /// in the document. The sequence counter starts at 0 even for a loaded model
+    /// (whose ids may already be `e1`, `n2`, …), so a freshly generated id must
+    /// be checked against what's on disk — otherwise a new wire can duplicate an
+    /// existing edge id and the compiler rejects the model.
+    fn fresh_id(&self, prefix: &str) -> String {
+        let taken: std::collections::HashSet<String> = self.document.with(|d| {
+            let mut s: std::collections::HashSet<String> =
+                d.flows.iter().map(|f| f.id.clone()).collect();
+            for f in &d.flows {
+                s.extend(f.nodes.iter().map(|n| n.id.clone()));
+                s.extend(f.edges.iter().map(|e| e.id.clone()));
+            }
+            s
+        });
+        loop {
+            let candidate = format!("{prefix}{}", self.next_seq());
+            if !taken.contains(&candidate) {
+                return candidate;
+            }
+        }
+    }
+
     fn push_undo(&self) {
         self.undo_stack.borrow_mut().push(self.document.get());
         self.redo_stack.borrow_mut().clear();
@@ -94,7 +117,7 @@ impl FlowchartViewModel {
     /// and return its generated id.
     pub fn add_node(&self, kind: NodeKind, x: f64, y: f64) -> String {
         self.push_undo();
-        let id = format!("n{}", self.next_seq());
+        let id = self.fresh_id("n");
         let node = FlowNode::new(
             &id,
             kind,
@@ -426,7 +449,7 @@ impl FlowchartViewModel {
         to_port: &str,
     ) -> String {
         self.push_undo();
-        let id = format!("e{}", self.next_seq());
+        let id = self.fresh_id("e");
         let edge = FlowEdge::new(
             &id,
             EdgeKind::Control,
@@ -476,7 +499,7 @@ impl FlowchartViewModel {
     /// Add an empty `Transition` edge between two states and return its id.
     pub fn add_transition(&self, src: &str, dst: &str) -> String {
         self.push_undo();
-        let id = format!("t{}", self.next_seq());
+        let id = self.fresh_id("t");
         let edge = FlowEdge::new(
             &id,
             EdgeKind::Transition,
@@ -671,8 +694,8 @@ impl FlowchartViewModel {
         }
         let idx = self.current_flow_index();
         let set: std::collections::BTreeSet<String> = ids.iter().cloned().collect();
-        let sub_flow_id = format!("flow_sub{}", self.next_seq());
-        let sub_node_id = format!("n{}", self.next_seq());
+        let sub_flow_id = self.fresh_id("flow_sub");
+        let sub_node_id = self.fresh_id("n");
         self.push_undo();
         let mut result = None;
         self.document.update(|d| {
@@ -713,7 +736,7 @@ impl FlowchartViewModel {
             })
         })?;
         self.push_undo();
-        let id = format!("n{}", self.next_seq());
+        let id = self.fresh_id("n");
         let mask: BTreeMap<String, String> =
             names.into_iter().map(|n| (n, String::new())).collect();
         let node = FlowNode::new(
@@ -1411,6 +1434,36 @@ mod tests {
         set_body(&vm, "function y = g(u1)\n y = u1;\nend");
         assert_eq!(ins(&vm), vec!["u1"]);
         assert_eq!(vm.edge_count(), 0, "edge to the removed u3 port is dropped");
+    }
+
+    #[test]
+    fn added_edge_ids_do_not_collide_with_loaded_ids() {
+        use crate::services::flowchart_codec;
+        // A loaded model whose edges are already e1/e2/e3 (the common case).
+        let json = r#"{"schema":"matforge.flowchart","version":"0.1.0",
+          "settings":{"kind":"signal_flow"},
+          "flows":[{"id":"f","kind":"program","name":"m","signature":{"inputs":[],"outputs":[]},
+            "nodes":[
+              {"id":"a","kind":"signal_constant","ports":{"in":[],"out":[{"id":"out"}]}},
+              {"id":"b","kind":"signal_scope","ports":{"in":[{"id":"in"}],"out":[]}}],
+            "edges":[
+              {"id":"e1","kind":"data","from":{"node":"a","port":"out"},"to":{"node":"b","port":"in"}},
+              {"id":"e2","kind":"data","from":{"node":"a","port":"out"},"to":{"node":"b","port":"in"}},
+              {"id":"e3","kind":"data","from":{"node":"a","port":"out"},"to":{"node":"b","port":"in"}}]}]}"#;
+        let vm = FlowchartViewModel::from_document(flowchart_codec::decode_str(json).unwrap());
+        // Add a node (bumps the shared seq) then a wire — the wire must not reuse
+        // a loaded edge id (the bug produced a duplicate `e2`).
+        let n = vm.add_node(NodeKind::SignalGain, 0.0, 0.0);
+        let e = vm.add_edge(&n, "out", "b", "in");
+        assert!(
+            !["e1", "e2", "e3"].contains(&e.as_str()),
+            "new edge id {e} duplicates a loaded id"
+        );
+        let ids: Vec<String> = vm
+            .document
+            .with(|d| d.flows[0].edges.iter().map(|x| x.id.clone()).collect());
+        let uniq: std::collections::HashSet<_> = ids.iter().collect();
+        assert_eq!(ids.len(), uniq.len(), "duplicate edge ids present: {ids:?}");
     }
 
     #[test]
