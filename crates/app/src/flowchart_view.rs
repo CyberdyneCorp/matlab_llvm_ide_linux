@@ -1931,8 +1931,13 @@ fn open_matlab_fcn_editor(fc: &Rc<FlowchartViewModel>, node_id: &str, canvas: &D
 
     let scroll = ScrolledWindow::new();
     scroll.set_vexpand(true);
+    // The gutter is a fixed-width sibling; the editor must take the rest of the
+    // row, or it collapses to a sliver and the code looks missing.
+    scroll.set_hexpand(true);
     scroll.set_child(Some(&view));
+    view.set_hexpand(true);
     let content = GtkBox::new(Orientation::Horizontal, 0);
+    content.set_vexpand(true);
     content.append(&gutter);
     content.append(&scroll);
     root.append(&content);
