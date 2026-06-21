@@ -244,6 +244,9 @@ pub fn build_flowchart_view(
             if let Some(hit) = fc.document.with(|d| flow_render::hit_test(d, idx, world)) {
                 if fc.enter_subflow(&hit) {
                     canvas2.queue_draw();
+                } else if fc.node(&hit).map(|n| n.kind) == Some(NodeKind::SignalMatlabFcn) {
+                    // Not a subsystem: a MATLAB Function block opens its source.
+                    open_matlab_fcn_editor(&fc, &hit, &canvas2);
                 }
             }
         });
@@ -1633,6 +1636,13 @@ fn build_inspector_body(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>) -> Scro
                         err2.set_visible(false);
                     }
                     fc2.edit_node(&id2, |n| field_set(n, &key, &value));
+                    // A MATLAB Function block's ports follow its source: editing
+                    // the expression / body re-derives the u1..uN / out ports.
+                    if matches!(&key, FieldKey::Param(k)
+                        if k == "function_body" || k == "expression")
+                    {
+                        fc2.sync_matlab_fcn_ports(&id2);
+                    }
                 });
                 field.append(&lbl);
                 field.append(&entry);
@@ -1748,6 +1758,105 @@ fn build_action_field(
     field.append(&scroll);
     field.append(&err);
     field
+}
+
+/// Open a MATLAB-highlighted source editor for a MATLAB Function block.
+/// Double-clicking the block shows its `function … = name(u1, …) … end` body;
+/// edits write back to `function_body` and re-derive the block's ports so they
+/// follow the function signature (`u1..uN` → `out`).
+fn open_matlab_fcn_editor(fc: &Rc<FlowchartViewModel>, node_id: &str, canvas: &DrawingArea) {
+    use matforge_core::models::flowchart::matlab_fcn_ports;
+    use matforge_core::services::highlighter::Language;
+
+    let Some(node) = fc.node(node_id) else {
+        return;
+    };
+    // Show the function body; seed one from the single-line expression if empty.
+    let body = node.param_str("function_body").unwrap_or_default();
+    let initial = if !body.trim().is_empty() {
+        body
+    } else {
+        let expr = node.param_str("expression").unwrap_or_default();
+        let arity = matlab_fcn_ports("", &expr).0.len().max(1);
+        let args = (1..=arity)
+            .map(|i| format!("u{i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        if expr.trim().is_empty() {
+            format!("function out = fcn({args})\n  out = u1;\nend\n")
+        } else {
+            format!(
+                "function out = fcn({args})\n  out = {};\nend\n",
+                expr.trim()
+            )
+        }
+    };
+
+    let window = gtk::Window::builder()
+        .title(format!("MATLAB Function — {node_id}"))
+        .default_width(580)
+        .default_height(380)
+        .build();
+    window.add_css_class("mf-root");
+    if let Some(parent) = crate::ui::main_window() {
+        window.set_transient_for(Some(&parent));
+    }
+    let root = GtkBox::new(Orientation::Vertical, 0);
+    root.add_css_class("mf-window");
+
+    let view = TextView::new();
+    view.set_monospace(true);
+    view.set_top_margin(6);
+    view.set_bottom_margin(6);
+    view.set_left_margin(8);
+    view.set_right_margin(8);
+    view.add_css_class("mf-action-editor");
+    let buffer = view.buffer();
+    buffer.set_text(&initial);
+    crate::highlight::ensure_tags(&buffer);
+    crate::highlight::apply(&buffer, Language::Matlab);
+
+    let scroll = ScrolledWindow::new();
+    scroll.set_vexpand(true);
+    scroll.set_child(Some(&view));
+    root.append(&scroll);
+
+    let status = Label::new(None);
+    status.add_css_class("mf-col-title");
+    status.set_halign(gtk::Align::Start);
+    status.set_margin_start(8);
+    status.set_margin_top(4);
+    status.set_margin_bottom(6);
+    let set_status = |s: &Label, text: &str| {
+        let ins = matlab_fcn_ports(text, "").0.join(", ");
+        s.set_text(&format!("ports: {ins} → out"));
+    };
+    set_status(&status, &initial);
+    root.append(&status);
+
+    // Commit on every edit: write the body, re-derive ports, redraw the canvas.
+    {
+        let fc = fc.clone();
+        let id = node_id.to_string();
+        let canvas = canvas.clone();
+        let status = status.clone();
+        buffer.connect_changed(move |b| {
+            let text = b.text(&b.start_iter(), &b.end_iter(), false).to_string();
+            crate::highlight::apply(b, Language::Matlab);
+            fc.edit_node(&id, |n| {
+                n.data
+                    .params
+                    .get_or_insert_with(Default::default)
+                    .insert("function_body".into(), ParamValue::Str(text.clone()));
+            });
+            fc.sync_matlab_fcn_ports(&id);
+            set_status(&status, &text);
+            canvas.queue_draw();
+        });
+    }
+
+    window.set_child(Some(&root));
+    window.present();
 }
 
 /// Which `FlowNode` field an inspector entry edits.

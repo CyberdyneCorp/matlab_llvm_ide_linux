@@ -7,9 +7,10 @@ use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 
 use crate::models::flowchart::{
-    self, ChartSymbols, EdgeData, EdgeEndpoint, EdgeKind, Flow, FlowEdge, FlowKind, FlowNode,
-    FlowPort, FlowPorts, FlowPosition, FlowSignature, FlowUi, FlowchartDocument, NodeData,
-    NodeKind, ParamValue, SchemaKind, SolverConfig, StateDecomposition, TransitionLabel,
+    self, matlab_fcn_ports, ChartSymbols, EdgeData, EdgeEndpoint, EdgeKind, Flow, FlowEdge,
+    FlowKind, FlowNode, FlowPort, FlowPorts, FlowPosition, FlowSignature, FlowUi,
+    FlowchartDocument, NodeData, NodeKind, ParamValue, SchemaKind, SolverConfig,
+    StateDecomposition, TransitionLabel,
 };
 
 use crate::models::BreakpointConfig;
@@ -529,6 +530,45 @@ impl FlowchartViewModel {
         if self.selected_edge.get().as_deref() == Some(edge_id) {
             self.selected_edge.set(None);
         }
+        self.is_dirty.set(true);
+    }
+
+    /// Re-derive a MATLAB Function block's `u1..uN` input ports + `out` from its
+    /// source (`function_body`, else `expression`) so the ports follow the
+    /// function signature. Edges to ports that no longer exist are dropped. A
+    /// no-op when the ports already match (avoids spurious dirty/redraw).
+    pub fn sync_matlab_fcn_ports(&self, node_id: &str) {
+        let Some(node) = self.node(node_id) else {
+            return;
+        };
+        if node.kind != NodeKind::SignalMatlabFcn {
+            return;
+        }
+        let body = node.param_str("function_body").unwrap_or_default();
+        let expr = node.param_str("expression").unwrap_or_default();
+        let (inputs, outputs) = matlab_fcn_ports(&body, &expr);
+
+        let cur_in: Vec<&str> = node.ports.inputs.iter().map(|p| p.id.as_str()).collect();
+        let cur_out: Vec<&str> = node.ports.outputs.iter().map(|p| p.id.as_str()).collect();
+        if cur_in == inputs && cur_out == outputs {
+            return;
+        }
+
+        let idx = self.current_flow_index();
+        self.document.update(|d| {
+            let Some(flow) = d.flows.get_mut(idx) else {
+                return;
+            };
+            if let Some(n) = flow.nodes.iter_mut().find(|n| n.id == node_id) {
+                n.ports.inputs = inputs.iter().map(|s| FlowPort::new(s)).collect();
+                n.ports.outputs = outputs.iter().map(|s| FlowPort::new(s)).collect();
+            }
+            // Prune edges that referenced a port that just disappeared.
+            flow.edges.retain(|e| {
+                (e.to.node != node_id || inputs.iter().any(|p| p == &e.to.port))
+                    && (e.from.node != node_id || outputs.iter().any(|p| p == &e.from.port))
+            });
+        });
         self.is_dirty.set(true);
     }
 
@@ -1277,6 +1317,43 @@ mod tests {
         assert_eq!(vm.edge_count(), 0);
         assert_eq!(vm.node_count(), 2);
         assert_eq!(vm.selected_edge.get(), None);
+    }
+
+    #[test]
+    fn matlab_fcn_ports_track_the_function_signature() {
+        let vm = FlowchartViewModel::empty("D", SchemaKind::SignalFlow);
+        let id = vm.add_node(NodeKind::SignalMatlabFcn, 0.0, 0.0);
+        let set_body = |vm: &FlowchartViewModel, body: &str| {
+            vm.edit_node(&id, |n| {
+                n.data
+                    .params
+                    .get_or_insert_with(Default::default)
+                    .insert("function_body".into(), ParamValue::Str(body.into()));
+            });
+            vm.sync_matlab_fcn_ports(&id);
+        };
+        let ins = |vm: &FlowchartViewModel| -> Vec<String> {
+            vm.node(&id)
+                .unwrap()
+                .ports
+                .inputs
+                .iter()
+                .map(|p| p.id.clone())
+                .collect()
+        };
+
+        set_body(&vm, "function y = f(u1, u2, u3)\n y = u1;\nend");
+        assert_eq!(ins(&vm), vec!["u1", "u2", "u3"]);
+        assert_eq!(vm.node(&id).unwrap().ports.outputs[0].id.as_str(), "out");
+
+        // Wire an edge into u3, then shrink the signature: the now-missing port's
+        // edge is pruned.
+        let src = vm.add_node(NodeKind::SignalConstant, -100.0, 0.0);
+        vm.add_edge(&src, "out", &id, "u3");
+        assert_eq!(vm.edge_count(), 1);
+        set_body(&vm, "function y = g(u1)\n y = u1;\nend");
+        assert_eq!(ins(&vm), vec!["u1"]);
+        assert_eq!(vm.edge_count(), 0, "edge to the removed u3 port is dropped");
     }
 
     #[test]
