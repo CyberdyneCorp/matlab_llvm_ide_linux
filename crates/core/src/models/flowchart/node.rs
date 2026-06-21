@@ -770,6 +770,16 @@ impl NodeKind {
                 "out" => Some(Right),
                 _ => None,
             },
+            // MATLAB Function: `out` on the right, the `u1..uN` inputs on the
+            // left (without this they'd fall through to None and collapse onto
+            // the default bottom-center point, overlapping).
+            SignalMatlabFcn => {
+                if id == "out" {
+                    Some(Right)
+                } else {
+                    Some(Left)
+                }
+            }
             _ => match id {
                 "in" => Some(Left),
                 "out" => Some(Right),
@@ -1164,6 +1174,20 @@ mod tests {
             Some(PortAnchor::Right)
         );
         assert_eq!(NodeKind::Assignment.port_anchor("nope"), None);
+        // MATLAB Function: u-inputs anchor left (not None → no bottom-center
+        // collapse), output anchors right.
+        assert_eq!(
+            NodeKind::SignalMatlabFcn.port_anchor("u1"),
+            Some(PortAnchor::Left)
+        );
+        assert_eq!(
+            NodeKind::SignalMatlabFcn.port_anchor("u2"),
+            Some(PortAnchor::Left)
+        );
+        assert_eq!(
+            NodeKind::SignalMatlabFcn.port_anchor("out"),
+            Some(PortAnchor::Right)
+        );
     }
 
     #[test]
