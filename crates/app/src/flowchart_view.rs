@@ -1916,9 +1916,11 @@ fn open_matlab_fcn_editor(fc: &Rc<FlowchartViewModel>, node_id: &str, canvas: &D
 
     // Ports status (right-aligned in the toolbar).
     let status = Label::new(None);
-    status.add_css_class("mf-col-title");
+    status.add_css_class("mf-text-muted");
+    status.add_css_class("mf-mono-sm");
     status.set_halign(gtk::Align::End);
     status.set_hexpand(true);
+    status.set_margin_end(6);
     let set_status = |s: &Label, text: &str| {
         let ins = matlab_fcn_ports(text, "").0.join(", ");
         s.set_text(&format!("ports: {ins} → out"));
@@ -1950,11 +1952,12 @@ fn open_matlab_fcn_editor(fc: &Rc<FlowchartViewModel>, node_id: &str, canvas: &D
     let hint = Label::new(Some(
         "Line breakpoints persist in the model; the simulator does not stop on them yet.",
     ));
-    hint.add_css_class("mf-col-title");
+    hint.add_css_class("mf-text-muted");
+    hint.add_css_class("mf-fcn-hint");
     hint.set_halign(gtk::Align::Start);
-    hint.set_margin_start(8);
-    hint.set_margin_top(4);
-    hint.set_margin_bottom(6);
+    hint.set_margin_start(10);
+    hint.set_margin_top(5);
+    hint.set_margin_bottom(7);
     root.append(&hint);
 
     // Commit on every edit: write the body, re-derive ports, redraw.
@@ -2053,12 +2056,16 @@ fn mf_build_editor_toolbar(
     find_bar: &gtk::Revealer,
     status: &Label,
 ) -> GtkBox {
-    let bar = GtkBox::new(Orientation::Horizontal, 4);
-    bar.add_css_class("mf-window");
-    bar.set_margin_start(6);
-    bar.set_margin_end(6);
-    bar.set_margin_top(6);
-    bar.set_margin_bottom(4);
+    let bar = GtkBox::new(Orientation::Horizontal, 2);
+    bar.add_css_class("mf-flow-toolbar");
+    bar.add_css_class("mf-fcn-toolbar");
+    bar.add_css_class("mf-border-bottom");
+
+    let sep = || {
+        let s = gtk::Separator::new(Orientation::Vertical);
+        s.add_css_class("mf-tb-sep");
+        s
+    };
 
     // Buttons that trigger the TextView's built-in actions.
     for (label, action) in [
@@ -2069,18 +2076,22 @@ fn mf_build_editor_toolbar(
         ("Paste", "clipboard.paste"),
     ] {
         let b = Button::with_label(label);
-        b.add_css_class("flat");
+        b.add_css_class("mf-tool");
         let view2 = view.clone();
         let action = action.to_string();
         b.connect_clicked(move |_| {
             let _ = view2.activate_action(&action, None);
             view2.grab_focus();
         });
+        if label == "Cut" {
+            bar.append(&sep());
+        }
         bar.append(&b);
     }
 
+    bar.append(&sep());
     let find_btn = Button::with_label("Find");
-    find_btn.add_css_class("flat");
+    find_btn.add_css_class("mf-tool");
     {
         let find_bar = find_bar.clone();
         find_btn.connect_clicked(move |_| {
@@ -2088,16 +2099,19 @@ fn mf_build_editor_toolbar(
         });
     }
     bar.append(&find_btn);
+    bar.append(&sep());
 
     // "Break on output": set/clear the signal breakpoint on the block's output
     // wire(s). Insensitive until the block's output is wired somewhere.
     let cond = Entry::new();
     cond.set_width_chars(10);
+    cond.add_css_class("mf-bp-cond");
     cond.set_placeholder_text(Some("value > 0"));
     let existing = fc.block_output_breakpoint(node_id);
     cond.set_text(existing.as_deref().unwrap_or("value > 0"));
     let toggle = gtk::ToggleButton::with_label("Break on output");
-    toggle.add_css_class("flat");
+    toggle.add_css_class("mf-tool");
+    toggle.add_css_class("mf-bp-toggle");
     toggle.set_active(existing.is_some());
     if fc.node_output_edge_count(node_id) == 0 {
         toggle.set_sensitive(false);
