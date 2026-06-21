@@ -341,6 +341,16 @@ def scenario_signal_editor_features():
     finally:
         app.close()
 
+    # Opening the MATLAB Function source editor publishes its line-number gutter.
+    app = open_signal("open-matlab")
+    try:
+        st = app.wait_for(lambda s: s.get("gutter_rect"),
+                          timeout=10, what="MATLAB Function editor opens with a gutter")
+        check("double-click opens the MATLAB Function editor (with a line gutter)",
+              bool(st.get("gutter_rect")), f"gutter_rect={st.get('gutter_rect')}")
+    finally:
+        app.close()
+
     # Growing the MATLAB Function signature grows its input ports to u1..u3.
     app = open_signal("grow-matlab")
     try:

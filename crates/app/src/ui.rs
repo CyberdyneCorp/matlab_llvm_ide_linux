@@ -1993,6 +1993,8 @@ pub fn flow_e2e_op(op: &str) {
                 fc.set_edge_breakpoint(&e, Some("value > 0".into()));
             }
         }
+        // Open the MATLAB Function source editor (gutter / toolbar / find).
+        "open-matlab" => crate::flowchart_view::open_active_matlab_fcn_editor(&fc),
         // MATLAB Function block: grow the signature to three inputs (what the
         // source editor's Apply does) so the ports follow it.
         "grow-matlab" => {

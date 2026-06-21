@@ -180,11 +180,16 @@ signature — `u1..uN` for the arity of the header (or the highest `uN` referenc
 in an expression) plus a single `out` — and edits to the body or expression
 SHALL re-derive the ports, dropping wires to ports that disappear.
 
+The source editor SHALL provide code-editor affordances: a line-number gutter,
+a visible edit toolbar (undo / redo / cut / copy / paste backed by the text
+view's built-in actions), a find bar (Ctrl+F), current-line highlighting, and
+auto-indent that preserves the current line's leading whitespace on Enter.
+
 #### Scenario: Double-click opens the source
 
 - **WHEN** the user double-clicks a MATLAB Function block
 - **THEN** an editor opens showing its function source (or one seeded from the
-  block's expression)
+  block's expression), with a line-number gutter and an edit toolbar
 
 #### Scenario: Ports follow the signature
 
@@ -195,6 +200,39 @@ SHALL re-derive the ports, dropping wires to ports that disappear.
 
 - **WHEN** the function arity is reduced and an input port disappears
 - **THEN** the wire that targeted the removed port is dropped
+
+#### Scenario: Find selects a match
+
+- **WHEN** the user opens the find bar and enters a term that occurs in the body
+- **THEN** the next matching occurrence is selected and scrolled into view
+
+### Requirement: MATLAB Function block breakpoints
+
+The MATLAB Function source editor SHALL support two breakpoint kinds. A
+**source-line breakpoint** toggles by clicking its gutter line; it persists on
+the node's `breakpoint_lines` param (round-tripping through `.mflow`) and draws a
+gutter marker, but is labeled as not yet honored by the simulator. A **break on
+output** control SHALL set or clear a signal breakpoint on every wire leaving the
+block's output — the breakpoint the simulator honors — and is disabled until the
+output is wired.
+
+#### Scenario: Toggle a source-line breakpoint
+
+- **WHEN** the user clicks a line in the editor gutter
+- **THEN** a breakpoint marker is drawn on that line and the line is recorded in
+  the node's `breakpoint_lines`, persisting through save/reload
+
+#### Scenario: Break on output sets the wire breakpoint
+
+- **WHEN** the user enables "Break on output" with a condition and the block's
+  output is wired
+- **THEN** the condition is installed as a signal breakpoint on each output wire
+  (cleared when disabled)
+
+#### Scenario: Break on output needs a wired output
+
+- **WHEN** the block's output is not connected to any wire
+- **THEN** the "Break on output" control is disabled
 
 ### Requirement: Editor block library tracks the simulator
 
