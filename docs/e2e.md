@@ -49,6 +49,7 @@ Headless / CI: wrap with Xvfb — `xvfb-run -a just e2e`.
 | F9 breakpoint | focuses the editor, presses F9 | a breakpoint is set at the cursor | |
 | explorer double-click | single- then double-clicks a tree row | single click selects only; double click opens the tab | |
 | flowchart editor | opens a demo chart, clicks a BLOCKS palette row | the chart loads with nodes/edges; the palette adds a node | |
+| signal editor features | opens the demo signal chart and applies one `MATFORGE_FLOW_OP` per launch | a wire selects (`selected_edge`), deletes (`edges` drops), takes a breakpoint (`edge_breakpoints`), and the MATLAB Function block's ports follow its signature (`matlab_inputs`) | |
 | mflowLink simulate | opens the signal-flow window (autostart) | the simulation streams samples and reaches `Finished` | ✓ |
 | mStateflow trace | opens the state-chart window (autostart) | the trace streams events and activates a state | ✓ |
 | live REPL | types `x = [1 2 3]` in the REPL + Enter | the Workspace gains variable `x` | ✓ |
@@ -62,6 +63,19 @@ The mflowLink / mStateflow scenarios drive standalone windows: their env hooks
 (`MATFORGE_SIMULATE` / `MATFORGE_STATECHART`) open the window and autostart the
 run, so the harness only reads the published state — no input into the separate
 window is required. They use the bundled `e2e/fixtures/{signal,chart}.mflow`.
+
+The **signal editor features** scenario is matlabc-free: it drives the new
+editor interactions through `MATFORGE_FLOW_OP` (`select-edge`, `delete-edge`,
+`set-edge-bp`, `grow-matlab`), one operation per launch, so it exercises the real
+view-model paths and the canvas redraw without needing the simulator.
+
+> **CI and the compiler.** The GitHub Actions `e2e` job runs this harness under
+> `xvfb`, but the runner does **not** build or install `matlabc`. Every
+> **Needs `matlabc`** scenario therefore *skips* in CI; only the compiler-free
+> scenarios (search, breakpoints, explorer, flowchart editor, signal editor
+> features) actually execute there. Run the full suite locally — with
+> `$MATLABC_PATH` pointing at a built `matlabc` — to cover the simulate / debug /
+> REPL paths end to end.
 
 > **Local display note:** the `Ctrl+F` find-in-files scenario relies on a
 > keyboard *accelerator*, which needs a window manager to route focus; it passes

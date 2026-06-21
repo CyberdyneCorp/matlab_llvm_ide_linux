@@ -258,6 +258,11 @@ fn build_main_window(app: &Application) {
     if let Ok(kind) = std::env::var("MATFORGE_NEWFLOW") {
         ui::open_demo_flowchart(&app, kind == "signal");
     }
+    // Deterministically drive one flowchart editor operation (wire select/delete,
+    // edge breakpoint, MATLAB Function port growth) for the e2e harness.
+    if let Ok(op) = std::env::var("MATFORGE_FLOW_OP") {
+        ui::flow_e2e_op(&op);
+    }
     if let Ok(p) = std::env::var("MATFORGE_SIMULATE") {
         let path = std::path::PathBuf::from(&p);
         if let Ok(text) = std::fs::read_to_string(&path) {
