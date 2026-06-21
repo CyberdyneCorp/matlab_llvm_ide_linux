@@ -57,12 +57,20 @@ the trace; a live `--sim-dap` session steps the solver.
 - **THEN** a one-shot replay advances one sample, and a live session requests one
   major step
 
+#### Scenario: Step-back rewinds the live trace
+
+- **WHEN** the user steps a live run backward
+- **THEN** the solver restores the previous major step and the scope trace is
+  truncated to that time, with no samples left past the rewound cursor
+
 ### Requirement: Live streaming and breakpoints
 
 In live `--sim-dap` mode the window SHALL stream `signalSample` events into the
 scopes as the solver runs, halo the currently-active block on the model canvas,
 and honor signal-value and simulation-time breakpoints with a snapshot
-indicator.
+indicator. Signal breakpoints are keyed by the watched signal's source block;
+any per-wire breakpoints carried by the model are installed automatically when
+the live session starts.
 
 #### Scenario: Streamed samples appear live
 
@@ -71,5 +79,11 @@ indicator.
 
 #### Scenario: A breakpoint pauses the run
 
-- **WHEN** a configured signal-value or simulation-time breakpoint is hit
-- **THEN** the run pauses and the transport reflects the paused state
+- **WHEN** a configured signal-value or simulation-time breakpoint is hit (e.g.
+  on a MATLAB Function block's output)
+- **THEN** the run pauses on that block and the transport reflects the paused state
+
+#### Scenario: Model wire breakpoints are installed on start
+
+- **WHEN** a live session starts for a model whose wires carry breakpoints
+- **THEN** each wire's condition is installed against its source block's output

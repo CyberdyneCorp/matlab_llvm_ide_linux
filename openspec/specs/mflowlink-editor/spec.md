@@ -5,8 +5,10 @@
 The signal-flow (mflowLink) block-diagram editor: authoring, validating, and
 analyzing a `.mflow` signal diagram that lowers to MATLAB and simulates via
 `matlabc`. Covers block-parameter validation, edit-time diagnostics, port-to-port
-wiring, solver configuration, the control-block palette (incl. PID), linear
-analysis, subsystem nesting/navigation, and reusable library/masked blocks.
+wiring, solver configuration, the control-block palette (incl. PID and MPC),
+linear analysis, subsystem nesting/navigation, reusable library/masked blocks,
+the MATLAB Function block's source editor, and per-wire signal breakpoints. The
+editor's block vocabulary tracks the blocks the simulator implements.
 
 ## Requirements
 ### Requirement: Block parameter validation
@@ -74,6 +76,13 @@ fan out) and is not a self-connection.
 
 - **WHEN** the user drops a wire onto an input port that already has a source
 - **THEN** the connection is rejected and the existing wire is unchanged
+
+#### Scenario: Multiple ports on one face are spread, not collapsed
+
+- **WHEN** a block has several ports on the same face (e.g. an Integrator's
+  `in`/`reset`/`init`, or a MATLAB Function block's `u1..uN` inputs)
+- **THEN** the ports render at distinct points down that face rather than
+  overlapping at one point
 
 ### Requirement: Solver configuration
 
@@ -160,5 +169,70 @@ expansion preview. `library_id` and `mask_params` round-trip through `.mflow`.
 - **WHEN** the user sets a mask parameter value
 - **THEN** the inspector's preview substitutes `${name}` with that value; and the
   masked instance round-trips through the codec
-</content>
+
+### Requirement: MATLAB Function block source and ports
+
+The editor SHALL let the user view and edit a MATLAB Function block's source:
+double-clicking the block opens a MATLAB-highlighted editor on its
+`function … = name(u1, …) … end` body (seeded from the single-line `expression`
+when no body exists). The block's input ports SHALL follow the function
+signature — `u1..uN` for the arity of the header (or the highest `uN` referenced
+in an expression) plus a single `out` — and edits to the body or expression
+SHALL re-derive the ports, dropping wires to ports that disappear.
+
+#### Scenario: Double-click opens the source
+
+- **WHEN** the user double-clicks a MATLAB Function block
+- **THEN** an editor opens showing its function source (or one seeded from the
+  block's expression)
+
+#### Scenario: Ports follow the signature
+
+- **WHEN** the user changes the function to take three inputs
+- **THEN** the block exposes `u1`, `u2`, `u3` inputs and a single `out` output
+
+#### Scenario: Shrinking the signature prunes wires
+
+- **WHEN** the function arity is reduced and an input port disappears
+- **THEN** the wire that targeted the removed port is dropped
+
+### Requirement: Editor block library tracks the simulator
+
+The editor's signal-flow block library SHALL offer every block kind the
+simulator implements, including the MPC Controller (`signal_mpc_move`), From
+Workspace, n-D Lookup Table, If / Switch-Case Action subsystems, and the custom
+block, so models that use them open and are authorable in the editor.
+
+#### Scenario: A simulator block is placeable
+
+- **WHEN** the user opens the Library
+- **THEN** the MPC Controller block (and the other simulator-supported blocks)
+  appear and can be dropped onto the canvas
+
+#### Scenario: A model using the block opens
+
+- **WHEN** the user opens a model containing a `signal_mpc_move` block
+- **THEN** the model decodes and renders without an unknown-kind error
+
+### Requirement: Per-wire signal breakpoints
+
+The editor SHALL attach a signal-breakpoint condition (`value > 0`,
+`abs(value) >= 1`) to an individual wire, persisting it on the edge in the
+`.mflow`. A breakpointed wire SHALL draw a marker, and the breakpoints SHALL be
+installed (keyed by the wire's source block) when the model is simulated live.
+
+#### Scenario: Set a breakpoint on a wire
+
+- **WHEN** the user right-clicks a wire and enters a condition
+- **THEN** the condition is stored on the edge and the wire shows a breakpoint marker
+
+#### Scenario: Breakpoint persists and round-trips
+
+- **WHEN** the model is saved and reloaded
+- **THEN** the wire still carries its breakpoint condition
+
+#### Scenario: Clearing removes the breakpoint
+
+- **WHEN** the user clears the condition (or empties it)
+- **THEN** the wire's breakpoint and its marker are removed
 

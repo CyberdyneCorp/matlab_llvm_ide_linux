@@ -22,7 +22,9 @@ pub struct TimeBreakpoint {
 /// holds — e.g. `"abs(value) > 1e3"`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SignalBreakpoint {
-    pub edge_id: String,
+    /// The block whose output signal is watched (the simulator keys signal
+    /// breakpoints by the source block of the wire).
+    pub block_id: String,
     pub condition: Option<String>,
 }
 
@@ -98,8 +100,8 @@ impl SimRequest {
                 let arr: Vec<Value> = breakpoints
                     .iter()
                     .map(|b| match &b.condition {
-                        Some(c) => json!({ "edgeId": b.edge_id, "condition": c }),
-                        None => json!({ "edgeId": b.edge_id }),
+                        Some(c) => json!({ "blockId": b.block_id, "condition": c }),
+                        None => json!({ "blockId": b.block_id }),
                     })
                     .collect();
                 (
@@ -250,17 +252,18 @@ mod tests {
     }
 
     #[test]
-    fn signal_breakpoints_serialize_source_and_edges() {
+    fn signal_breakpoints_serialize_source_and_block() {
         let (cmd, args) = frame_command(&SimRequest::SetSignalBreakpoints {
             source: "model.mflow".into(),
             breakpoints: vec![SignalBreakpoint {
-                edge_id: "e7".into(),
+                block_id: "fcn".into(),
                 condition: Some("abs(value) > 1e3".into()),
             }],
         });
         assert_eq!(cmd, "setSignalBreakpoints");
         assert_eq!(args["source"]["path"], "model.mflow");
-        assert_eq!(args["breakpoints"][0]["edgeId"], "e7");
+        // The simulator keys signal breakpoints by the source block id.
+        assert_eq!(args["breakpoints"][0]["blockId"], "fcn");
     }
 
     fn event(json_body: &str) -> SimEvent {

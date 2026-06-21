@@ -244,6 +244,9 @@ pub fn build_flowchart_view(
             if let Some(hit) = fc.document.with(|d| flow_render::hit_test(d, idx, world)) {
                 if fc.enter_subflow(&hit) {
                     canvas2.queue_draw();
+                } else if fc.node(&hit).map(|n| n.kind) == Some(NodeKind::SignalMatlabFcn) {
+                    // Not a subsystem: a MATLAB Function block opens its source.
+                    open_matlab_fcn_editor(&fc, &hit, &canvas2);
                 }
             }
         });
@@ -335,6 +338,17 @@ pub fn build_flowchart_view(
                 pop.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
                 pop.popup();
                 canvas2.queue_draw();
+            } else {
+                // Right-clicking a wire opens its signal-breakpoint editor.
+                let tol = 6.0 / vp.zoom.max(0.01);
+                if let Some(eid) = fc
+                    .document
+                    .with(|d| flow_render::edge_hit_test(d, idx, world, tol))
+                {
+                    fc.select_edge(Some(eid.clone()));
+                    open_edge_breakpoint_popover(&fc, &eid, &canvas2, x, y);
+                    canvas2.queue_draw();
+                }
             }
         });
     }
@@ -1549,6 +1563,78 @@ fn append_mask_editor(body: &GtkBox, fc: &Rc<FlowchartViewModel>, node: &FlowNod
     refresh();
 }
 
+/// A small popover (anchored at the right-click point) for setting or clearing
+/// the signal-breakpoint condition on a wire. The breakpoint persists on the
+/// `FlowEdge` and is installed when the model is simulated.
+fn open_edge_breakpoint_popover(
+    fc: &Rc<FlowchartViewModel>,
+    edge_id: &str,
+    canvas: &DrawingArea,
+    x: f64,
+    y: f64,
+) {
+    let pop = gtk::Popover::new();
+    pop.set_parent(canvas);
+    pop.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+    pop.connect_closed(|p| p.unparent());
+
+    let col = GtkBox::new(Orientation::Vertical, 6);
+    col.set_margin_top(8);
+    col.set_margin_bottom(8);
+    col.set_margin_start(8);
+    col.set_margin_end(8);
+    let lbl = Label::new(Some("Signal breakpoint — pause when:"));
+    lbl.add_css_class("mf-col-title");
+    lbl.set_halign(gtk::Align::Start);
+    col.append(&lbl);
+
+    let entry = Entry::new();
+    entry.set_placeholder_text(Some("value > 0   /   abs(value) >= 1"));
+    if let Some(c) = fc.edge_breakpoint(edge_id) {
+        entry.set_text(&c);
+    }
+    entry.set_hexpand(true);
+    col.append(&entry);
+
+    let row = GtkBox::new(Orientation::Horizontal, 6);
+    let set = Button::with_label("Set");
+    set.add_css_class("mf-compile-cta");
+    let clear = Button::with_label("Clear");
+    row.append(&set);
+    row.append(&clear);
+    col.append(&row);
+    pop.set_child(Some(&col));
+
+    {
+        let fc = fc.clone();
+        let id = edge_id.to_string();
+        let canvas = canvas.clone();
+        let pop = pop.clone();
+        let entry2 = entry.clone();
+        set.connect_clicked(move |_| {
+            fc.set_edge_breakpoint(&id, Some(entry2.text().to_string()));
+            canvas.queue_draw();
+            pop.popdown();
+        });
+    }
+    {
+        let fc = fc.clone();
+        let id = edge_id.to_string();
+        let canvas = canvas.clone();
+        let pop = pop.clone();
+        clear.connect_clicked(move |_| {
+            fc.set_edge_breakpoint(&id, None);
+            canvas.queue_draw();
+            pop.popdown();
+        });
+    }
+    entry.connect_activate({
+        let set = set.clone();
+        move |_| set.emit_clicked()
+    });
+    pop.popup();
+}
+
 fn build_inspector_body(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>) -> ScrolledWindow {
     let body = GtkBox::new(Orientation::Vertical, 8);
     body.set_margin_start(10);
@@ -1633,6 +1719,13 @@ fn build_inspector_body(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>) -> Scro
                         err2.set_visible(false);
                     }
                     fc2.edit_node(&id2, |n| field_set(n, &key, &value));
+                    // A MATLAB Function block's ports follow its source: editing
+                    // the expression / body re-derives the u1..uN / out ports.
+                    if matches!(&key, FieldKey::Param(k)
+                        if k == "function_body" || k == "expression")
+                    {
+                        fc2.sync_matlab_fcn_ports(&id2);
+                    }
                 });
                 field.append(&lbl);
                 field.append(&entry);
@@ -1748,6 +1841,105 @@ fn build_action_field(
     field.append(&scroll);
     field.append(&err);
     field
+}
+
+/// Open a MATLAB-highlighted source editor for a MATLAB Function block.
+/// Double-clicking the block shows its `function … = name(u1, …) … end` body;
+/// edits write back to `function_body` and re-derive the block's ports so they
+/// follow the function signature (`u1..uN` → `out`).
+fn open_matlab_fcn_editor(fc: &Rc<FlowchartViewModel>, node_id: &str, canvas: &DrawingArea) {
+    use matforge_core::models::flowchart::matlab_fcn_ports;
+    use matforge_core::services::highlighter::Language;
+
+    let Some(node) = fc.node(node_id) else {
+        return;
+    };
+    // Show the function body; seed one from the single-line expression if empty.
+    let body = node.param_str("function_body").unwrap_or_default();
+    let initial = if !body.trim().is_empty() {
+        body
+    } else {
+        let expr = node.param_str("expression").unwrap_or_default();
+        let arity = matlab_fcn_ports("", &expr).0.len().max(1);
+        let args = (1..=arity)
+            .map(|i| format!("u{i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        if expr.trim().is_empty() {
+            format!("function out = fcn({args})\n  out = u1;\nend\n")
+        } else {
+            format!(
+                "function out = fcn({args})\n  out = {};\nend\n",
+                expr.trim()
+            )
+        }
+    };
+
+    let window = gtk::Window::builder()
+        .title(format!("MATLAB Function — {node_id}"))
+        .default_width(580)
+        .default_height(380)
+        .build();
+    window.add_css_class("mf-root");
+    if let Some(parent) = crate::ui::main_window() {
+        window.set_transient_for(Some(&parent));
+    }
+    let root = GtkBox::new(Orientation::Vertical, 0);
+    root.add_css_class("mf-window");
+
+    let view = TextView::new();
+    view.set_monospace(true);
+    view.set_top_margin(6);
+    view.set_bottom_margin(6);
+    view.set_left_margin(8);
+    view.set_right_margin(8);
+    view.add_css_class("mf-action-editor");
+    let buffer = view.buffer();
+    buffer.set_text(&initial);
+    crate::highlight::ensure_tags(&buffer);
+    crate::highlight::apply(&buffer, Language::Matlab);
+
+    let scroll = ScrolledWindow::new();
+    scroll.set_vexpand(true);
+    scroll.set_child(Some(&view));
+    root.append(&scroll);
+
+    let status = Label::new(None);
+    status.add_css_class("mf-col-title");
+    status.set_halign(gtk::Align::Start);
+    status.set_margin_start(8);
+    status.set_margin_top(4);
+    status.set_margin_bottom(6);
+    let set_status = |s: &Label, text: &str| {
+        let ins = matlab_fcn_ports(text, "").0.join(", ");
+        s.set_text(&format!("ports: {ins} → out"));
+    };
+    set_status(&status, &initial);
+    root.append(&status);
+
+    // Commit on every edit: write the body, re-derive ports, redraw the canvas.
+    {
+        let fc = fc.clone();
+        let id = node_id.to_string();
+        let canvas = canvas.clone();
+        let status = status.clone();
+        buffer.connect_changed(move |b| {
+            let text = b.text(&b.start_iter(), &b.end_iter(), false).to_string();
+            crate::highlight::apply(b, Language::Matlab);
+            fc.edit_node(&id, |n| {
+                n.data
+                    .params
+                    .get_or_insert_with(Default::default)
+                    .insert("function_body".into(), ParamValue::Str(text.clone()));
+            });
+            fc.sync_matlab_fcn_ports(&id);
+            set_status(&status, &text);
+            canvas.queue_draw();
+        });
+    }
+
+    window.set_child(Some(&root));
+    window.present();
 }
 
 /// Which `FlowNode` field an inspector entry edits.

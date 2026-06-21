@@ -93,6 +93,18 @@ pub fn draw_document(
     for (id, pts) in &routes {
         let is_selected = selected_edge == Some(id.as_str());
         draw_polyline(ctx, pts, is_selected);
+        // A red marker at the wire's midpoint flags a signal breakpoint.
+        let has_bp = flow
+            .edges
+            .iter()
+            .any(|e| &e.id == id && e.breakpoint.is_some());
+        if has_bp {
+            if let Some(mid) = polyline_midpoint(pts) {
+                set_rgb(ctx, crate::theme_css::current().red);
+                ctx.arc(mid.0, mid.1, 4.0, 0.0, std::f64::consts::TAU);
+                ctx.fill().ok();
+            }
+        }
     }
     set_rgb(ctx, crate::theme_css::current().text_secondary);
     for j in &junctions {
@@ -586,6 +598,28 @@ fn point_segment_distance(p: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
     };
     let (cx, cy) = (a.0 + t * dx, a.1 + t * dy);
     ((p.0 - cx).powi(2) + (p.1 - cy).powi(2)).sqrt()
+}
+
+/// The point at the half-length mark along a polyline (its visual midpoint).
+fn polyline_midpoint(pts: &[(f64, f64)]) -> Option<(f64, f64)> {
+    if pts.len() < 2 {
+        return pts.first().copied();
+    }
+    let seg_len = |a: (f64, f64), b: (f64, f64)| ((b.0 - a.0).powi(2) + (b.1 - a.1).powi(2)).sqrt();
+    let half: f64 = pts.windows(2).map(|s| seg_len(s[0], s[1])).sum::<f64>() / 2.0;
+    let mut acc = 0.0;
+    for s in pts.windows(2) {
+        let l = seg_len(s[0], s[1]);
+        if acc + l >= half {
+            let t = if l == 0.0 { 0.0 } else { (half - acc) / l };
+            return Some((
+                s[0].0 + t * (s[1].0 - s[0].0),
+                s[0].1 + t * (s[1].1 - s[0].1),
+            ));
+        }
+        acc += l;
+    }
+    pts.last().copied()
 }
 
 /// The id of the edge whose routed line passes within `tol` world units of
@@ -1106,3 +1140,5 @@ mod tests {
         });
     }
 }
+
+

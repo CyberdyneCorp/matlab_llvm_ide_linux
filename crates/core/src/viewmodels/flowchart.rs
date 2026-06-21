@@ -7,9 +7,10 @@ use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 
 use crate::models::flowchart::{
-    self, ChartSymbols, EdgeData, EdgeEndpoint, EdgeKind, Flow, FlowEdge, FlowKind, FlowNode,
-    FlowPort, FlowPorts, FlowPosition, FlowSignature, FlowUi, FlowchartDocument, NodeData,
-    NodeKind, ParamValue, SchemaKind, SolverConfig, StateDecomposition, TransitionLabel,
+    self, matlab_fcn_ports, ChartSymbols, EdgeData, EdgeEndpoint, EdgeKind, Flow, FlowEdge,
+    FlowKind, FlowNode, FlowPort, FlowPorts, FlowPosition, FlowSignature, FlowUi,
+    FlowchartDocument, NodeData, NodeKind, ParamValue, SchemaKind, SolverConfig,
+    StateDecomposition, TransitionLabel,
 };
 
 use crate::models::BreakpointConfig;
@@ -84,6 +85,29 @@ impl FlowchartViewModel {
         n
     }
 
+    /// A fresh `<prefix><n>` id that collides with no existing node or edge id
+    /// in the document. The sequence counter starts at 0 even for a loaded model
+    /// (whose ids may already be `e1`, `n2`, …), so a freshly generated id must
+    /// be checked against what's on disk — otherwise a new wire can duplicate an
+    /// existing edge id and the compiler rejects the model.
+    fn fresh_id(&self, prefix: &str) -> String {
+        let taken: std::collections::HashSet<String> = self.document.with(|d| {
+            let mut s: std::collections::HashSet<String> =
+                d.flows.iter().map(|f| f.id.clone()).collect();
+            for f in &d.flows {
+                s.extend(f.nodes.iter().map(|n| n.id.clone()));
+                s.extend(f.edges.iter().map(|e| e.id.clone()));
+            }
+            s
+        });
+        loop {
+            let candidate = format!("{prefix}{}", self.next_seq());
+            if !taken.contains(&candidate) {
+                return candidate;
+            }
+        }
+    }
+
     fn push_undo(&self) {
         self.undo_stack.borrow_mut().push(self.document.get());
         self.redo_stack.borrow_mut().clear();
@@ -93,7 +117,7 @@ impl FlowchartViewModel {
     /// and return its generated id.
     pub fn add_node(&self, kind: NodeKind, x: f64, y: f64) -> String {
         self.push_undo();
-        let id = format!("n{}", self.next_seq());
+        let id = self.fresh_id("n");
         let node = FlowNode::new(
             &id,
             kind,
@@ -425,7 +449,7 @@ impl FlowchartViewModel {
         to_port: &str,
     ) -> String {
         self.push_undo();
-        let id = format!("e{}", self.next_seq());
+        let id = self.fresh_id("e");
         let edge = FlowEdge::new(
             &id,
             EdgeKind::Control,
@@ -475,7 +499,7 @@ impl FlowchartViewModel {
     /// Add an empty `Transition` edge between two states and return its id.
     pub fn add_transition(&self, src: &str, dst: &str) -> String {
         self.push_undo();
-        let id = format!("t{}", self.next_seq());
+        let id = self.fresh_id("t");
         let edge = FlowEdge::new(
             &id,
             EdgeKind::Transition,
@@ -529,6 +553,79 @@ impl FlowchartViewModel {
         if self.selected_edge.get().as_deref() == Some(edge_id) {
             self.selected_edge.set(None);
         }
+        self.is_dirty.set(true);
+    }
+
+    /// Set or clear the signal-breakpoint condition on a wire (`None`, or an
+    /// empty/whitespace condition, clears it).
+    pub fn set_edge_breakpoint(&self, edge_id: &str, condition: Option<String>) {
+        let cond = condition
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        let idx = self.current_flow_index();
+        let mut changed = false;
+        self.document.update(|d| {
+            if let Some(flow) = d.flows.get_mut(idx) {
+                if let Some(e) = flow.edges.iter_mut().find(|e| e.id == edge_id) {
+                    if e.breakpoint != cond {
+                        e.breakpoint = cond.clone();
+                        changed = true;
+                    }
+                }
+            }
+        });
+        if changed {
+            self.is_dirty.set(true);
+        }
+    }
+
+    /// The breakpoint condition on a wire, if any.
+    pub fn edge_breakpoint(&self, edge_id: &str) -> Option<String> {
+        let idx = self.current_flow_index();
+        self.document.with(|d| {
+            d.flows
+                .get(idx)
+                .and_then(|f| f.edges.iter().find(|e| e.id == edge_id))
+                .and_then(|e| e.breakpoint.clone())
+        })
+    }
+
+    /// Re-derive a MATLAB Function block's `u1..uN` input ports + `out` from its
+    /// source (`function_body`, else `expression`) so the ports follow the
+    /// function signature. Edges to ports that no longer exist are dropped. A
+    /// no-op when the ports already match (avoids spurious dirty/redraw).
+    pub fn sync_matlab_fcn_ports(&self, node_id: &str) {
+        let Some(node) = self.node(node_id) else {
+            return;
+        };
+        if node.kind != NodeKind::SignalMatlabFcn {
+            return;
+        }
+        let body = node.param_str("function_body").unwrap_or_default();
+        let expr = node.param_str("expression").unwrap_or_default();
+        let (inputs, outputs) = matlab_fcn_ports(&body, &expr);
+
+        let cur_in: Vec<&str> = node.ports.inputs.iter().map(|p| p.id.as_str()).collect();
+        let cur_out: Vec<&str> = node.ports.outputs.iter().map(|p| p.id.as_str()).collect();
+        if cur_in == inputs && cur_out == outputs {
+            return;
+        }
+
+        let idx = self.current_flow_index();
+        self.document.update(|d| {
+            let Some(flow) = d.flows.get_mut(idx) else {
+                return;
+            };
+            if let Some(n) = flow.nodes.iter_mut().find(|n| n.id == node_id) {
+                n.ports.inputs = inputs.iter().map(|s| FlowPort::new(s)).collect();
+                n.ports.outputs = outputs.iter().map(|s| FlowPort::new(s)).collect();
+            }
+            // Prune edges that referenced a port that just disappeared.
+            flow.edges.retain(|e| {
+                (e.to.node != node_id || inputs.iter().any(|p| p == &e.to.port))
+                    && (e.from.node != node_id || outputs.iter().any(|p| p == &e.from.port))
+            });
+        });
         self.is_dirty.set(true);
     }
 
@@ -597,8 +694,8 @@ impl FlowchartViewModel {
         }
         let idx = self.current_flow_index();
         let set: std::collections::BTreeSet<String> = ids.iter().cloned().collect();
-        let sub_flow_id = format!("flow_sub{}", self.next_seq());
-        let sub_node_id = format!("n{}", self.next_seq());
+        let sub_flow_id = self.fresh_id("flow_sub");
+        let sub_node_id = self.fresh_id("n");
         self.push_undo();
         let mut result = None;
         self.document.update(|d| {
@@ -639,7 +736,7 @@ impl FlowchartViewModel {
             })
         })?;
         self.push_undo();
-        let id = format!("n{}", self.next_seq());
+        let id = self.fresh_id("n");
         let mask: BTreeMap<String, String> =
             names.into_iter().map(|n| (n, String::new())).collect();
         let node = FlowNode::new(
@@ -1277,6 +1374,96 @@ mod tests {
         assert_eq!(vm.edge_count(), 0);
         assert_eq!(vm.node_count(), 2);
         assert_eq!(vm.selected_edge.get(), None);
+    }
+
+    #[test]
+    fn edge_breakpoints_persist_and_collect_by_source_block() {
+        let vm = FlowchartViewModel::empty("D", SchemaKind::ControlFlow);
+        let (edge_id, src) = vm.document.with(|d| {
+            let e = &d.flows[0].edges[0];
+            (e.id.clone(), e.from.node.clone())
+        });
+        assert!(vm.edge_breakpoint(&edge_id).is_none());
+
+        vm.set_edge_breakpoint(&edge_id, Some("value > 0".into()));
+        assert_eq!(vm.edge_breakpoint(&edge_id).as_deref(), Some("value > 0"));
+        // Collected for the simulator, keyed by the wire's source block.
+        assert_eq!(
+            vm.document.with(|d| d.signal_breakpoints()),
+            vec![(src, "value > 0".to_string())]
+        );
+
+        // An empty/whitespace condition clears the breakpoint.
+        vm.set_edge_breakpoint(&edge_id, Some("   ".into()));
+        assert!(vm.edge_breakpoint(&edge_id).is_none());
+        assert!(vm.document.with(|d| d.signal_breakpoints()).is_empty());
+    }
+
+    #[test]
+    fn matlab_fcn_ports_track_the_function_signature() {
+        let vm = FlowchartViewModel::empty("D", SchemaKind::SignalFlow);
+        let id = vm.add_node(NodeKind::SignalMatlabFcn, 0.0, 0.0);
+        let set_body = |vm: &FlowchartViewModel, body: &str| {
+            vm.edit_node(&id, |n| {
+                n.data
+                    .params
+                    .get_or_insert_with(Default::default)
+                    .insert("function_body".into(), ParamValue::Str(body.into()));
+            });
+            vm.sync_matlab_fcn_ports(&id);
+        };
+        let ins = |vm: &FlowchartViewModel| -> Vec<String> {
+            vm.node(&id)
+                .unwrap()
+                .ports
+                .inputs
+                .iter()
+                .map(|p| p.id.clone())
+                .collect()
+        };
+
+        set_body(&vm, "function y = f(u1, u2, u3)\n y = u1;\nend");
+        assert_eq!(ins(&vm), vec!["u1", "u2", "u3"]);
+        assert_eq!(vm.node(&id).unwrap().ports.outputs[0].id.as_str(), "out");
+
+        // Wire an edge into u3, then shrink the signature: the now-missing port's
+        // edge is pruned.
+        let src = vm.add_node(NodeKind::SignalConstant, -100.0, 0.0);
+        vm.add_edge(&src, "out", &id, "u3");
+        assert_eq!(vm.edge_count(), 1);
+        set_body(&vm, "function y = g(u1)\n y = u1;\nend");
+        assert_eq!(ins(&vm), vec!["u1"]);
+        assert_eq!(vm.edge_count(), 0, "edge to the removed u3 port is dropped");
+    }
+
+    #[test]
+    fn added_edge_ids_do_not_collide_with_loaded_ids() {
+        use crate::services::flowchart_codec;
+        // A loaded model whose edges are already e1/e2/e3 (the common case).
+        let json = r#"{"schema":"matforge.flowchart","version":"0.1.0",
+          "settings":{"kind":"signal_flow"},
+          "flows":[{"id":"f","kind":"program","name":"m","signature":{"inputs":[],"outputs":[]},
+            "nodes":[
+              {"id":"a","kind":"signal_constant","ports":{"in":[],"out":[{"id":"out"}]}},
+              {"id":"b","kind":"signal_scope","ports":{"in":[{"id":"in"}],"out":[]}}],
+            "edges":[
+              {"id":"e1","kind":"data","from":{"node":"a","port":"out"},"to":{"node":"b","port":"in"}},
+              {"id":"e2","kind":"data","from":{"node":"a","port":"out"},"to":{"node":"b","port":"in"}},
+              {"id":"e3","kind":"data","from":{"node":"a","port":"out"},"to":{"node":"b","port":"in"}}]}]}"#;
+        let vm = FlowchartViewModel::from_document(flowchart_codec::decode_str(json).unwrap());
+        // Add a node (bumps the shared seq) then a wire — the wire must not reuse
+        // a loaded edge id (the bug produced a duplicate `e2`).
+        let n = vm.add_node(NodeKind::SignalGain, 0.0, 0.0);
+        let e = vm.add_edge(&n, "out", "b", "in");
+        assert!(
+            !["e1", "e2", "e3"].contains(&e.as_str()),
+            "new edge id {e} duplicates a loaded id"
+        );
+        let ids: Vec<String> = vm
+            .document
+            .with(|d| d.flows[0].edges.iter().map(|x| x.id.clone()).collect());
+        let uniq: std::collections::HashSet<_> = ids.iter().collect();
+        assert_eq!(ids.len(), uniq.len(), "duplicate edge ids present: {ids:?}");
     }
 
     #[test]

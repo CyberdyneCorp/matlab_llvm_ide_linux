@@ -247,6 +247,19 @@ pub enum NodeKind {
     SignalEnabledSubsystem,
     #[serde(rename = "signal_triggered_subsystem")]
     SignalTriggeredSubsystem,
+    // additional compiler-supported library blocks
+    #[serde(rename = "signal_mpc_move")]
+    SignalMpcMove,
+    #[serde(rename = "signal_from_workspace")]
+    SignalFromWorkspace,
+    #[serde(rename = "signal_lookup_nd")]
+    SignalLookupNd,
+    #[serde(rename = "signal_if_action")]
+    SignalIfAction,
+    #[serde(rename = "signal_switch_case_action")]
+    SignalSwitchCaseAction,
+    #[serde(rename = "signal_custom")]
+    SignalCustom,
     // 6.7 State-chart
     #[serde(rename = "state")]
     State,
@@ -290,7 +303,7 @@ pub enum PortAnchor {
 
 impl NodeKind {
     /// Every kind, for palette enumeration + exhaustive tests.
-    pub const ALL: [NodeKind; 85] = [
+    pub const ALL: [NodeKind; 91] = [
         NodeKind::Start,
         NodeKind::End,
         NodeKind::Comment,
@@ -367,6 +380,12 @@ impl NodeKind {
         NodeKind::SignalOutport,
         NodeKind::SignalEnabledSubsystem,
         NodeKind::SignalTriggeredSubsystem,
+        NodeKind::SignalMpcMove,
+        NodeKind::SignalFromWorkspace,
+        NodeKind::SignalLookupNd,
+        NodeKind::SignalIfAction,
+        NodeKind::SignalSwitchCaseAction,
+        NodeKind::SignalCustom,
         NodeKind::State,
         NodeKind::JunctionConnective,
         NodeKind::JunctionHistory,
@@ -399,10 +418,13 @@ impl NodeKind {
             | SignalClock
             | SignalChirp
             | SignalNoise
-            | SignalFunctionCallGenerator => C::SignalSources,
+            | SignalFunctionCallGenerator
+            | SignalFromWorkspace => C::SignalSources,
             SignalScope | SignalDisplay | SignalToWorkspace | SignalTerminator => C::SignalSinks,
             SignalIntegrator | SignalPid | SignalDerivative | SignalTransferFcn
-            | SignalStateSpace | SignalZeroPole | SignalTransportDelay => C::SignalContinuous,
+            | SignalStateSpace | SignalZeroPole | SignalTransportDelay | SignalMpcMove => {
+                C::SignalContinuous
+            }
             SignalUnitDelay
             | SignalZoh
             | SignalDiscreteIntegrator
@@ -421,7 +443,8 @@ impl NodeKind {
             | SignalCompareToZero
             | SignalCompareToConstant
             | SignalRelay
-            | SignalMatlabFcn => C::SignalMath,
+            | SignalMatlabFcn
+            | SignalCustom => C::SignalMath,
             SignalMux
             | SignalDemux
             | SignalSwitch
@@ -432,12 +455,14 @@ impl NodeKind {
             | SignalBusCreator
             | SignalBusSelector
             | SignalReshape => C::SignalRouting,
-            SignalLookup1D | SignalLookup2D => C::SignalLookup,
+            SignalLookup1D | SignalLookup2D | SignalLookupNd => C::SignalLookup,
             SignalSubsystem
             | SignalInport
             | SignalOutport
             | SignalEnabledSubsystem
-            | SignalTriggeredSubsystem => C::SignalComposite,
+            | SignalTriggeredSubsystem
+            | SignalIfAction
+            | SignalSwitchCaseAction => C::SignalComposite,
             State => C::ChartStates,
             JunctionConnective | JunctionHistory | JunctionEntry | JunctionExit
             | JunctionDefault => C::ChartJunctions,
@@ -525,6 +550,12 @@ impl NodeKind {
             SignalOutport => "Out",
             SignalEnabledSubsystem => "Enabled Subsystem",
             SignalTriggeredSubsystem => "Triggered Subsystem",
+            SignalMpcMove => "MPC Controller",
+            SignalFromWorkspace => "From Workspace",
+            SignalLookupNd => "n-D Lookup Table",
+            SignalIfAction => "If Action Subsystem",
+            SignalSwitchCaseAction => "Switch Case Action Subsystem",
+            SignalCustom => "Custom Block",
             SignalClock => "Clock",
             SignalChirp => "Chirp",
             SignalNoise => "Random Noise",
@@ -714,7 +745,13 @@ impl NodeKind {
             | SignalChirp
             | SignalNoise
             | SignalFunctionCallGenerator
+            | SignalFromWorkspace
             | SignalFrom => (id == "out").then_some(Right),
+            SignalMpcMove => match id {
+                "ym" | "r" => Some(Left),
+                "out" => Some(Right),
+                _ => None,
+            },
             SignalScope | SignalDisplay | SignalToWorkspace | SignalTerminator | SignalOutport
             | SignalGoto => (id == "in").then_some(Left),
             SignalSubsystem | SignalEnabledSubsystem | SignalTriggeredSubsystem => {
@@ -770,6 +807,16 @@ impl NodeKind {
                 "out" => Some(Right),
                 _ => None,
             },
+            // MATLAB Function: `out` on the right, the `u1..uN` inputs on the
+            // left (without this they'd fall through to None and collapse onto
+            // the default bottom-center point, overlapping).
+            SignalMatlabFcn => {
+                if id == "out" {
+                    Some(Right)
+                } else {
+                    Some(Left)
+                }
+            }
             _ => match id {
                 "in" => Some(Left),
                 "out" => Some(Right),
@@ -809,8 +856,13 @@ impl NodeKind {
             | SignalChirp
             | SignalNoise
             | SignalFunctionCallGenerator
+            | SignalFromWorkspace
             | SignalFrom => FlowPorts {
                 inputs: vec![],
+                outputs: vec![p("out")],
+            },
+            SignalMpcMove => FlowPorts {
+                inputs: vec![p("ym"), p("r")],
                 outputs: vec![p("out")],
             },
             SignalScope | SignalDisplay | SignalToWorkspace | SignalTerminator | SignalOutport
@@ -1164,6 +1216,20 @@ mod tests {
             Some(PortAnchor::Right)
         );
         assert_eq!(NodeKind::Assignment.port_anchor("nope"), None);
+        // MATLAB Function: u-inputs anchor left (not None → no bottom-center
+        // collapse), output anchors right.
+        assert_eq!(
+            NodeKind::SignalMatlabFcn.port_anchor("u1"),
+            Some(PortAnchor::Left)
+        );
+        assert_eq!(
+            NodeKind::SignalMatlabFcn.port_anchor("u2"),
+            Some(PortAnchor::Left)
+        );
+        assert_eq!(
+            NodeKind::SignalMatlabFcn.port_anchor("out"),
+            Some(PortAnchor::Right)
+        );
     }
 
     #[test]
@@ -1277,5 +1343,41 @@ mod tests {
             // Must not panic; many return [] which is fine.
             let _ = SignalFlowParamSpec::fields(k);
         }
+    }
+
+    #[test]
+    fn compiler_supported_blocks_are_exposed_and_roundtrip() {
+        use super::super::palette::library_blocks;
+        use super::super::SchemaKind;
+        // Every block the simulator implements is now placeable in the editor.
+        let lib: Vec<NodeKind> = library_blocks(SchemaKind::SignalFlow)
+            .into_iter()
+            .flat_map(|(_, k)| k)
+            .collect();
+        for k in [
+            NodeKind::SignalMpcMove,
+            NodeKind::SignalFromWorkspace,
+            NodeKind::SignalLookupNd,
+            NodeKind::SignalIfAction,
+            NodeKind::SignalSwitchCaseAction,
+            NodeKind::SignalCustom,
+        ] {
+            assert!(
+                lib.contains(&k),
+                "{k:?} missing from the signal-flow library"
+            );
+            assert!(k.is_signal_flow(), "{k:?} should be a signal-flow block");
+        }
+        // The MPC block keeps its simulator-facing ports and serde name.
+        let mpc = NodeKind::SignalMpcMove;
+        let ports = mpc.default_ports();
+        let ins: Vec<&str> = ports.inputs.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ins, vec!["ym", "r"]);
+        let json = serde_json::to_string(&mpc).unwrap();
+        assert_eq!(json, "\"signal_mpc_move\"");
+        assert_eq!(
+            serde_json::from_str::<NodeKind>("\"signal_mpc_move\"").unwrap(),
+            mpc
+        );
     }
 }
