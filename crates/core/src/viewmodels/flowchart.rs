@@ -670,6 +670,106 @@ impl FlowchartViewModel {
         self.is_dirty.set(true);
     }
 
+    /// Source-line breakpoints set inside a block's body editor, stored on the
+    /// node's `breakpoint_lines` param as a sorted, comma-separated list. These
+    /// persist and round-trip through `.mflow`; the simulator does not yet honor
+    /// them (it has signal/time breakpoints only — see [`Self::set_block_output_breakpoint`]).
+    pub fn node_line_breakpoints(&self, node_id: &str) -> Vec<usize> {
+        let raw = self
+            .node(node_id)
+            .and_then(|n| n.param_str("breakpoint_lines"))
+            .unwrap_or_default();
+        let mut lines: Vec<usize> = raw
+            .split(',')
+            .filter_map(|s| s.trim().parse::<usize>().ok())
+            .filter(|&n| n > 0)
+            .collect();
+        lines.sort_unstable();
+        lines.dedup();
+        lines
+    }
+
+    /// Toggle a source-line breakpoint on a block's body. Returns the new state
+    /// (true = now set). Persists to the `breakpoint_lines` param (removed when
+    /// the last line clears).
+    pub fn toggle_node_line_breakpoint(&self, node_id: &str, line: usize) -> bool {
+        if line == 0 {
+            return false;
+        }
+        let mut lines = self.node_line_breakpoints(node_id);
+        let now_set = if let Some(pos) = lines.iter().position(|&l| l == line) {
+            lines.remove(pos);
+            false
+        } else {
+            lines.push(line);
+            lines.sort_unstable();
+            true
+        };
+        self.edit_node(node_id, |n| {
+            let params = n.data.params.get_or_insert_with(Default::default);
+            if lines.is_empty() {
+                params.remove("breakpoint_lines");
+            } else {
+                let csv = lines
+                    .iter()
+                    .map(usize::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                params.insert("breakpoint_lines".into(), ParamValue::Str(csv));
+            }
+        });
+        now_set
+    }
+
+    /// Number of wires leaving a block's output ports in the current flow.
+    pub fn node_output_edge_count(&self, node_id: &str) -> usize {
+        let idx = self.current_flow_index();
+        self.document.with(|d| {
+            d.flows
+                .get(idx)
+                .map(|f| f.edges.iter().filter(|e| e.from.node == node_id).count())
+                .unwrap_or(0)
+        })
+    }
+
+    /// Set (or clear, with `None`) a signal breakpoint on every wire leaving a
+    /// block's output ports — "break when this block's output meets `condition`".
+    /// This is the breakpoint the simulator actually honors. Returns the number
+    /// of output wires affected (0 when the block has no outgoing wire yet).
+    pub fn set_block_output_breakpoint(&self, node_id: &str, condition: Option<String>) -> usize {
+        let idx = self.current_flow_index();
+        let out_edges: Vec<String> = self.document.with(|d| {
+            d.flows
+                .get(idx)
+                .map(|f| {
+                    f.edges
+                        .iter()
+                        .filter(|e| e.from.node == node_id)
+                        .map(|e| e.id.clone())
+                        .collect()
+                })
+                .unwrap_or_default()
+        });
+        for edge_id in &out_edges {
+            self.set_edge_breakpoint(edge_id, condition.clone());
+        }
+        out_edges.len()
+    }
+
+    /// The block-output breakpoint condition currently on this block's output
+    /// wires, if any (the first such wire's condition).
+    pub fn block_output_breakpoint(&self, node_id: &str) -> Option<String> {
+        let idx = self.current_flow_index();
+        self.document.with(|d| {
+            d.flows.get(idx).and_then(|f| {
+                f.edges
+                    .iter()
+                    .find(|e| e.from.node == node_id && e.breakpoint.is_some())
+                    .and_then(|e| e.breakpoint.clone())
+            })
+        })
+    }
+
     /// Enter the sub-flow of a subsystem node (resolved by its `data.flow_id`).
     /// Returns false when the node has no linked sub-flow in the document.
     pub fn enter_subflow(&self, node_id: &str) -> bool {
@@ -1441,6 +1541,67 @@ mod tests {
         vm.set_edge_breakpoint(&edge, Some("value > 0".into()));
         assert_eq!(vm.edge_breakpoint_count(), 1);
         vm.set_edge_breakpoint(&edge, None);
+        assert_eq!(vm.edge_breakpoint_count(), 0);
+    }
+
+    #[test]
+    fn matlab_fcn_line_breakpoints_toggle_and_persist() {
+        let vm = FlowchartViewModel::empty("D", SchemaKind::SignalFlow);
+        let id = vm.add_node(NodeKind::SignalMatlabFcn, 0.0, 0.0);
+        assert!(vm.node_line_breakpoints(&id).is_empty());
+
+        assert!(vm.toggle_node_line_breakpoint(&id, 3));
+        assert!(vm.toggle_node_line_breakpoint(&id, 1));
+        // Stored sorted + deduped, and a 0 line is ignored.
+        assert!(!vm.toggle_node_line_breakpoint(&id, 0));
+        assert_eq!(vm.node_line_breakpoints(&id), vec![1, 3]);
+        assert_eq!(
+            vm.node(&id)
+                .unwrap()
+                .param_str("breakpoint_lines")
+                .as_deref(),
+            Some("1, 3")
+        );
+
+        // Toggling an existing line clears it; clearing the last removes the param.
+        assert!(!vm.toggle_node_line_breakpoint(&id, 1));
+        assert_eq!(vm.node_line_breakpoints(&id), vec![3]);
+        assert!(!vm.toggle_node_line_breakpoint(&id, 3));
+        assert!(vm.node_line_breakpoints(&id).is_empty());
+        assert!(vm
+            .node(&id)
+            .unwrap()
+            .param_str("breakpoint_lines")
+            .is_none());
+    }
+
+    #[test]
+    fn block_output_breakpoint_sets_the_output_wires() {
+        let vm = FlowchartViewModel::empty("D", SchemaKind::SignalFlow);
+        let f = vm.add_node(NodeKind::SignalMatlabFcn, 0.0, 0.0);
+        let s1 = vm.add_node(NodeKind::SignalScope, 200.0, 0.0);
+        let s2 = vm.add_node(NodeKind::SignalScope, 200.0, 100.0);
+
+        // No output wire yet: nothing to set.
+        assert_eq!(
+            vm.set_block_output_breakpoint(&f, Some("value > 1".into())),
+            0
+        );
+        assert!(vm.block_output_breakpoint(&f).is_none());
+
+        // Fan out from the block's single `out` port to two scopes.
+        vm.add_edge(&f, "out", &s1, "in");
+        vm.add_edge(&f, "out", &s2, "in");
+        assert_eq!(
+            vm.set_block_output_breakpoint(&f, Some("value > 1".into())),
+            2
+        );
+        assert_eq!(vm.block_output_breakpoint(&f).as_deref(), Some("value > 1"));
+        assert_eq!(vm.edge_breakpoint_count(), 2);
+
+        // Clearing removes them from every output wire.
+        assert_eq!(vm.set_block_output_breakpoint(&f, None), 2);
+        assert!(vm.block_output_breakpoint(&f).is_none());
         assert_eq!(vm.edge_breakpoint_count(), 0);
     }
 

@@ -40,7 +40,11 @@ draws plots — all driven by the tested MVVM core.
   dots, and per-net lanes so unrelated signals never overlap; click-to-select and
   Delete a wire.
 * **MATLAB Function block** — double-click opens a MATLAB source editor; ports
-  follow the function signature (`u1..uN` → `out`).
+  follow the function signature (`u1..uN` → `out`). The editor has a line-number
+  gutter, an edit toolbar (undo/redo/clipboard), find (Ctrl+F), current-line
+  highlight, and auto-indent. Gutter clicks set persisted source-line
+  breakpoints (markers only — not yet honored by the simulator), and a **Break on
+  output** control sets the signal breakpoint the simulator does honor.
 * **Editor block library** tracks the simulator, including the **MPC Controller**
   and the From Workspace / n-D Lookup / If / Switch-Case Action / custom blocks.
 * **Breakpoints** — per-wire signal breakpoints (persist on the edge, marker on

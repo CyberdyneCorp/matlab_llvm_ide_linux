@@ -29,6 +29,23 @@ use matforge_core::viewmodels::FlowchartViewModel;
 use crate::app_state::AppState;
 use crate::flow_render::{self, Viewport};
 
+thread_local! {
+    /// The visible flowchart canvas — lets launch hooks open the MATLAB Function
+    /// editor (which needs a canvas to redraw) without a pointer gesture.
+    static ACTIVE_FLOW_CANVAS: RefCell<Option<DrawingArea>> = const { RefCell::new(None) };
+}
+
+/// Open the MATLAB Function source editor for the active flowchart's first such
+/// block (used by the e2e launch hook; a no-op without an open chart/block).
+pub fn open_active_matlab_fcn_editor(fc: &Rc<FlowchartViewModel>) {
+    let Some(id) = fc.first_node_of_kind(NodeKind::SignalMatlabFcn) else {
+        return;
+    };
+    let canvas = ACTIVE_FLOW_CANVAS.with(|c| c.borrow().clone());
+    let canvas = canvas.unwrap_or_default();
+    open_matlab_fcn_editor(fc, &id, &canvas);
+}
+
 /// In-progress canvas gesture.
 enum DragMode {
     /// Moving the node under the cursor.
@@ -598,10 +615,12 @@ pub fn build_flowchart_view(
         let inspector = inspector.clone();
         let fc = fc.clone();
         let path = path.clone();
+        let canvas2 = canvas.clone();
         root.connect_map(move |_| {
             crate::ui::flow_inspector_show(&inspector);
             // Make this the Run/Debug target while its tab is visible.
             crate::ui::set_active_flowchart(&fc, (*path).clone());
+            ACTIVE_FLOW_CANVAS.with(|c| *c.borrow_mut() = Some(canvas2.clone()));
         });
     }
     {
@@ -1853,7 +1872,9 @@ fn build_action_field(
 /// Open a MATLAB-highlighted source editor for a MATLAB Function block.
 /// Double-clicking the block shows its `function … = name(u1, …) … end` body;
 /// edits write back to `function_body` and re-derive the block's ports so they
-/// follow the function signature (`u1..uN` → `out`).
+/// follow the function signature (`u1..uN` → `out`). The editor carries a
+/// line-number + breakpoint gutter, a visible edit toolbar (undo/redo/clipboard),
+/// a Ctrl+F find bar, current-line highlighting, and auto-indent.
 fn open_matlab_fcn_editor(fc: &Rc<FlowchartViewModel>, node_id: &str, canvas: &DrawingArea) {
     use matforge_core::models::flowchart::matlab_fcn_ports;
     use matforge_core::services::highlighter::Language;
@@ -1861,31 +1882,12 @@ fn open_matlab_fcn_editor(fc: &Rc<FlowchartViewModel>, node_id: &str, canvas: &D
     let Some(node) = fc.node(node_id) else {
         return;
     };
-    // Show the function body; seed one from the single-line expression if empty.
-    let body = node.param_str("function_body").unwrap_or_default();
-    let initial = if !body.trim().is_empty() {
-        body
-    } else {
-        let expr = node.param_str("expression").unwrap_or_default();
-        let arity = matlab_fcn_ports("", &expr).0.len().max(1);
-        let args = (1..=arity)
-            .map(|i| format!("u{i}"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        if expr.trim().is_empty() {
-            format!("function out = fcn({args})\n  out = u1;\nend\n")
-        } else {
-            format!(
-                "function out = fcn({args})\n  out = {};\nend\n",
-                expr.trim()
-            )
-        }
-    };
+    let initial = matlab_fcn_seed_body(&node);
 
     let window = gtk::Window::builder()
         .title(format!("MATLAB Function — {node_id}"))
-        .default_width(580)
-        .default_height(380)
+        .default_width(660)
+        .default_height(460)
         .build();
     window.add_css_class("mf-root");
     if let Some(parent) = crate::ui::main_window() {
@@ -1902,37 +1904,62 @@ fn open_matlab_fcn_editor(fc: &Rc<FlowchartViewModel>, node_id: &str, canvas: &D
     view.set_right_margin(8);
     view.add_css_class("mf-action-editor");
     let buffer = view.buffer();
+    buffer.set_enable_undo(true);
     buffer.set_text(&initial);
     crate::highlight::ensure_tags(&buffer);
     crate::highlight::apply(&buffer, Language::Matlab);
+    mf_ensure_current_line_tag(&buffer);
+    mf_highlight_current_line(&buffer);
 
-    let scroll = ScrolledWindow::new();
-    scroll.set_vexpand(true);
-    scroll.set_child(Some(&view));
-    root.append(&scroll);
-
+    // Ports status (right-aligned in the toolbar).
     let status = Label::new(None);
     status.add_css_class("mf-col-title");
-    status.set_halign(gtk::Align::Start);
-    status.set_margin_start(8);
-    status.set_margin_top(4);
-    status.set_margin_bottom(6);
+    status.set_halign(gtk::Align::End);
+    status.set_hexpand(true);
     let set_status = |s: &Label, text: &str| {
         let ins = matlab_fcn_ports(text, "").0.join(", ");
         s.set_text(&format!("ports: {ins} → out"));
     };
     set_status(&status, &initial);
-    root.append(&status);
 
-    // Commit on every edit: write the body, re-derive ports, redraw the canvas.
+    let gutter = mf_build_gutter(fc, node_id, &view);
+    let (find_bar, find_entry) = mf_build_find_bar(&view);
+    let toolbar = mf_build_editor_toolbar(fc, node_id, canvas, &view, &find_bar, &status);
+
+    root.append(&toolbar);
+    root.append(&find_bar);
+
+    let scroll = ScrolledWindow::new();
+    scroll.set_vexpand(true);
+    scroll.set_child(Some(&view));
+    let content = GtkBox::new(Orientation::Horizontal, 0);
+    content.append(&gutter);
+    content.append(&scroll);
+    root.append(&content);
+
+    // Honesty note: line breakpoints persist but the simulator can't stop on
+    // them yet (it has signal/time breakpoints only — see "Break on output").
+    let hint = Label::new(Some(
+        "Line breakpoints persist in the model; the simulator does not stop on them yet.",
+    ));
+    hint.add_css_class("mf-col-title");
+    hint.set_halign(gtk::Align::Start);
+    hint.set_margin_start(8);
+    hint.set_margin_top(4);
+    hint.set_margin_bottom(6);
+    root.append(&hint);
+
+    // Commit on every edit: write the body, re-derive ports, redraw.
     {
         let fc = fc.clone();
         let id = node_id.to_string();
         let canvas = canvas.clone();
         let status = status.clone();
+        let gutter = gutter.clone();
         buffer.connect_changed(move |b| {
             let text = b.text(&b.start_iter(), &b.end_iter(), false).to_string();
             crate::highlight::apply(b, Language::Matlab);
+            mf_highlight_current_line(b);
             fc.edit_node(&id, |n| {
                 n.data
                     .params
@@ -1941,12 +1968,399 @@ fn open_matlab_fcn_editor(fc: &Rc<FlowchartViewModel>, node_id: &str, canvas: &D
             });
             fc.sync_matlab_fcn_ports(&id);
             set_status(&status, &text);
+            gutter.queue_draw();
             canvas.queue_draw();
         });
     }
+    // Track the caret line for the current-line highlight.
+    {
+        let gutter = gutter.clone();
+        buffer.connect_mark_set(move |b, _iter, mark| {
+            if mark.name().as_deref() == Some("insert") {
+                mf_highlight_current_line(b);
+                gutter.queue_draw();
+            }
+        });
+    }
 
+    // Ctrl+F reveals find; Enter auto-indents to the current line's indentation.
+    let keys = gtk::EventControllerKey::new();
+    {
+        let view2 = view.clone();
+        let find_bar = find_bar.clone();
+        let find_entry = find_entry.clone();
+        keys.connect_key_pressed(move |_c, keyval, _code, state| {
+            use gtk::gdk::{Key, ModifierType};
+            if keyval == Key::f && state.contains(ModifierType::CONTROL_MASK) {
+                find_bar.set_reveal_child(true);
+                find_entry.grab_focus();
+                return gtk::glib::Propagation::Stop;
+            }
+            let plain = !state.intersects(ModifierType::CONTROL_MASK | ModifierType::ALT_MASK);
+            if keyval == Key::Return && plain {
+                mf_auto_indent(&view2);
+                return gtk::glib::Propagation::Stop;
+            }
+            gtk::glib::Propagation::Proceed
+        });
+    }
+    view.add_controller(keys);
+
+    crate::e2e::set_active_gutter(&gutter);
     window.set_child(Some(&root));
     window.present();
+}
+
+/// The body to show for a MATLAB Function block: its stored `function_body`, or
+/// one seeded from the single-line `expression` (or a stub) when empty.
+fn matlab_fcn_seed_body(node: &FlowNode) -> String {
+    use matforge_core::models::flowchart::matlab_fcn_ports;
+    let body = node.param_str("function_body").unwrap_or_default();
+    if !body.trim().is_empty() {
+        return body;
+    }
+    let expr = node.param_str("expression").unwrap_or_default();
+    let arity = matlab_fcn_ports("", &expr).0.len().max(1);
+    let args = (1..=arity)
+        .map(|i| format!("u{i}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if expr.trim().is_empty() {
+        format!("function out = fcn({args})\n  out = u1;\nend\n")
+    } else {
+        format!(
+            "function out = fcn({args})\n  out = {};\nend\n",
+            expr.trim()
+        )
+    }
+}
+
+/// Edit toolbar: undo/redo, clipboard, find, and a "Break on output" control
+/// that drives the (simulator-honored) signal breakpoint on the block's output.
+fn mf_build_editor_toolbar(
+    fc: &Rc<FlowchartViewModel>,
+    node_id: &str,
+    canvas: &DrawingArea,
+    view: &TextView,
+    find_bar: &gtk::Revealer,
+    status: &Label,
+) -> GtkBox {
+    let bar = GtkBox::new(Orientation::Horizontal, 4);
+    bar.add_css_class("mf-window");
+    bar.set_margin_start(6);
+    bar.set_margin_end(6);
+    bar.set_margin_top(6);
+    bar.set_margin_bottom(4);
+
+    // Buttons that trigger the TextView's built-in actions.
+    for (label, action) in [
+        ("Undo", "text.undo"),
+        ("Redo", "text.redo"),
+        ("Cut", "clipboard.cut"),
+        ("Copy", "clipboard.copy"),
+        ("Paste", "clipboard.paste"),
+    ] {
+        let b = Button::with_label(label);
+        b.add_css_class("flat");
+        let view2 = view.clone();
+        let action = action.to_string();
+        b.connect_clicked(move |_| {
+            let _ = view2.activate_action(&action, None);
+            view2.grab_focus();
+        });
+        bar.append(&b);
+    }
+
+    let find_btn = Button::with_label("Find");
+    find_btn.add_css_class("flat");
+    {
+        let find_bar = find_bar.clone();
+        find_btn.connect_clicked(move |_| {
+            find_bar.set_reveal_child(!find_bar.reveals_child());
+        });
+    }
+    bar.append(&find_btn);
+
+    // "Break on output": set/clear the signal breakpoint on the block's output
+    // wire(s). Insensitive until the block's output is wired somewhere.
+    let cond = Entry::new();
+    cond.set_width_chars(10);
+    cond.set_placeholder_text(Some("value > 0"));
+    let existing = fc.block_output_breakpoint(node_id);
+    cond.set_text(existing.as_deref().unwrap_or("value > 0"));
+    let toggle = gtk::ToggleButton::with_label("Break on output");
+    toggle.add_css_class("flat");
+    toggle.set_active(existing.is_some());
+    if fc.node_output_edge_count(node_id) == 0 {
+        toggle.set_sensitive(false);
+        cond.set_sensitive(false);
+        toggle.set_tooltip_text(Some("Connect the block's output to a wire first"));
+    }
+    let apply = {
+        let fc = fc.clone();
+        let id = node_id.to_string();
+        let canvas = canvas.clone();
+        let cond = cond.clone();
+        move |on: bool| {
+            let c = if on {
+                let t = cond.text().trim().to_string();
+                Some(if t.is_empty() { "value > 0".into() } else { t })
+            } else {
+                None
+            };
+            fc.set_block_output_breakpoint(&id, c);
+            canvas.queue_draw();
+        }
+    };
+    {
+        let apply = apply.clone();
+        toggle.connect_toggled(move |t| apply(t.is_active()));
+    }
+    {
+        let toggle = toggle.clone();
+        cond.connect_changed(move |_| {
+            if toggle.is_active() {
+                apply(true);
+            }
+        });
+    }
+    bar.append(&cond);
+    bar.append(&toggle);
+
+    let _ = status; // appended last so it right-aligns via hexpand.
+    bar.append(status);
+    bar
+}
+
+/// A line-number + breakpoint-dot gutter for the MATLAB Function editor. Clicking
+/// a line toggles a (persisted) source-line breakpoint on the node.
+fn mf_build_gutter(fc: &Rc<FlowchartViewModel>, node_id: &str, view: &TextView) -> DrawingArea {
+    use std::f64::consts::PI;
+    let gutter = DrawingArea::new();
+    gutter.set_width_request(52);
+    gutter.set_vexpand(true);
+    gutter.add_css_class("mf-gutter");
+    {
+        let view = view.clone();
+        let fc = fc.clone();
+        let id = node_id.to_string();
+        gutter.set_draw_func(move |_a, ctx, _w, h| {
+            let (br, bg, bb) = crate::theme_css::current().editor_bg.to_unit();
+            ctx.set_source_rgb(br, bg, bb);
+            let _ = ctx.paint();
+            ctx.select_font_face(
+                "monospace",
+                gtk::cairo::FontSlant::Normal,
+                gtk::cairo::FontWeight::Normal,
+            );
+            ctx.set_font_size(11.0 * crate::theme_css::code_scale());
+            let buffer = view.buffer();
+            let bps = fc.node_line_breakpoints(&id);
+            for line in 0..buffer.line_count() {
+                let Some(iter) = buffer.iter_at_line(line) else {
+                    continue;
+                };
+                let (by, lh) = view.line_yrange(&iter);
+                let (_, wy) = view.buffer_to_window_coords(gtk::TextWindowType::Widget, 0, by);
+                if wy + lh < 0 || wy > h {
+                    continue;
+                }
+                let yf = wy as f64;
+                let center = yf + lh as f64 / 2.0;
+                let one = line as usize + 1;
+                if bps.contains(&one) {
+                    let (r, g, b) = crate::theme_css::current().red.to_unit();
+                    ctx.set_source_rgb(r, g, b);
+                    ctx.arc(10.0, center, 4.0, 0.0, 2.0 * PI);
+                    let _ = ctx.fill();
+                }
+                let (nr, ng, nb) = crate::theme_css::current().syn_line_number.to_unit();
+                ctx.set_source_rgb(nr, ng, nb);
+                let label = one.to_string();
+                let ext = ctx.text_extents(&label).map(|e| e.width()).unwrap_or(0.0);
+                ctx.move_to(44.0 - ext, yf + 11.0);
+                let _ = ctx.show_text(&label);
+            }
+        });
+    }
+    {
+        let g = gutter.clone();
+        if let Some(adj) = view.vadjustment() {
+            adj.connect_value_changed(move |_| g.queue_draw());
+        }
+    }
+    let click = gtk::GestureClick::new();
+    {
+        let view = view.clone();
+        let fc = fc.clone();
+        let id = node_id.to_string();
+        let g = gutter.clone();
+        click.connect_released(move |_gst, _n, _x, y| {
+            let (_, by) = view.window_to_buffer_coords(gtk::TextWindowType::Widget, 0, y as i32);
+            let (iter, _) = view.line_at_y(by);
+            fc.toggle_node_line_breakpoint(&id, iter.line() as usize + 1);
+            g.queue_draw();
+        });
+    }
+    gutter.add_controller(click);
+    gutter
+}
+
+/// A reveal-on-demand find bar: an entry plus prev/next/close that select
+/// matches in the text view.
+fn mf_build_find_bar(view: &TextView) -> (gtk::Revealer, Entry) {
+    let bar = GtkBox::new(Orientation::Horizontal, 4);
+    bar.add_css_class("mf-window");
+    bar.set_margin_start(6);
+    bar.set_margin_end(6);
+    bar.set_margin_bottom(4);
+    let entry = Entry::new();
+    entry.set_placeholder_text(Some("Find"));
+    entry.set_hexpand(true);
+    let prev = Button::with_label("◀");
+    let next = Button::with_label("▶");
+    let close = Button::with_label("✕");
+    for b in [&prev, &next, &close] {
+        b.add_css_class("flat");
+    }
+    bar.append(&entry);
+    bar.append(&prev);
+    bar.append(&next);
+    bar.append(&close);
+
+    let revealer = gtk::Revealer::new();
+    revealer.set_child(Some(&bar));
+    revealer.set_reveal_child(false);
+
+    {
+        let view = view.clone();
+        let entry2 = entry.clone();
+        entry.connect_activate(move |_| mf_find(&view, &entry2.text(), true));
+    }
+    {
+        let view = view.clone();
+        let entry2 = entry.clone();
+        next.connect_clicked(move |_| mf_find(&view, &entry2.text(), true));
+    }
+    {
+        let view = view.clone();
+        let entry2 = entry.clone();
+        prev.connect_clicked(move |_| mf_find(&view, &entry2.text(), false));
+    }
+    {
+        let revealer2 = revealer.clone();
+        let view = view.clone();
+        close.connect_clicked(move |_| {
+            revealer2.set_reveal_child(false);
+            view.grab_focus();
+        });
+    }
+    // Escape in the entry closes the bar.
+    let esc = gtk::EventControllerKey::new();
+    {
+        let revealer2 = revealer.clone();
+        let view = view.clone();
+        esc.connect_key_pressed(move |_c, keyval, _code, _state| {
+            if keyval == gtk::gdk::Key::Escape {
+                revealer2.set_reveal_child(false);
+                view.grab_focus();
+                return gtk::glib::Propagation::Stop;
+            }
+            gtk::glib::Propagation::Proceed
+        });
+    }
+    entry.add_controller(esc);
+    (revealer, entry)
+}
+
+/// Select the next/previous case-insensitive occurrence of `term`, wrapping.
+fn mf_find(view: &TextView, term: &str, forward: bool) {
+    let term = term.trim();
+    if term.is_empty() {
+        return;
+    }
+    let buffer = view.buffer();
+    let (s, e) = buffer.bounds();
+    let hay = buffer.text(&s, &e, false).to_string();
+    let hay_l = hay.to_lowercase();
+    let needle = term.to_lowercase();
+    let needle_clen = needle.chars().count() as i32;
+    let cursor_char = buffer.cursor_position() as usize;
+    let cursor_byte = hay
+        .char_indices()
+        .nth(cursor_char)
+        .map(|(b, _)| b)
+        .unwrap_or(hay.len());
+
+    let found = if forward {
+        hay_l[cursor_byte.min(hay_l.len())..]
+            .find(&needle)
+            .map(|p| cursor_byte + p)
+            .or_else(|| hay_l.find(&needle))
+    } else {
+        let upto = cursor_byte.saturating_sub(1).min(hay_l.len());
+        hay_l[..upto]
+            .rfind(&needle)
+            .or_else(|| hay_l.rfind(&needle))
+    };
+    if let Some(b) = found {
+        let start_char = hay[..b].chars().count() as i32;
+        let si = buffer.iter_at_offset(start_char);
+        let ei = buffer.iter_at_offset(start_char + needle_clen);
+        buffer.select_range(&si, &ei);
+        let mut sc = si;
+        view.scroll_to_iter(&mut sc, 0.1, false, 0.0, 0.0);
+    }
+}
+
+/// Insert a newline preserving the current line's leading whitespace.
+fn mf_auto_indent(view: &TextView) {
+    let buffer = view.buffer();
+    let cur = buffer.iter_at_offset(buffer.cursor_position());
+    let mut ls = cur;
+    ls.set_line_offset(0);
+    let line_text = buffer.text(&ls, &cur, false).to_string();
+    let indent: String = line_text
+        .chars()
+        .take_while(|c| *c == ' ' || *c == '\t')
+        .collect();
+    buffer.begin_user_action();
+    if buffer.has_selection() {
+        if let Some((mut a, mut b)) = buffer.selection_bounds() {
+            buffer.delete(&mut a, &mut b);
+        }
+    }
+    buffer.insert_at_cursor(&format!("\n{indent}"));
+    buffer.end_user_action();
+}
+
+/// Background color (hex) for the current-line highlight tag.
+fn mf_current_line_hex() -> String {
+    let c = crate::theme_css::current().hover;
+    format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b)
+}
+
+/// Create the current-line background tag once on the buffer.
+fn mf_ensure_current_line_tag(buffer: &gtk::TextBuffer) {
+    if buffer.tag_table().lookup("mf-current-line").is_none() {
+        if let Some(tag) = buffer.create_tag(Some("mf-current-line"), &[]) {
+            tag.set_property("background", mf_current_line_hex());
+        }
+    }
+}
+
+/// Move the current-line highlight to the caret's line.
+fn mf_highlight_current_line(buffer: &gtk::TextBuffer) {
+    let (s0, e0) = buffer.bounds();
+    buffer.remove_tag_by_name("mf-current-line", &s0, &e0);
+    let cur = buffer.iter_at_offset(buffer.cursor_position());
+    let mut start = cur;
+    start.set_line_offset(0);
+    let mut end = start;
+    if !end.ends_line() {
+        end.forward_to_line_end();
+    }
+    buffer.apply_tag_by_name("mf-current-line", &start, &end);
 }
 
 /// Which `FlowNode` field an inspector entry edits.
