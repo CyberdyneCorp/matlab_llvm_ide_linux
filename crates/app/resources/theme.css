@@ -230,6 +230,53 @@ popover button:hover { background-color: @mf_hover; }
     padding: 4px 8px;
 }
 
+/* MATLAB Function block source-editor toolbar. */
+.mf-fcn-toolbar { background-color: @mf_chrome; padding: 5px 8px; }
+/* Flat toolbar buttons: no default raised frame, just text + hover wash. */
+.mf-fcn-toolbar button.mf-tool {
+    background: transparent;
+    background-image: none;
+    border: none;
+    box-shadow: none;
+    outline: none;
+    min-width: 0;
+    padding: 3px 9px;
+    border-radius: 5px;
+    font-size: __FS_SM__;
+    font-weight: 600;
+    color: @mf_text_secondary;
+}
+.mf-fcn-toolbar button.mf-tool:hover { color: @mf_text_primary; background-color: @mf_hover; }
+.mf-fcn-toolbar button.mf-tool:disabled { color: @mf_text_muted; }
+.mf-tb-sep { background-color: @mf_border_soft; margin: 3px 4px; min-width: 1px; }
+/* "Break on output" engaged — red to read as an active breakpoint. */
+.mf-fcn-toolbar button.mf-bp-toggle:checked,
+.mf-fcn-toolbar button.mf-bp-toggle:checked:hover {
+    background-color: @mf_red;
+    color: #ffffff;
+}
+.mf-bp-cond {
+    border: 1px solid @mf_border;
+    border-radius: 5px;
+    min-height: 0;
+    padding: 1px 6px;
+    background-color: @mf_editor_bg;
+}
+.mf-bp-cond text,
+.mf-bp-cond > text {
+    background-color: @mf_editor_bg;
+    color: @mf_code_fg;
+    font-family: "JetBrains Mono", "DejaVu Sans Mono", monospace;
+    font-size: __FS_XS__;
+}
+.mf-bp-cond:focus-within { border-color: @mf_accent; }
+.mf-mono-sm { font-family: "JetBrains Mono", "DejaVu Sans Mono", monospace; font-size: __FS_XS__; }
+.mf-fcn-hint {
+    font-size: __FS_XS__;
+    border-top: 1px solid @mf_border_soft;
+    padding-top: 5px;
+}
+
 /* Floating "Fit" button over the flowchart canvas. */
 .mf-flow-fit {
     background-color: alpha(@mf_card, 0.92);
