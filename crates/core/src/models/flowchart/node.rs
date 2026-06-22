@@ -260,6 +260,83 @@ pub enum NodeKind {
     SignalSwitchCaseAction,
     #[serde(rename = "signal_custom")]
     SignalCustom,
+    // 6.6.1 Communications (compiler #343)
+    #[serde(rename = "signal_awgn")]
+    SignalAwgn,
+    #[serde(rename = "signal_psk_mod")]
+    SignalPskMod,
+    #[serde(rename = "signal_psk_demod")]
+    SignalPskDemod,
+    #[serde(rename = "signal_qam_mod")]
+    SignalQamMod,
+    #[serde(rename = "signal_qam_demod")]
+    SignalQamDemod,
+    #[serde(rename = "signal_error_rate")]
+    SignalErrorRate,
+    // 6.6.2 DSP & image (compiler #343)
+    #[serde(rename = "signal_fft")]
+    SignalFft,
+    #[serde(rename = "signal_ifft")]
+    SignalIfft,
+    #[serde(rename = "signal_window")]
+    SignalWindow,
+    #[serde(rename = "signal_spectrum")]
+    SignalSpectrum,
+    #[serde(rename = "signal_biquad")]
+    SignalBiquad,
+    #[serde(rename = "signal_lowpass")]
+    SignalLowpass,
+    #[serde(rename = "signal_highpass")]
+    SignalHighpass,
+    #[serde(rename = "signal_dcblock")]
+    SignalDcBlock,
+    #[serde(rename = "signal_dwt")]
+    SignalDwt,
+    #[serde(rename = "signal_idwt")]
+    SignalIdwt,
+    #[serde(rename = "signal_image_filter")]
+    SignalImageFilter,
+    #[serde(rename = "signal_color_space")]
+    SignalColorSpace,
+    #[serde(rename = "signal_threshold")]
+    SignalThreshold,
+    // 6.6.3 HDL / digital sequential (compiler #343)
+    #[serde(rename = "signal_dff")]
+    SignalDff,
+    #[serde(rename = "signal_tff")]
+    SignalTff,
+    #[serde(rename = "signal_counter")]
+    SignalCounter,
+    #[serde(rename = "signal_jkff")]
+    SignalJkff,
+    #[serde(rename = "signal_srff")]
+    SignalSrff,
+    #[serde(rename = "signal_shift_register")]
+    SignalShiftRegister,
+    #[serde(rename = "signal_ram")]
+    SignalRam,
+    #[serde(rename = "signal_rom")]
+    SignalRom,
+    // 6.6.4 Additional sources (compiler #343)
+    #[serde(rename = "signal_repeating_sequence")]
+    SignalRepeatingSequence,
+    #[serde(rename = "signal_image_source")]
+    SignalImageSource,
+    // 6.6.5 Estimation / ML / control (compiler #343)
+    #[serde(rename = "signal_kalman")]
+    SignalKalman,
+    #[serde(rename = "signal_lqr")]
+    SignalLqr,
+    #[serde(rename = "signal_running_stats")]
+    SignalRunningStats,
+    #[serde(rename = "signal_dnn_predict")]
+    SignalDnnPredict,
+    #[serde(rename = "signal_rl_agent")]
+    SignalRlAgent,
+    #[serde(rename = "signal_rf_2port")]
+    SignalRf2Port,
+    #[serde(rename = "signal_pose_transform")]
+    SignalPoseTransform,
     // 6.7 State-chart
     #[serde(rename = "state")]
     State,
@@ -303,7 +380,7 @@ pub enum PortAnchor {
 
 impl NodeKind {
     /// Every kind, for palette enumeration + exhaustive tests.
-    pub const ALL: [NodeKind; 91] = [
+    pub const ALL: [NodeKind; 127] = [
         NodeKind::Start,
         NodeKind::End,
         NodeKind::Comment,
@@ -386,6 +463,42 @@ impl NodeKind {
         NodeKind::SignalIfAction,
         NodeKind::SignalSwitchCaseAction,
         NodeKind::SignalCustom,
+        NodeKind::SignalAwgn,
+        NodeKind::SignalPskMod,
+        NodeKind::SignalPskDemod,
+        NodeKind::SignalQamMod,
+        NodeKind::SignalQamDemod,
+        NodeKind::SignalErrorRate,
+        NodeKind::SignalFft,
+        NodeKind::SignalIfft,
+        NodeKind::SignalWindow,
+        NodeKind::SignalSpectrum,
+        NodeKind::SignalBiquad,
+        NodeKind::SignalLowpass,
+        NodeKind::SignalHighpass,
+        NodeKind::SignalDcBlock,
+        NodeKind::SignalDwt,
+        NodeKind::SignalIdwt,
+        NodeKind::SignalImageFilter,
+        NodeKind::SignalColorSpace,
+        NodeKind::SignalThreshold,
+        NodeKind::SignalDff,
+        NodeKind::SignalTff,
+        NodeKind::SignalCounter,
+        NodeKind::SignalJkff,
+        NodeKind::SignalSrff,
+        NodeKind::SignalShiftRegister,
+        NodeKind::SignalRam,
+        NodeKind::SignalRom,
+        NodeKind::SignalRepeatingSequence,
+        NodeKind::SignalImageSource,
+        NodeKind::SignalKalman,
+        NodeKind::SignalLqr,
+        NodeKind::SignalRunningStats,
+        NodeKind::SignalDnnPredict,
+        NodeKind::SignalRlAgent,
+        NodeKind::SignalRf2Port,
+        NodeKind::SignalPoseTransform,
         NodeKind::State,
         NodeKind::JunctionConnective,
         NodeKind::JunctionHistory,
@@ -419,8 +532,17 @@ impl NodeKind {
             | SignalChirp
             | SignalNoise
             | SignalFunctionCallGenerator
-            | SignalFromWorkspace => C::SignalSources,
+            | SignalFromWorkspace
+            | SignalRepeatingSequence
+            | SignalImageSource => C::SignalSources,
             SignalScope | SignalDisplay | SignalToWorkspace | SignalTerminator => C::SignalSinks,
+            SignalAwgn | SignalPskMod | SignalPskDemod | SignalQamMod | SignalQamDemod
+            | SignalErrorRate => C::SignalComms,
+            SignalFft | SignalIfft | SignalWindow | SignalSpectrum | SignalBiquad
+            | SignalLowpass | SignalHighpass | SignalDcBlock | SignalDwt | SignalIdwt
+            | SignalImageFilter | SignalColorSpace | SignalThreshold => C::SignalDsp,
+            SignalDff | SignalTff | SignalCounter | SignalJkff | SignalSrff
+            | SignalShiftRegister | SignalRam | SignalRom => C::SignalHdl,
             SignalIntegrator | SignalPid | SignalDerivative | SignalTransferFcn
             | SignalStateSpace | SignalZeroPole | SignalTransportDelay | SignalMpcMove => {
                 C::SignalContinuous
@@ -429,7 +551,8 @@ impl NodeKind {
             | SignalZoh
             | SignalDiscreteIntegrator
             | SignalDiscreteFilter
-            | SignalRateTransition => C::SignalDiscrete,
+            | SignalRateTransition
+            | SignalKalman => C::SignalDiscrete,
             SignalGain
             | SignalSum
             | SignalProduct
@@ -444,7 +567,13 @@ impl NodeKind {
             | SignalCompareToConstant
             | SignalRelay
             | SignalMatlabFcn
-            | SignalCustom => C::SignalMath,
+            | SignalCustom
+            | SignalRunningStats
+            | SignalDnnPredict
+            | SignalRlAgent
+            | SignalRf2Port
+            | SignalPoseTransform
+            | SignalLqr => C::SignalMath,
             SignalMux
             | SignalDemux
             | SignalSwitch
@@ -583,6 +712,42 @@ impl NodeKind {
             SignalBusCreator => "Bus Creator",
             SignalBusSelector => "Bus Selector",
             SignalReshape => "Reshape",
+            SignalAwgn => "AWGN Channel",
+            SignalPskMod => "PSK Modulator",
+            SignalPskDemod => "PSK Demodulator",
+            SignalQamMod => "QAM Modulator",
+            SignalQamDemod => "QAM Demodulator",
+            SignalErrorRate => "Error Rate (BER)",
+            SignalFft => "FFT",
+            SignalIfft => "Inverse FFT",
+            SignalWindow => "Window",
+            SignalSpectrum => "Power Spectrum",
+            SignalBiquad => "Biquad Filter",
+            SignalLowpass => "Lowpass",
+            SignalHighpass => "Highpass",
+            SignalDcBlock => "DC Block",
+            SignalDwt => "DWT (Haar)",
+            SignalIdwt => "Inverse DWT",
+            SignalImageFilter => "Image Filter",
+            SignalColorSpace => "Color Space",
+            SignalThreshold => "Threshold",
+            SignalDff => "D Flip-Flop",
+            SignalTff => "T Flip-Flop",
+            SignalCounter => "Counter",
+            SignalJkff => "JK Flip-Flop",
+            SignalSrff => "SR Flip-Flop",
+            SignalShiftRegister => "Shift Register",
+            SignalRam => "RAM",
+            SignalRom => "ROM",
+            SignalRepeatingSequence => "Repeating Sequence",
+            SignalImageSource => "Image Source",
+            SignalKalman => "Kalman Filter",
+            SignalLqr => "LQR Gain",
+            SignalRunningStats => "Running Stats",
+            SignalDnnPredict => "DNN Predict",
+            SignalRlAgent => "RL Agent",
+            SignalRf2Port => "RF 2-Port",
+            SignalPoseTransform => "Pose Transform",
             State => "State",
             JunctionConnective => "Junction",
             JunctionHistory => "History Junction",
@@ -817,6 +982,17 @@ impl NodeKind {
                     Some(Left)
                 }
             }
+            // Multi-input blocks (BER, Kalman, HDL registers): `out` on the
+            // right, every other named input (tx/rx, z/u, d/clk/reset, …) on the
+            // left so they spread down the face instead of collapsing.
+            SignalErrorRate | SignalKalman | SignalDff | SignalTff | SignalCounter | SignalJkff
+            | SignalSrff | SignalShiftRegister | SignalRam | SignalRom => {
+                if id == "out" {
+                    Some(Right)
+                } else {
+                    Some(Left)
+                }
+            }
             _ => match id {
                 "in" => Some(Left),
                 "out" => Some(Right),
@@ -857,6 +1033,8 @@ impl NodeKind {
             | SignalNoise
             | SignalFunctionCallGenerator
             | SignalFromWorkspace
+            | SignalRepeatingSequence
+            | SignalImageSource
             | SignalFrom => FlowPorts {
                 inputs: vec![],
                 outputs: vec![p("out")],
@@ -893,6 +1071,49 @@ impl NodeKind {
             },
             SignalMerge => FlowPorts {
                 inputs: vec![p("in1"), p("in2")],
+                outputs: vec![p("out")],
+            },
+            // Communications BER sink: compares transmitted vs received.
+            SignalErrorRate => FlowPorts {
+                inputs: vec![p("tx"), p("rx")],
+                outputs: vec![p("out")],
+            },
+            // Kalman filter: measurement (required) + optional control input.
+            SignalKalman => FlowPorts {
+                inputs: vec![p("z"), p("u")],
+                outputs: vec![p("out")],
+            },
+            // HDL clocked registers: clocked by `clk`, async `reset`.
+            SignalDff => FlowPorts {
+                inputs: vec![p("d"), p("clk"), p("reset")],
+                outputs: vec![p("out")],
+            },
+            SignalTff => FlowPorts {
+                inputs: vec![p("t"), p("clk"), p("reset")],
+                outputs: vec![p("out")],
+            },
+            SignalCounter => FlowPorts {
+                inputs: vec![p("clk"), p("reset")],
+                outputs: vec![p("out")],
+            },
+            SignalJkff => FlowPorts {
+                inputs: vec![p("j"), p("k"), p("clk"), p("reset")],
+                outputs: vec![p("out")],
+            },
+            SignalSrff => FlowPorts {
+                inputs: vec![p("s"), p("r"), p("clk"), p("reset")],
+                outputs: vec![p("out")],
+            },
+            SignalShiftRegister => FlowPorts {
+                inputs: vec![p("in"), p("clk"), p("reset")],
+                outputs: vec![p("out")],
+            },
+            SignalRam => FlowPorts {
+                inputs: vec![p("addr"), p("data"), p("we"), p("clk")],
+                outputs: vec![p("out")],
+            },
+            SignalRom => FlowPorts {
+                inputs: vec![p("addr")],
                 outputs: vec![p("out")],
             },
             _ => FlowPorts {
@@ -1379,5 +1600,110 @@ mod tests {
             serde_json::from_str::<NodeKind>("\"signal_mpc_move\"").unwrap(),
             mpc
         );
+    }
+
+    #[test]
+    fn compiler_343_blocks_are_exposed_with_ports_anchors_and_params() {
+        use super::super::palette::{library_blocks, SignalFlowParamSpec};
+        use super::super::SchemaKind;
+        use NodeCategory as C;
+        use NodeKind::*;
+
+        let lib: Vec<NodeKind> = library_blocks(SchemaKind::SignalFlow)
+            .into_iter()
+            .flat_map(|(_, k)| k)
+            .collect();
+
+        // (kind, serde string, expected category) for every #343 block.
+        let cases: &[(NodeKind, &str, NodeCategory)] = &[
+            (SignalAwgn, "signal_awgn", C::SignalComms),
+            (SignalPskMod, "signal_psk_mod", C::SignalComms),
+            (SignalPskDemod, "signal_psk_demod", C::SignalComms),
+            (SignalQamMod, "signal_qam_mod", C::SignalComms),
+            (SignalQamDemod, "signal_qam_demod", C::SignalComms),
+            (SignalErrorRate, "signal_error_rate", C::SignalComms),
+            (SignalFft, "signal_fft", C::SignalDsp),
+            (SignalIfft, "signal_ifft", C::SignalDsp),
+            (SignalWindow, "signal_window", C::SignalDsp),
+            (SignalSpectrum, "signal_spectrum", C::SignalDsp),
+            (SignalBiquad, "signal_biquad", C::SignalDsp),
+            (SignalLowpass, "signal_lowpass", C::SignalDsp),
+            (SignalHighpass, "signal_highpass", C::SignalDsp),
+            (SignalDcBlock, "signal_dcblock", C::SignalDsp),
+            (SignalDwt, "signal_dwt", C::SignalDsp),
+            (SignalIdwt, "signal_idwt", C::SignalDsp),
+            (SignalImageFilter, "signal_image_filter", C::SignalDsp),
+            (SignalColorSpace, "signal_color_space", C::SignalDsp),
+            (SignalThreshold, "signal_threshold", C::SignalDsp),
+            (SignalDff, "signal_dff", C::SignalHdl),
+            (SignalTff, "signal_tff", C::SignalHdl),
+            (SignalCounter, "signal_counter", C::SignalHdl),
+            (SignalJkff, "signal_jkff", C::SignalHdl),
+            (SignalSrff, "signal_srff", C::SignalHdl),
+            (SignalShiftRegister, "signal_shift_register", C::SignalHdl),
+            (SignalRam, "signal_ram", C::SignalHdl),
+            (SignalRom, "signal_rom", C::SignalHdl),
+            (
+                SignalRepeatingSequence,
+                "signal_repeating_sequence",
+                C::SignalSources,
+            ),
+            (SignalImageSource, "signal_image_source", C::SignalSources),
+            (SignalKalman, "signal_kalman", C::SignalDiscrete),
+            (SignalLqr, "signal_lqr", C::SignalMath),
+            (SignalRunningStats, "signal_running_stats", C::SignalMath),
+            (SignalDnnPredict, "signal_dnn_predict", C::SignalMath),
+            (SignalRlAgent, "signal_rl_agent", C::SignalMath),
+            (SignalRf2Port, "signal_rf_2port", C::SignalMath),
+            (SignalPoseTransform, "signal_pose_transform", C::SignalMath),
+        ];
+        assert_eq!(cases.len(), 36, "all 36 #343 blocks covered");
+
+        for &(k, name, cat) in cases {
+            // serde name round-trips both ways.
+            assert_eq!(serde_json::to_string(&k).unwrap(), format!("\"{name}\""));
+            assert_eq!(
+                serde_json::from_str::<NodeKind>(&format!("\"{name}\"")).unwrap(),
+                k
+            );
+            // placeable in the editor library + categorized as expected.
+            assert!(lib.contains(&k), "{k:?} missing from the library");
+            assert!(k.is_signal_flow(), "{k:?} not a signal-flow block");
+            assert_eq!(k.category(), cat, "{k:?} wrong category");
+            // every input port anchors to a face (no bottom-center collapse).
+            for port in &k.default_ports().inputs {
+                assert!(
+                    k.signal_flow_port_anchor(&port.id).is_some(),
+                    "{k:?} input port {} has no anchor",
+                    port.id
+                );
+            }
+            // every default parameter value validates against its constraint.
+            for f in SignalFlowParamSpec::fields(k) {
+                let v = f.default_value.display_string();
+                assert!(
+                    SignalFlowParamSpec::validate_field(k, f.key, &v).is_ok(),
+                    "{k:?} default {}={v:?} fails its own constraint",
+                    f.key
+                );
+            }
+        }
+
+        // Spot-check the tricky multi-input port lineups.
+        let names = |k: NodeKind| -> Vec<String> {
+            k.default_ports()
+                .inputs
+                .iter()
+                .map(|p| p.id.clone())
+                .collect()
+        };
+        assert_eq!(names(SignalErrorRate), vec!["tx", "rx"]);
+        assert_eq!(names(SignalKalman), vec!["z", "u"]);
+        assert_eq!(names(SignalJkff), vec!["j", "k", "clk", "reset"]);
+        assert_eq!(names(SignalRam), vec!["addr", "data", "we", "clk"]);
+        assert_eq!(names(SignalRom), vec!["addr"]);
+        // Sources have no inputs.
+        assert!(names(SignalImageSource).is_empty());
+        assert!(names(SignalRepeatingSequence).is_empty());
     }
 }

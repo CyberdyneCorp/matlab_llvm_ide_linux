@@ -26,6 +26,9 @@ pub enum NodeCategory {
     SignalRouting,
     SignalLookup,
     SignalComposite,
+    SignalComms,
+    SignalDsp,
+    SignalHdl,
     // State-chart document categories
     ChartStates,
     ChartJunctions,
@@ -51,6 +54,9 @@ impl NodeCategory {
             SignalRouting => "Signal Routing",
             SignalLookup => "Lookup Tables",
             SignalComposite => "Composite",
+            SignalComms => "Communications",
+            SignalDsp => "DSP & Image",
+            SignalHdl => "HDL",
             ChartStates => "States",
             ChartJunctions => "Junctions",
             ChartFunctions => "Chart Functions",
@@ -75,6 +81,9 @@ impl NodeCategory {
             SignalRouting => palette::ACCENT_MAGENTA,
             SignalLookup => palette::ACCENT_YELLOW,
             SignalComposite => palette::ACCENT_ORANGE,
+            SignalComms => palette::ACCENT_BLUE,
+            SignalDsp => palette::ACCENT_CYAN,
+            SignalHdl => palette::ACCENT_GREEN,
             ChartStates => palette::ACCENT_ORANGE,
             ChartJunctions => palette::ACCENT_CYAN,
             ChartFunctions => palette::ACCENT_MAGENTA,
@@ -93,6 +102,9 @@ impl NodeCategory {
                 | SignalRouting
                 | SignalLookup
                 | SignalComposite
+                | SignalComms
+                | SignalDsp
+                | SignalHdl
         )
     }
 
@@ -108,13 +120,16 @@ impl NodeCategory {
     }
 
     /// Display order for the signal-flow palette.
-    pub fn signal_flow_order() -> [NodeCategory; 8] {
+    pub fn signal_flow_order() -> [NodeCategory; 11] {
         use NodeCategory::*;
         [
             SignalSources,
             SignalContinuous,
             SignalDiscrete,
             SignalMath,
+            SignalDsp,
+            SignalComms,
+            SignalHdl,
             SignalRouting,
             SignalLookup,
             SignalSinks,
@@ -233,6 +248,13 @@ impl SignalFlowParamSpec {
         const LOGICAL_OPS: &[&str] = &["AND", "OR", "NAND", "NOR", "XOR", "NOT"];
         const DISCRETE_METHODS: &[&str] = &["ForwardEuler", "BackwardEuler", "Trapezoidal"];
         const NOISE_DISTS: &[&str] = &["uniform", "gaussian", "normal"];
+        const BOOL_CHOICES: &[&str] = &["false", "true"];
+        const WINDOW_TYPES: &[&str] = &["hann", "hamming", "blackman", "rect"];
+        const IMAGE_FILTERS: &[&str] = &["box", "gaussian3", "sobelx", "sobely"];
+        const COLOR_MODES: &[&str] = &["rgb2gray", "gray2rgb"];
+        const STATS: &[&str] = &["mean", "var", "std"];
+        const ACTIVATIONS: &[&str] = &["relu", "tanh", "sigmoid", "linear"];
+        const ACTION_TYPES: &[&str] = &["discrete", "continuous"];
         match kind {
             SignalConstant => vec![Self::d("value", "Value", 1.0)],
             SignalStep => vec![
@@ -355,6 +377,115 @@ impl SignalFlowParamSpec {
             SignalMatlabFcn => vec![
                 Self::s("expression", "Expression", "u"),
                 Self::s("function_body", "Function Body", ""),
+            ],
+            // Communications (#343)
+            SignalAwgn => vec![
+                Self::d("snr", "SNR (dB)", 10.0),
+                Self::d("signalPower", "Signal Power", 1.0),
+                Self::d("seed", "Seed", 1.0).int(0),
+            ],
+            SignalPskMod | SignalPskDemod => vec![
+                Self::d("M", "M (order)", 4.0).int(2),
+                Self::d("phaseOffset", "Phase Offset (rad)", 0.0),
+            ],
+            SignalQamMod | SignalQamDemod => vec![
+                Self::d("M", "M (order)", 16.0).int(2),
+                Self::s("normalize", "Normalize Power", "false").choices(BOOL_CHOICES),
+            ],
+            SignalErrorRate => vec![Self::d("tolerance", "Tolerance", 0.5)],
+            // DSP & image (#343)
+            SignalFft | SignalIfft | SignalSpectrum | SignalDwt | SignalIdwt => {
+                vec![Self::d("n", "Frame Size (n)", 8.0).int(1)]
+            }
+            SignalWindow => vec![
+                Self::d("n", "Frame Size (n)", 8.0).int(1),
+                Self::s("type", "Window Type", "hann").choices(WINDOW_TYPES),
+            ],
+            SignalBiquad => vec![
+                Self::s("b", "Numerator b", "1 0 0").coeffs(),
+                Self::s("a", "Denominator a", "1 0 0").coeffs(),
+                Self::d("sampleTime", "Sample Time", 1.0),
+            ],
+            SignalLowpass => vec![
+                Self::d("alpha", "Alpha", 0.1),
+                Self::d("sampleTime", "Sample Time", 1.0),
+            ],
+            SignalHighpass => vec![
+                Self::d("alpha", "Alpha", 0.9),
+                Self::d("sampleTime", "Sample Time", 1.0),
+            ],
+            SignalDcBlock => vec![
+                Self::d("r", "Pole r", 0.995),
+                Self::d("sampleTime", "Sample Time", 1.0),
+            ],
+            SignalImageFilter => vec![
+                Self::s("type", "Filter Type", "box").choices(IMAGE_FILTERS),
+                Self::s("kernel", "Kernel (matrix)", "").matrix(),
+            ],
+            SignalColorSpace => vec![Self::s("mode", "Mode", "rgb2gray").choices(COLOR_MODES)],
+            SignalThreshold => vec![Self::d("level", "Level", 0.5)],
+            // HDL / digital sequential (#343)
+            SignalDff | SignalTff | SignalJkff | SignalSrff => {
+                vec![Self::d("initialValue", "Initial Value", 0.0)]
+            }
+            SignalCounter => vec![
+                Self::d("step", "Step", 1.0),
+                Self::d("modulus", "Modulus (0 = none)", 0.0),
+            ],
+            SignalShiftRegister => vec![
+                Self::d("length", "Length", 4.0).int(1),
+                Self::d("initialValue", "Initial Value", 0.0),
+            ],
+            SignalRam => vec![
+                Self::d("depth", "Depth", 8.0).int(1),
+                Self::d("initialValue", "Initial Value", 0.0),
+            ],
+            SignalRom => vec![Self::s("content", "Content (vector)", "1 2 3").coeffs()],
+            // Additional sources (#343)
+            SignalRepeatingSequence => vec![
+                Self::s("timeValues", "Time Values", "0 1").coeffs(),
+                Self::s("outputValues", "Output Values", "0 1").coeffs(),
+            ],
+            SignalImageSource => vec![
+                Self::d("rows", "Rows", 3.0).int(1),
+                Self::d("cols", "Cols", 3.0).int(1),
+                Self::s("data", "Pixel Data (row-major)", "0 0 0 0 1 0 0 0 0").coeffs(),
+            ],
+            // Estimation / ML / control (#343)
+            SignalKalman => vec![
+                Self::s("A", "A matrix", "1").matrix(),
+                Self::s("C", "C matrix", "1").matrix(),
+                Self::s("Q", "Process noise Q", "0.01").matrix(),
+                Self::s("R", "Measurement noise R", "1").matrix(),
+                Self::s("B", "B matrix (opt)", "").matrix(),
+                Self::s("x0", "Initial state x0", "0").matrix(),
+                Self::s("P0", "Initial cov P0", "1").matrix(),
+            ],
+            SignalLqr => vec![
+                Self::s("K", "Gain K (matrix)", "1").matrix(),
+                Self::d("sign", "Sign (+1 / -1)", -1.0),
+            ],
+            SignalRunningStats => vec![Self::s("stat", "Statistic", "mean").choices(STATS)],
+            SignalDnnPredict => vec![
+                Self::s("W1", "W1 matrix", "1").matrix(),
+                Self::s("b1", "b1 vector", "0").matrix(),
+                Self::s("W2", "W2 matrix", "1").matrix(),
+                Self::s("b2", "b2 vector", "0").matrix(),
+                Self::s("activation", "Activation", "relu").choices(ACTIVATIONS),
+            ],
+            SignalRlAgent => vec![
+                Self::s("W1", "W1 matrix", "1").matrix(),
+                Self::s("b1", "b1 vector", "0").matrix(),
+                Self::s("W2", "W2 matrix", "1").matrix(),
+                Self::s("b2", "b2 vector", "0").matrix(),
+                Self::s("actionType", "Action Type", "discrete").choices(ACTION_TYPES),
+                Self::d("actionScale", "Action Scale", 1.0),
+            ],
+            SignalRf2Port => vec![Self::s("S", "S-parameters (2x2)", "0 1; 1 0").matrix()],
+            SignalPoseTransform => vec![
+                Self::d("x", "x", 0.0),
+                Self::d("y", "y", 0.0),
+                Self::d("theta", "theta (rad)", 0.0),
             ],
             _ => vec![],
         }
@@ -503,7 +634,7 @@ mod tests {
     #[test]
     fn display_orders_are_complete() {
         assert_eq!(NodeCategory::control_flow_order().len(), 6);
-        assert_eq!(NodeCategory::signal_flow_order().len(), 8);
+        assert_eq!(NodeCategory::signal_flow_order().len(), 11);
         assert_eq!(NodeCategory::state_chart_order().len(), 3);
         // signal order starts with Sources, ends with Composite
         let order = NodeCategory::signal_flow_order();
@@ -535,6 +666,9 @@ mod tests {
             SignalRouting,
             SignalLookup,
             SignalComposite,
+            SignalComms,
+            SignalDsp,
+            SignalHdl,
             ChartStates,
             ChartJunctions,
             ChartFunctions,

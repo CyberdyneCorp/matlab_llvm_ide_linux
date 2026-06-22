@@ -42,7 +42,13 @@ draws plots — all driven by the tested MVVM core.
 * **MATLAB Function block** — double-click opens a MATLAB source editor; ports
   follow the function signature (`u1..uN` → `out`).
 * **Editor block library** tracks the simulator, including the **MPC Controller**
-  and the From Workspace / n-D Lookup / If / Switch-Case Action / custom blocks.
+  and the From Workspace / n-D Lookup / If / Switch-Case Action / custom blocks,
+  plus the **36 toolbox blocks** the compiler added under issue #343 —
+  **Communications** (AWGN, PSK/QAM, BER), **DSP & Image** (FFT/IFFT, window,
+  spectrum, biquad, low/high-pass, DC-block, DWT, image filter/threshold/color),
+  **HDL** (D/T/JK/SR flip-flops, counter, shift register, RAM, ROM), and Kalman /
+  LQR / DNN / RL / RF / pose / running-stats blocks — each with its simulator
+  ports and inspector parameters, grouped into new palette sections.
 * **Breakpoints** — per-wire signal breakpoints (persist on the edge, marker on
   the canvas, installed against the source block on a live run).
 * **Robustness** — new wires/blocks get collision-free ids (no duplicate-edge-id
