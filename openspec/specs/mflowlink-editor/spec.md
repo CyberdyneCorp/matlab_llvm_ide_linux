@@ -101,9 +101,10 @@ round-tripping through the `.mflow` codec.
 #### Scenario: Fixed-step odeN algorithms decode
 
 - **WHEN** a model declares a Simulink fixed-step solver (`ode1`/`ode2`/`ode3`/
-  `ode4`/`ode5`/`ode8`) or `ode113`/`ode23s`, as the compiler examples do
-- **THEN** the document decodes and the algorithm round-trips (rather than being
-  rejected as an unknown variant)
+  `ode4`/`ode5`/`ode8`) or a variable-step / stiff solver (`ode113`, `ode23s`,
+  `ode23t`, `ode23tb`), as the compiler examples do
+- **THEN** the document decodes and the algorithm round-trips, and the Solver
+  popover lists it
 
 #### Scenario: Undo restores the previous solver
 

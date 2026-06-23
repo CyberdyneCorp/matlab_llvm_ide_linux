@@ -342,6 +342,9 @@ pub enum NodeKind {
     SignalPermute,
     #[serde(rename = "signal_squeeze")]
     SignalSqueeze,
+    // 6.6.7 3-D trajectory scope (compiler #406)
+    #[serde(rename = "signal_scope3d")]
+    SignalScope3D,
     // 6.7 State-chart
     #[serde(rename = "state")]
     State,
@@ -385,7 +388,7 @@ pub enum PortAnchor {
 
 impl NodeKind {
     /// Every kind, for palette enumeration + exhaustive tests.
-    pub const ALL: [NodeKind; 129] = [
+    pub const ALL: [NodeKind; 130] = [
         NodeKind::Start,
         NodeKind::End,
         NodeKind::Comment,
@@ -506,6 +509,7 @@ impl NodeKind {
         NodeKind::SignalPoseTransform,
         NodeKind::SignalPermute,
         NodeKind::SignalSqueeze,
+        NodeKind::SignalScope3D,
         NodeKind::State,
         NodeKind::JunctionConnective,
         NodeKind::JunctionHistory,
@@ -542,7 +546,9 @@ impl NodeKind {
             | SignalFromWorkspace
             | SignalRepeatingSequence
             | SignalImageSource => C::SignalSources,
-            SignalScope | SignalDisplay | SignalToWorkspace | SignalTerminator => C::SignalSinks,
+            SignalScope | SignalDisplay | SignalToWorkspace | SignalTerminator | SignalScope3D => {
+                C::SignalSinks
+            }
             SignalAwgn | SignalPskMod | SignalPskDemod | SignalQamMod | SignalQamDemod
             | SignalErrorRate => C::SignalComms,
             SignalFft | SignalIfft | SignalWindow | SignalSpectrum | SignalBiquad
@@ -759,6 +765,7 @@ impl NodeKind {
             SignalPoseTransform => "Pose Transform",
             SignalPermute => "Permute",
             SignalSqueeze => "Squeeze",
+            SignalScope3D => "3-D Scope",
             State => "State",
             JunctionConnective => "Junction",
             JunctionHistory => "History Junction",
@@ -997,7 +1004,7 @@ impl NodeKind {
             // right, every other named input (tx/rx, z/u, d/clk/reset, …) on the
             // left so they spread down the face instead of collapsing.
             SignalErrorRate | SignalKalman | SignalDff | SignalTff | SignalCounter | SignalJkff
-            | SignalSrff | SignalShiftRegister | SignalRam | SignalRom => {
+            | SignalSrff | SignalShiftRegister | SignalRam | SignalRom | SignalScope3D => {
                 if id == "out" {
                     Some(Right)
                 } else {
@@ -1057,6 +1064,11 @@ impl NodeKind {
             SignalScope | SignalDisplay | SignalToWorkspace | SignalTerminator | SignalOutport
             | SignalGoto => FlowPorts {
                 inputs: vec![p("in")],
+                outputs: vec![],
+            },
+            // 3-D trajectory scope: three scalar inputs, no output.
+            SignalScope3D => FlowPorts {
+                inputs: vec![p("x"), p("y"), p("z")],
                 outputs: vec![],
             },
             SignalSubsystem | SignalEnabledSubsystem | SignalTriggeredSubsystem => FlowPorts {
@@ -1743,6 +1755,34 @@ mod tests {
             "order"
         );
         assert!(SignalFlowParamSpec::fields(NodeKind::SignalSqueeze).is_empty());
+    }
+
+    #[test]
+    fn scope3d_block_is_a_sink_with_xyz_ports() {
+        use super::super::palette::{library_blocks, NodeCategory};
+        use super::super::SchemaKind;
+        let k = NodeKind::SignalScope3D;
+        assert_eq!(serde_json::to_string(&k).unwrap(), "\"signal_scope3d\"");
+        assert_eq!(
+            serde_json::from_str::<NodeKind>("\"signal_scope3d\"").unwrap(),
+            k
+        );
+        // A sink: three scalar inputs x/y/z, no output.
+        let ports = k.default_ports();
+        let ins: Vec<&str> = ports.inputs.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ins, vec!["x", "y", "z"]);
+        assert!(ports.outputs.is_empty());
+        assert_eq!(k.category(), NodeCategory::SignalSinks);
+        // Every input port anchors to a face (no bottom-center collapse).
+        for p in &k.default_ports().inputs {
+            assert!(k.signal_flow_port_anchor(&p.id).is_some());
+        }
+        // Placeable in the editor library.
+        let lib: Vec<NodeKind> = library_blocks(SchemaKind::SignalFlow)
+            .into_iter()
+            .flat_map(|(_, k)| k)
+            .collect();
+        assert!(lib.contains(&k));
     }
 
     #[test]

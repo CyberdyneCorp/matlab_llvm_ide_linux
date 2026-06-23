@@ -69,8 +69,12 @@ draws plots — all driven by the tested MVVM core.
   `variableName`, so it shows in the Workspace panel and `whos` and can be
   inspected / plotted.
 * **Full simulator block parity** — the editor library now exposes **every**
-  signal block the compiler implements (101 kinds), including the N-D axis
-  utilities **Permute** / **Squeeze**.
+  signal block the compiler implements, including the N-D axis utilities
+  **Permute** / **Squeeze** and the **3-D Scope** (`signal_scope3d`). A 3-D scope's
+  `base[x]/[y]/[z]` group is drawn as an **x–y trajectory path** (the figure the
+  point traces) beside the time-series traces. The Solver popover offers the full
+  algorithm set (`ode1`…`ode8`, `ode23`/`ode23s`/`ode23t`/`ode23tb`, `ode45`,
+  `ode113`, `ode15s`).
 * **Robustness** — new wires/blocks get collision-free ids (no duplicate-edge-id
   on save), and multi-input ports spread along a block face instead of collapsing.
 
