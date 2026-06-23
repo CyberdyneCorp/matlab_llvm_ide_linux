@@ -49,6 +49,7 @@ Headless / CI: wrap with Xvfb — `xvfb-run -a just e2e`.
 | F9 breakpoint | focuses the editor, presses F9 | a breakpoint is set at the cursor | |
 | explorer double-click | single- then double-clicks a tree row | single click selects only; double click opens the tab | |
 | flowchart editor | opens a demo chart, clicks a BLOCKS palette row | the chart loads with nodes/edges; the palette adds a node | |
+| signal editor features | opens the demo signal chart and applies one `MATFORGE_FLOW_OP` per launch | a wire selects (`selected_edge`), deletes (`edges` drops), takes a breakpoint (`edge_breakpoints`), and the MATLAB Function block's ports follow its signature (`matlab_inputs`) | |
 | mflowLink simulate | opens the signal-flow window (autostart) | the simulation streams samples and reaches `Finished` | ✓ |
 | mStateflow trace | opens the state-chart window (autostart) | the trace streams events and activates a state | ✓ |
 | live REPL | types `x = [1 2 3]` in the REPL + Enter | the Workspace gains variable `x` | ✓ |
@@ -62,6 +63,36 @@ The mflowLink / mStateflow scenarios drive standalone windows: their env hooks
 (`MATFORGE_SIMULATE` / `MATFORGE_STATECHART`) open the window and autostart the
 run, so the harness only reads the published state — no input into the separate
 window is required. They use the bundled `e2e/fixtures/{signal,chart}.mflow`.
+
+The **signal editor features** scenario is matlabc-free: it drives the new
+editor interactions through `MATFORGE_FLOW_OP` (`select-edge`, `delete-edge`,
+`set-edge-bp`, `grow-matlab`), one operation per launch, so it exercises the real
+view-model paths and the canvas redraw without needing the simulator.
+
+## CI and the compiler
+
+Two GitHub Actions lanes run this harness:
+
+| Workflow | Triggers | `matlabc` | Covers |
+|----------|----------|:---:|--------|
+| `ci.yml` → `e2e` job | every push / PR | **no** | compiler-free scenarios only (search, breakpoints, explorer, flowchart editor, signal editor features); **Needs `matlabc`** scenarios *skip* |
+| `e2e-matlabc.yml` | nightly + manual `workflow_dispatch` | **yes** | the full suite — builds the real `matlabc` from the public `matlab_llvm` repo and runs with `$MATLABC_PATH` set, so simulate / debug / REPL / compile **actually execute** |
+
+The `e2e-matlabc` lane checks out the public `matlab_llvm` repo, reuses its
+`setup-llvm` composite action to fetch a **prebuilt LLVM 22 tarball** (~30s),
+builds the `matlabc` target (ccache-cached, ~5–15 min warm), then runs the e2e
+suite headlessly with `LD_LIBRARY_PATH=/opt/llvm/lib`.
+
+> **Prerequisite for fast runs.** `setup-llvm`'s 30s path needs the LLVM
+> toolchain tarball published as a `matlab_llvm` release
+> (`toolchain-<llvm-tag>`). Run that repo's `build-llvm-toolchain.yml` once
+> (manual dispatch) to publish it. Until then, the first `e2e-matlabc` run falls
+> back to a ~2h LLVM source build (then cached). This lane is kept off
+> push / PR precisely because of that build cost — dispatch it on demand, or let
+> the nightly run it.
+
+You can always run the full suite **locally** with `$MATLABC_PATH` pointing at a
+built `matlabc` to cover the simulate / debug / REPL paths end to end.
 
 > **Local display note:** the `Ctrl+F` find-in-files scenario relies on a
 > keyboard *accelerator*, which needs a window manager to route focus; it passes

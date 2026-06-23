@@ -286,6 +286,73 @@ def scenario_flowchart_editor():
         app.close()
 
 
+def scenario_signal_editor_features():
+    """The signal-flow editor's new interactions, driven deterministically via
+    MATFORGE_FLOW_OP (no matlabc needed, so this runs in CI). The demo signal
+    chart is Constant -> Gain -> MATLAB Function -> Scope (3 wires)."""
+    print("scenario: signal-flow editor wire select/delete, breakpoints, MATLAB Function ports")
+
+    def open_signal(op):
+        return App(env_extra={"MATFORGE_OPEN": PROJ, "MATFORGE_NEWFLOW": "signal",
+                              "MATFORGE_FLOW_OP": op})
+
+    # Baseline: the demo loads with a MATLAB Function block (1 input) and 3 wires.
+    app = open_signal("")
+    try:
+        st = app.wait_for(lambda s: (s.get("flowchart") or {}).get("nodes", 0) >= 4,
+                          timeout=10, what="signal demo loaded")
+        fc = st["flowchart"]
+        check("the signal demo loads its blocks and wires",
+              fc["nodes"] >= 4 and fc["edges"] == 3, f"flowchart={fc}")
+        check("the MATLAB Function block starts with one input port",
+              fc.get("matlab_inputs") == 1, f"matlab_inputs={fc.get('matlab_inputs')}")
+    finally:
+        app.close()
+
+    # Selecting a wire publishes its id.
+    app = open_signal("select-edge")
+    try:
+        st = app.wait_for(lambda s: (s.get("flowchart") or {}).get("selected_edge"),
+                          timeout=10, what="a wire is selected")
+        check("clicking a wire selects it",
+              bool(st["flowchart"].get("selected_edge")),
+              f"selected_edge={st['flowchart'].get('selected_edge')}")
+    finally:
+        app.close()
+
+    # Deleting the selected wire drops the edge count.
+    app = open_signal("delete-edge")
+    try:
+        st = app.wait_for(lambda s: (s.get("flowchart") or {}).get("edges", 9) < 3,
+                          timeout=10, what="a wire is deleted")
+        check("deleting a selected wire removes it",
+              st["flowchart"]["edges"] == 2, f"edges={st['flowchart']['edges']}")
+    finally:
+        app.close()
+
+    # A per-wire breakpoint is recorded on the edge.
+    app = open_signal("set-edge-bp")
+    try:
+        st = app.wait_for(lambda s: (s.get("flowchart") or {}).get("edge_breakpoints", 0) > 0,
+                          timeout=10, what="a wire breakpoint is set")
+        check("a per-wire breakpoint is stored on the edge",
+              st["flowchart"]["edge_breakpoints"] == 1,
+              f"edge_breakpoints={st['flowchart']['edge_breakpoints']}")
+    finally:
+        app.close()
+
+    # Growing the MATLAB Function signature grows its input ports to u1..u3.
+    app = open_signal("grow-matlab")
+    try:
+        st = app.wait_for(lambda s: (s.get("flowchart") or {}).get("matlab_inputs", 0) >= 3,
+                          timeout=10, what="MATLAB Function ports follow the signature")
+        check("MATLAB Function input ports follow the function signature",
+              st["flowchart"]["matlab_inputs"] == 3,
+              f"matlab_inputs={st['flowchart']['matlab_inputs']}")
+    finally:
+        app.close()
+
+
 def scenario_mflowlink_simulate():
     print("scenario: the mflowLink window runs a signal-flow simulation")
     if not os.path.exists(MATLABC):
@@ -338,6 +405,7 @@ def main():
     scenario_f9_breakpoint()
     scenario_explorer_double_click()
     scenario_flowchart_editor()
+    scenario_signal_editor_features()
     scenario_mflowlink_simulate()
     scenario_statechart_trace()
     scenario_repl_workspace()

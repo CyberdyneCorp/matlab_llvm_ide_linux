@@ -590,6 +590,47 @@ impl FlowchartViewModel {
         })
     }
 
+    /// Number of wires in the current flow that carry a signal breakpoint.
+    pub fn edge_breakpoint_count(&self) -> usize {
+        let idx = self.current_flow_index();
+        self.document.with(|d| {
+            d.flows
+                .get(idx)
+                .map(|f| f.edges.iter().filter(|e| e.breakpoint.is_some()).count())
+                .unwrap_or(0)
+        })
+    }
+
+    /// The id of the first wire in the current flow, if any (test drive target).
+    pub fn first_edge_id(&self) -> Option<String> {
+        let idx = self.current_flow_index();
+        self.document.with(|d| {
+            d.flows
+                .get(idx)
+                .and_then(|f| f.edges.first().map(|e| e.id.clone()))
+        })
+    }
+
+    /// The id of the first node of `kind` in the current flow, if any.
+    pub fn first_node_of_kind(&self, kind: NodeKind) -> Option<String> {
+        let idx = self.current_flow_index();
+        self.document.with(|d| {
+            d.flows.get(idx).and_then(|f| {
+                f.nodes
+                    .iter()
+                    .find(|n| n.kind == kind)
+                    .map(|n| n.id.clone())
+            })
+        })
+    }
+
+    /// Number of input ports on a node (e.g. a MATLAB Function block's `u1..uN`).
+    pub fn node_input_count(&self, node_id: &str) -> usize {
+        self.node(node_id)
+            .map(|n| n.ports.inputs.len())
+            .unwrap_or(0)
+    }
+
     /// Re-derive a MATLAB Function block's `u1..uN` input ports + `out` from its
     /// source (`function_body`, else `expression`) so the ports follow the
     /// function signature. Edges to ports that no longer exist are dropped. A
@@ -1374,6 +1415,33 @@ mod tests {
         assert_eq!(vm.edge_count(), 0);
         assert_eq!(vm.node_count(), 2);
         assert_eq!(vm.selected_edge.get(), None);
+    }
+
+    #[test]
+    fn e2e_accessors_report_first_edge_breakpoint_count_and_node_inputs() {
+        let vm = FlowchartViewModel::empty("D", SchemaKind::SignalFlow);
+        // Empty signal flow: no edges, no breakpoints, no MATLAB Function block.
+        assert_eq!(vm.first_edge_id(), None);
+        assert_eq!(vm.edge_breakpoint_count(), 0);
+        assert_eq!(vm.first_node_of_kind(NodeKind::SignalMatlabFcn), None);
+
+        let c = vm.add_node(NodeKind::SignalConstant, 0.0, 0.0);
+        let f = vm.add_node(NodeKind::SignalMatlabFcn, 100.0, 0.0);
+        let edge = vm.add_edge(&c, "out", &f, "u1");
+
+        assert_eq!(vm.first_edge_id().as_deref(), Some(edge.as_str()));
+        assert_eq!(
+            vm.first_node_of_kind(NodeKind::SignalMatlabFcn).as_deref(),
+            Some(f.as_str())
+        );
+        assert_eq!(vm.node_input_count(&f), 1);
+
+        // A breakpoint on the wire is counted.
+        assert_eq!(vm.edge_breakpoint_count(), 0);
+        vm.set_edge_breakpoint(&edge, Some("value > 0".into()));
+        assert_eq!(vm.edge_breakpoint_count(), 1);
+        vm.set_edge_breakpoint(&edge, None);
+        assert_eq!(vm.edge_breakpoint_count(), 0);
     }
 
     #[test]

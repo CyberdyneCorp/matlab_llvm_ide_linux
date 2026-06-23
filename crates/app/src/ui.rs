@@ -1971,6 +1971,47 @@ fn active_flowchart() -> Option<(Rc<FlowchartViewModel>, Option<std::path::PathB
     ACTIVE_FLOWCHART.with(|a| a.borrow().clone())
 }
 
+/// Deterministically apply one editor operation to the active flowchart for the
+/// e2e harness (drives the real view models the same way the GTK handlers do,
+/// without flaky coordinate-based clicks under headless X). No-op if no chart is
+/// open or the op is unknown. Results are observed through the flowchart probe.
+pub fn flow_e2e_op(op: &str) {
+    use matforge_core::models::flowchart::{NodeKind, ParamValue};
+    let Some((fc, _)) = active_flowchart() else {
+        return;
+    };
+    match op {
+        // Wire selection / deletion (the new select-and-delete-a-wire feature).
+        "select-edge" => fc.select_edge(fc.first_edge_id()),
+        "delete-edge" => {
+            fc.select_edge(fc.first_edge_id());
+            fc.delete_selected();
+        }
+        // Per-wire signal breakpoint.
+        "set-edge-bp" => {
+            if let Some(e) = fc.first_edge_id() {
+                fc.set_edge_breakpoint(&e, Some("value > 0".into()));
+            }
+        }
+        // MATLAB Function block: grow the signature to three inputs (what the
+        // source editor's Apply does) so the ports follow it.
+        "grow-matlab" => {
+            if let Some(id) = fc.first_node_of_kind(NodeKind::SignalMatlabFcn) {
+                fc.edit_node(&id, |n| {
+                    n.data.params.get_or_insert_with(Default::default).insert(
+                        "function_body".into(),
+                        ParamValue::Str(
+                            "function y = f(u1, u2, u3)\n  y = u1 + u2 + u3;\nend".into(),
+                        ),
+                    );
+                });
+                fc.sync_matlab_fcn_ports(&id);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Run the active editor target: a visible flowchart compiles to MATLAB and runs
 /// the generated `.m`; otherwise the active `.m` tab runs directly.
 fn run_active(app: &Rc<AppState>) {
@@ -2397,9 +2438,11 @@ pub fn open_demo_flowchart(app: &Rc<AppState>, signal: bool) {
     if signal {
         let c = fc.add_node(NodeKind::SignalConstant, 80.0, 120.0);
         let g = fc.add_node(NodeKind::SignalGain, 300.0, 120.0);
-        let s = fc.add_node(NodeKind::SignalScope, 520.0, 120.0);
+        let m = fc.add_node(NodeKind::SignalMatlabFcn, 520.0, 120.0);
+        let s = fc.add_node(NodeKind::SignalScope, 740.0, 120.0);
         fc.add_edge(&c, "out", &g, "in");
-        fc.add_edge(&g, "out", &s, "in");
+        fc.add_edge(&g, "out", &m, "u1");
+        fc.add_edge(&m, "out", &s, "in");
     } else {
         // Lay the template Start/End out as a clean vertical column.
         fc.set_node_position("main_start", 320.0, 30.0);
@@ -2413,6 +2456,9 @@ pub fn open_demo_flowchart(app: &Rc<AppState>, signal: bool) {
         fc.add_edge(&disp, "out", "main_end", "in");
     }
     fc.select(None);
+    // Mark this as the visible flowchart eagerly so launch-time drivers (Run,
+    // and the e2e `MATFORGE_FLOW_OP` hook) act on it before the canvas maps.
+    set_active_flowchart(&fc, None);
     let view = crate::flowchart_view::build_flowchart_view(app, fc, None);
     EDITOR_NB.with(|nb| {
         let nb = nb.borrow();

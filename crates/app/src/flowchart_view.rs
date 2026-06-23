@@ -56,10 +56,17 @@ pub fn build_flowchart_view(
     {
         let fc = fc.clone();
         crate::e2e::set_flowchart_probe(move || {
+            use matforge_core::models::flowchart::NodeKind;
+            let matlab_inputs = fc
+                .first_node_of_kind(NodeKind::SignalMatlabFcn)
+                .map(|id| fc.node_input_count(&id));
             serde_json::json!({
                 "nodes": fc.node_count(),
                 "edges": fc.edge_count(),
                 "selected": fc.selected_id.get().is_some(),
+                "selected_edge": fc.selected_edge.get(),
+                "edge_breakpoints": fc.edge_breakpoint_count(),
+                "matlab_inputs": matlab_inputs,
                 "zoom": fc.zoom.get(),
                 "can_undo": fc.can_undo(),
             })
