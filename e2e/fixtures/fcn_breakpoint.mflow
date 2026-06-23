@@ -1,0 +1,129 @@
+{
+  "schema": "matforge.flowchart",
+  "version": "0.1.0",
+  "entry": "m",
+  "settings": {
+    "kind": "signal_flow",
+    "solver": {
+      "type": "fixed_step",
+      "algorithm": "ode4",
+      "startTime": 0.0,
+      "stopTime": 1.0,
+      "maxStep": "0.1"
+    }
+  },
+  "flows": [
+    {
+      "id": "f",
+      "kind": "program",
+      "name": "m",
+      "signature": {
+        "inputs": [],
+        "outputs": []
+      },
+      "nodes": [
+        {
+          "id": "c",
+          "kind": "signal_constant",
+          "label": "",
+          "ports": {
+            "in": [],
+            "out": [
+              {
+                "id": "out"
+              }
+            ]
+          },
+          "data": {
+            "params": {
+              "value": 3.0
+            }
+          },
+          "ui": {
+            "position": {
+              "x": 60.0,
+              "y": 120.0
+            }
+          }
+        },
+        {
+          "id": "fcn",
+          "kind": "signal_matlab_fcn",
+          "label": "",
+          "ports": {
+            "in": [
+              {
+                "id": "u1"
+              }
+            ],
+            "out": [
+              {
+                "id": "out"
+              }
+            ]
+          },
+          "data": {
+            "params": {
+              "breakpoint_lines": "2",
+              "function_body": "function out = fcn(u1)\n  a = u1 + 1;\n  out = a * 2;\nend\n"
+            }
+          },
+          "ui": {
+            "position": {
+              "x": 300.0,
+              "y": 120.0
+            }
+          }
+        },
+        {
+          "id": "s",
+          "kind": "signal_scope",
+          "label": "",
+          "ports": {
+            "in": [
+              {
+                "id": "in"
+              }
+            ],
+            "out": []
+          },
+          "data": {
+            "params": {}
+          },
+          "ui": {
+            "position": {
+              "x": 540.0,
+              "y": 120.0
+            }
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "e1",
+          "kind": "data",
+          "from": {
+            "node": "c",
+            "port": "out"
+          },
+          "to": {
+            "node": "fcn",
+            "port": "u1"
+          }
+        },
+        {
+          "id": "e2",
+          "kind": "data",
+          "from": {
+            "node": "fcn",
+            "port": "out"
+          },
+          "to": {
+            "node": "s",
+            "port": "in"
+          }
+        }
+      ]
+    }
+  ]
+}

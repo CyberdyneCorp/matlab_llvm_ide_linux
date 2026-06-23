@@ -19,6 +19,7 @@ FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
 SIGNAL_MFLOW = os.path.join(FIXTURES, "signal.mflow")
 CHART_MFLOW = os.path.join(FIXTURES, "chart.mflow")
 WORKSPACE_MFLOW = os.path.join(FIXTURES, "workspace.mflow")
+FCN_BP_MFLOW = os.path.join(FIXTURES, "fcn_breakpoint.mflow")
 
 
 def setup_project():
@@ -444,6 +445,30 @@ def scenario_workspace_io_live():
         app.close()
 
 
+def scenario_fcn_source_breakpoint():
+    print("scenario: a MATLAB Function source-line breakpoint pauses the live run + shows locals")
+    if not os.path.exists(MATLABC):
+        check("source-line breakpoint (skipped: matlabc not found)", True, "skipped")
+        return
+    # fcn_breakpoint.mflow has a MATLAB Function block with breakpoint_lines=2.
+    # Driven live, the run pauses at fcn:2 and the IDE fetches the body locals.
+    app = App(env_extra={"MATFORGE_OPEN": PROJ, "MATFORGE_SIMULATE": FCN_BP_MFLOW,
+                         "MATFORGE_SIMULATE_LIVE": "1", "MATLABC_PATH": MATLABC})
+    try:
+        st = app.wait_for(lambda s: (s.get("mflowlink") or {}).get("source_stop"),
+                          timeout=40, what="the live run pauses at the source line")
+        ml = st["mflowlink"]
+        check("the live run pauses at the MATLAB Function source line (fcn:2)",
+              ml.get("source_stop") == "fcn:2", f"source_stop={ml.get('source_stop')}")
+        st = app.wait_for(lambda s: "u1" in ((s.get("mflowlink") or {}).get("locals") or []),
+                          timeout=15, what="the body locals are fetched")
+        check("the MATLAB Function body locals are surfaced",
+              "u1" in st["mflowlink"].get("locals", []),
+              f"locals={st['mflowlink'].get('locals')}")
+    finally:
+        app.close()
+
+
 def scenario_statechart_trace():
     print("scenario: the mStateflow window traces a state chart")
     if not os.path.exists(MATLABC):
@@ -477,6 +502,7 @@ def main():
     scenario_mflowlink_simulate()
     scenario_workspace_io_simulate()
     scenario_workspace_io_live()
+    scenario_fcn_source_breakpoint()
     scenario_statechart_trace()
     scenario_repl_workspace()
     scenario_inspect_and_plot()
