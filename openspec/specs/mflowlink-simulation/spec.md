@@ -72,12 +72,20 @@ When a run finishes, the simulation window SHALL publish each `signal_to_workspa
 (To Workspace) sink's logged series into the live REPL workspace as a column
 vector named by the block's `variableName`, so the outputs appear in the
 Workspace panel and `whos` (and can be inspected / plotted like any variable).
-Sinks with no logged column are skipped.
+Sinks with no logged column are skipped. This SHALL apply to both the one-shot
+run (the process exits) and the interactive live `--sim-dap` run (which ends with
+a `stopTime reached` stop, treated as completion rather than a pause).
 
 #### Scenario: To Workspace outputs become workspace variables
 
 - **WHEN** a model with To Workspace sinks (`simout`, `held`) finishes simulating
 - **THEN** `simout` and `held` appear in the Workspace panel and `whos` lists them
+
+#### Scenario: A live run also publishes on completion
+
+- **WHEN** an interactive live `--sim-dap` run reaches `stopTime`
+- **THEN** the run settles into the finished state and its To Workspace outputs
+  are published into the workspace (not left only in the scope)
 
 ### Requirement: Playback transport
 

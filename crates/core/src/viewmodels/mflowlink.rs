@@ -82,12 +82,22 @@ impl MflowLinkViewModel {
             SimEvent::ActiveBlock { node_id } => {
                 self.active_block.set(Some(node_id.clone()));
             }
-            SimEvent::Stopped { reason } => {
+            SimEvent::Stopped {
+                reason,
+                description,
+            } => {
                 // The runtime paused (entry / breakpoint / step / pause /
-                // crossing). Settle into Paused unless we never started.
+                // crossing) or reached the end of the run. `"stopTime reached"`
+                // is completion → Finished (so To Workspace export + the UI
+                // settle); anything else is an interactive Paused.
                 if self.state.get() != SimState::Idle {
-                    self.state.set(SimState::Paused);
-                    self.stop_reason.set(Some(reason.clone()));
+                    if description.as_deref() == Some("stopTime reached") {
+                        self.state.set(SimState::Finished);
+                    } else {
+                        self.state.set(SimState::Paused);
+                    }
+                    self.stop_reason
+                        .set(Some(description.clone().unwrap_or_else(|| reason.clone())));
                 }
             }
             SimEvent::Signal { block_id, t, value } => {
@@ -371,8 +381,19 @@ mod tests {
         // A stopped event (breakpoint / step / entry) pauses the transport.
         vm.on_sim_event(&SimEvent::Stopped {
             reason: "breakpoint".into(),
+            description: None,
         });
         assert_eq!(vm.state.get(), SimState::Paused);
+
+        // Reaching the end of the run (the `stopTime reached` description)
+        // completes it — Finished, not Paused — so a live run settles like a
+        // one-shot and triggers the To Workspace export.
+        vm.on_sim_event(&SimEvent::Stopped {
+            reason: "step".into(),
+            description: Some("stopTime reached".into()),
+        });
+        assert_eq!(vm.state.get(), SimState::Finished);
+        assert_eq!(vm.stop_reason.get().as_deref(), Some("stopTime reached"));
 
         // Reset clears the live state back to Idle.
         vm.reset();
@@ -387,6 +408,7 @@ mod tests {
         let vm = vm();
         vm.on_sim_event(&SimEvent::Stopped {
             reason: "entry".into(),
+            description: None,
         });
         assert_eq!(vm.state.get(), SimState::Idle);
     }
@@ -476,6 +498,7 @@ mod tests {
         assert_eq!(vm.snapshots.get(), vec![(10, 1), (20, 2)]);
         vm.on_sim_event(&SimEvent::Stopped {
             reason: "breakpoint".into(),
+            description: None,
         });
         assert_eq!(vm.stop_reason.get().as_deref(), Some("breakpoint"));
         assert_eq!(vm.state.get(), SimState::Paused);

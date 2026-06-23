@@ -118,6 +118,23 @@ pub fn open(
     if autostart {
         start_simulation(app, &vm, &sim, path.as_deref());
     }
+
+    // e2e: drive the interactive live `--sim-dap` path end to end — boot the
+    // session, then auto-continue past the entry pause so the run reaches
+    // stopTime (the path the editor's Simulate→Play uses).
+    if std::env::var("MATFORGE_SIMULATE_LIVE").is_ok() {
+        start_live_simulation(app, &vm, &dap, path.as_deref());
+        let dap2 = dap.clone();
+        let vm3 = vm.clone();
+        let continued = std::rc::Rc::new(std::cell::Cell::new(false));
+        vm.state.subscribe(move |s| {
+            if *s == SimState::Paused && vm3.live.get() && !continued.get() {
+                continued.set(true);
+                send_sim(&dap2, &SimRequest::Continue);
+                vm3.resume();
+            }
+        });
+    }
 }
 
 /// Assign each To Workspace sink's logged series into the live REPL as a column

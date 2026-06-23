@@ -267,7 +267,11 @@ fn build_main_window(app: &Application) {
         let path = std::path::PathBuf::from(&p);
         if let Ok(text) = std::fs::read_to_string(&path) {
             if let Ok(doc) = matforge_core::services::flowchart_codec::decode_str(&text) {
-                mflowlink_window::open(&app, doc, Some(path), true);
+                // MATFORGE_SIMULATE_LIVE drives the interactive live `--sim-dap`
+                // path (what the editor's Simulate→Play does) instead of the
+                // one-shot autostart; the window auto-continues to completion.
+                let live = std::env::var("MATFORGE_SIMULATE_LIVE").is_ok();
+                mflowlink_window::open(&app, doc, Some(path), !live);
             }
         }
     }
