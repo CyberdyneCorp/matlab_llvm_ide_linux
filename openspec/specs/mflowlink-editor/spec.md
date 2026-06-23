@@ -282,6 +282,13 @@ Math / Routing / Lookup / Sinks / Composite sections.
 - **THEN** it exposes the simulator's named input ports (`tx`/`rx`,
   `clk`/`reset`, …), each anchored to a block face rather than collapsed
 
+#### Scenario: From Workspace exposes its inline time-series
+
+- **WHEN** the user inspects a From Workspace (`signal_from_workspace`) block
+- **THEN** the inspector exposes its `data` time-series (`t v; …`) and an
+  `interpolation` choice (`linear` / `zoh`), and a From Workspace → To Workspace
+  model round-trips through the codec and simulates
+
 ### Requirement: Per-wire signal breakpoints
 
 The editor SHALL attach a signal-breakpoint condition (`value > 0`,

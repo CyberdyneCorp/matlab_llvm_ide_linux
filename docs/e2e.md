@@ -51,6 +51,7 @@ Headless / CI: wrap with Xvfb — `xvfb-run -a just e2e`.
 | flowchart editor | opens a demo chart, clicks a BLOCKS palette row | the chart loads with nodes/edges; the palette adds a node | |
 | signal editor features | opens the demo signal chart and applies one `MATFORGE_FLOW_OP` per launch | a wire selects (`selected_edge`), deletes (`edges` drops), takes a breakpoint (`edge_breakpoints`), and the MATLAB Function block's ports follow its signature (`matlab_inputs`) | |
 | mflowLink simulate | opens the signal-flow window (autostart) | the simulation streams samples and reaches `Finished` | ✓ |
+| workspace I/O simulate | autostarts a From Workspace → To Workspace model (`ode4`) | streams samples into both `To Workspace` sinks and reaches `Finished` | ✓ |
 | mStateflow trace | opens the state-chart window (autostart) | the trace streams events and activates a state | ✓ |
 | live REPL | types `x = [1 2 3]` in the REPL + Enter | the Workspace gains variable `x` | ✓ |
 | inspect + plot | inspects a workspace var, clicks Plots `+` | the value table shows; a figure is added | ✓ |

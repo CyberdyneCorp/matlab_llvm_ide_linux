@@ -33,7 +33,7 @@ impl SimTrace {
         if line.is_empty() || !line.contains(',') {
             return false;
         }
-        let fields: Vec<&str> = split_top_level(line);
+        let fields: Vec<String> = split_csv(line);
         let all_numeric = fields.iter().all(|f| f.parse::<f64>().is_ok());
 
         if self.columns.is_empty() {
@@ -44,7 +44,7 @@ impl SimTrace {
                     .collect();
                 return self.push_row(&fields);
             }
-            self.columns = fields.iter().map(|s| s.to_string()).collect();
+            self.columns = fields;
             return false;
         }
 
@@ -55,7 +55,7 @@ impl SimTrace {
         }
     }
 
-    fn push_row(&mut self, fields: &[&str]) -> bool {
+    fn push_row(&mut self, fields: &[String]) -> bool {
         let row: Vec<f64> = fields
             .iter()
             .map(|f| f.parse::<f64>().unwrap_or(f64::NAN))
@@ -132,25 +132,54 @@ impl SimTrace {
     }
 }
 
-/// Split a CSV line on commas that are **not** inside `[...]`, so image-pixel
-/// column names like `sBox[1,1]` (whose subscript carries a comma) survive as
-/// one field. Data rows contain no brackets, so this matches a plain split there.
-fn split_top_level(line: &str) -> Vec<&str> {
+/// Split a CSV line into fields, handling both encodings the simulator has used
+/// for image-pixel column names like `sBox[1,1]` (whose subscript carries a
+/// comma). RFC 4180 quoting (current) wraps such a cell — `t,"sBox[1,1]"` — so
+/// its commas are literal and `""` is an escaped `"`; the legacy bare form left
+/// the comma unquoted — `t,sBox[1,1]` — where commas inside `[...]` are not
+/// separators. Data rows carry neither quotes nor brackets, so they split on
+/// plain commas.
+fn split_csv(line: &str) -> Vec<String> {
     let mut fields = Vec::new();
-    let mut depth = 0i32;
-    let mut start = 0usize;
-    for (i, ch) in line.char_indices() {
-        match ch {
-            '[' => depth += 1,
-            ']' => depth = (depth - 1).max(0),
-            ',' if depth == 0 => {
-                fields.push(line[start..i].trim());
-                start = i + 1;
+    let mut cur = String::new();
+    let mut depth = 0i32; // `[...]` nesting, for the legacy bare form
+    let mut in_quotes = false;
+    let mut chars = line.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if in_quotes {
+            if ch == '"' {
+                if chars.peek() == Some(&'"') {
+                    cur.push('"');
+                    chars.next();
+                } else {
+                    in_quotes = false;
+                }
+            } else {
+                cur.push(ch);
             }
-            _ => {}
+            continue;
+        }
+        match ch {
+            '"' if cur.trim().is_empty() => {
+                in_quotes = true;
+                cur.clear();
+            }
+            '[' => {
+                depth += 1;
+                cur.push(ch);
+            }
+            ']' => {
+                depth = (depth - 1).max(0);
+                cur.push(ch);
+            }
+            ',' if depth == 0 => {
+                fields.push(cur.trim().to_string());
+                cur = String::new();
+            }
+            _ => cur.push(ch),
         }
     }
-    fields.push(line[start..].trim());
+    fields.push(cur.trim().to_string());
     fields
 }
 
@@ -175,7 +204,8 @@ mod tests {
     fn image_pixel_columns_with_commas_parse_as_single_signals() {
         // Image blocks log pixels as `base[i,j]` columns whose subscript carries
         // a comma; a naive comma split would shatter the header and reject every
-        // data row (0 samples). Regression for the empty image-model scope.
+        // data row (0 samples). Regression for the empty image-model scope. The
+        // legacy *bare* (unquoted) header form.
         let mut t = SimTrace::new();
         assert!(!t.feed_line("t,sBox[1,1],sBox[1,2],sThr[2,1]"));
         assert_eq!(t.columns, ["t", "sBox[1,1]", "sBox[1,2]", "sThr[2,1]"]);
@@ -185,6 +215,20 @@ mod tests {
         assert_eq!(t.signal_name(0), Some("sBox[1,1]"));
         let (_, ys) = t.series(0);
         assert_eq!(ys, vec![5.0]);
+    }
+
+    #[test]
+    fn rfc4180_quoted_header_cells_are_unquoted() {
+        // The simulator now RFC-4180-quotes only the cells that need it
+        // (matlab_llvm#392/#394): `t,"sBox[1,1]",scope`. Quotes are stripped, the
+        // embedded comma is literal, and `""` is an escaped quote.
+        let mut t = SimTrace::new();
+        assert!(!t.feed_line(r#"t,"sBox[1,1]","s,""x""",scope"#));
+        assert_eq!(t.columns, ["t", "sBox[1,1]", r#"s,"x""#, "scope"]);
+        assert_eq!(t.signal_count(), 3);
+        assert!(t.feed_line("0.0,5.0,6.0,7.0"));
+        assert_eq!(t.signal_name(0), Some("sBox[1,1]"));
+        assert_eq!(t.series(2).1, vec![7.0]);
     }
 
     #[test]

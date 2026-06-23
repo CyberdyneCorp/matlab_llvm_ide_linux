@@ -1706,4 +1706,94 @@ mod tests {
         assert!(names(SignalImageSource).is_empty());
         assert!(names(SignalRepeatingSequence).is_empty());
     }
+
+    #[test]
+    fn from_and_to_workspace_blocks_are_authorable() {
+        use super::super::palette::{NodeCategory, SignalFlowParamSpec};
+        use NodeKind::*;
+        let ins = |k: NodeKind| -> Vec<String> {
+            k.default_ports()
+                .inputs
+                .iter()
+                .map(|p| p.id.clone())
+                .collect()
+        };
+        let outs = |k: NodeKind| -> Vec<String> {
+            k.default_ports()
+                .outputs
+                .iter()
+                .map(|p| p.id.clone())
+                .collect()
+        };
+
+        // From Workspace is a source (out only); To Workspace is a sink (in only).
+        assert!(ins(SignalFromWorkspace).is_empty());
+        assert_eq!(outs(SignalFromWorkspace), vec!["out"]);
+        assert_eq!(ins(SignalToWorkspace), vec!["in"]);
+        assert!(outs(SignalToWorkspace).is_empty());
+        assert_eq!(SignalFromWorkspace.category(), NodeCategory::SignalSources);
+        assert_eq!(SignalToWorkspace.category(), NodeCategory::SignalSinks);
+
+        // From Workspace exposes the inline time-series + interpolation (#388);
+        // its defaults validate and interpolation only accepts linear / zoh.
+        let fw = SignalFlowParamSpec::fields(SignalFromWorkspace);
+        assert_eq!(
+            fw.iter().map(|f| f.key).collect::<Vec<_>>(),
+            ["data", "interpolation"]
+        );
+        for f in &fw {
+            assert!(
+                SignalFlowParamSpec::validate_field(
+                    SignalFromWorkspace,
+                    f.key,
+                    &f.default_value.display_string()
+                )
+                .is_ok(),
+                "From Workspace default {} is invalid",
+                f.key
+            );
+        }
+        assert!(
+            SignalFlowParamSpec::validate_field(SignalFromWorkspace, "interpolation", "zoh")
+                .is_ok()
+        );
+        assert!(SignalFlowParamSpec::validate_field(
+            SignalFromWorkspace,
+            "interpolation",
+            "spline"
+        )
+        .is_err());
+
+        // To Workspace names the logged variable.
+        assert_eq!(
+            SignalFlowParamSpec::fields(SignalToWorkspace)[0].key,
+            "variableName"
+        );
+    }
+
+    #[test]
+    fn from_to_workspace_model_round_trips_through_the_codec() {
+        use crate::services::flowchart_codec;
+        // A minimal From Workspace → To Workspace signal flow (the shape of the
+        // compiler's workspace_io.mflow example) decodes and re-encodes.
+        let json = r#"{"schema":"matforge.flowchart","version":"0.1.0",
+          "settings":{"kind":"signal_flow",
+            "solver":{"type":"fixed_step","algorithm":"ode4","startTime":0.0,"stopTime":2.0,"maxStep":"0.5"}},
+          "flows":[{"id":"f","kind":"function","name":"m","signature":{"inputs":[],"outputs":[]},
+            "nodes":[
+              {"id":"fw","kind":"signal_from_workspace","data":{"params":{"data":"0 0; 1 10; 2 20"}},
+               "ports":{"in":[],"out":[{"id":"out"}]}},
+              {"id":"tw","kind":"signal_to_workspace","data":{"params":{"variableName":"simout"}},
+               "ports":{"in":[{"id":"in"}],"out":[]}}],
+            "edges":[{"id":"e1","kind":"data","from":{"node":"fw","port":"out"},"to":{"node":"tw","port":"in"}}]}]}"#;
+        let doc = flowchart_codec::decode_str(json).expect("From/To Workspace model decodes");
+        let kinds: Vec<NodeKind> = doc.flows[0].nodes.iter().map(|n| n.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![NodeKind::SignalFromWorkspace, NodeKind::SignalToWorkspace]
+        );
+        // Re-encodes without losing the params.
+        let re = flowchart_codec::encode_string(&doc).expect("re-encodes");
+        assert!(re.contains("signal_from_workspace") && re.contains("\"variableName\""));
+    }
 }

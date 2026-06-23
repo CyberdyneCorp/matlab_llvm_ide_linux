@@ -255,6 +255,7 @@ impl SignalFlowParamSpec {
         const STATS: &[&str] = &["mean", "var", "std"];
         const ACTIVATIONS: &[&str] = &["relu", "tanh", "sigmoid", "linear"];
         const ACTION_TYPES: &[&str] = &["discrete", "continuous"];
+        const INTERP: &[&str] = &["linear", "zoh"];
         match kind {
             SignalConstant => vec![Self::d("value", "Value", 1.0)],
             SignalStep => vec![
@@ -320,6 +321,12 @@ impl SignalFlowParamSpec {
                 Self::d("decimation", "Decimation", 1.0).int(1),
             ],
             SignalToWorkspace => vec![Self::s("variableName", "Variable name", "simout")],
+            // From Workspace: an inline `t v; t v; …` time-series replayed at sim
+            // time (matlab_llvm#388), interpolated linearly or held (zoh).
+            SignalFromWorkspace => vec![
+                Self::s("data", "Time-series (t v; …)", "0 0; 1 1").matrix(),
+                Self::s("interpolation", "Interpolation", "linear").choices(INTERP),
+            ],
             SignalMux => vec![Self::d("numInputs", "Number of Inputs", 2.0).int(1)],
             SignalDemux => vec![Self::d("numOutputs", "Number of Outputs", 2.0).int(1)],
             SignalSwitch => vec![Self::d("threshold", "Threshold", 0.0)],

@@ -60,7 +60,11 @@ draws plots — all driven by the tested MVVM core.
   `image_filter` / `color_space` / `threshold`) are reconstructed from their
   `base[i,j(,k)]` element traces and drawn as grayscale / RGB **heatmap tiles** in
   the simulation window. Fixed-step Simulink solvers (`ode1`…`ode8`) now decode,
-  and pixel columns whose `[i,j]` subscript carries a comma parse correctly.
+  and the CSV trace parser handles the simulator's pixel-column names whether the
+  comma-bearing subscript is RFC-4180 **quoted** (`"sBox[1,1]"`) or bare.
+* **From / To Workspace** — the From Workspace source replays an inline
+  `t v; …` time-series (linear / zoh interpolation, editable in the inspector)
+  into a To Workspace sink; round-trips and simulates end-to-end.
 * **Robustness** — new wires/blocks get collision-free ids (no duplicate-edge-id
   on save), and multi-input ports spread along a block face instead of collapsing.
 
