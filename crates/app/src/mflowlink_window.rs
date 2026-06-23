@@ -377,12 +377,20 @@ fn build_transport(
             });
         });
     }
-    // Surface why the live run paused (breakpoint / step / crossing / entry).
+    // Surface why the live run stopped (breakpoint / step / crossing / entry,
+    // or `stopTime reached` at completion). Reflect the actual state so the end
+    // of a run reads "finished", not "paused".
     {
         let status = status.clone();
+        let vm_s = vm.clone();
         vm.stop_reason.bind(move |r| {
             if let Some(reason) = r {
-                status.set_text(&format!("paused — {reason}"));
+                let verb = if vm_s.state.get() == SimState::Finished {
+                    "finished"
+                } else {
+                    "paused"
+                };
+                status.set_text(&format!("{verb} — {reason}"));
             }
         });
     }
