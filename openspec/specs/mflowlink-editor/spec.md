@@ -218,10 +218,11 @@ auto-indent that preserves the current line's leading whitespace on Enter.
 
 The MATLAB Function source editor SHALL support two breakpoint kinds. A
 **source-line breakpoint** toggles by clicking its gutter line; it persists on
-the node's `breakpoint_lines` param (round-tripping through `.mflow`) and draws a
-gutter marker, but is labeled as not yet honored by the simulator. A **break on
-output** control SHALL set or clear a signal breakpoint on every wire leaving the
-block's output — the breakpoint the simulator honors — and is disabled until the
+the node's `breakpoint_lines` param (round-tripping through `.mflow`), draws a
+gutter marker, and is honored by the live simulation — the run pauses when the
+body reaches that line and the IDE surfaces the body's locals (matlab_llvm
+#354/#384/#385). A **break on output** control SHALL set or clear a signal
+breakpoint on every wire leaving the block's output — and is disabled until the
 output is wired.
 
 #### Scenario: Toggle a source-line breakpoint
@@ -229,6 +230,13 @@ output is wired.
 - **WHEN** the user clicks a line in the editor gutter
 - **THEN** a breakpoint marker is drawn on that line and the line is recorded in
   the node's `breakpoint_lines`, persisting through save/reload
+
+#### Scenario: A live run pauses on a source-line breakpoint with locals
+
+- **WHEN** a model with a MATLAB Function block carrying a `breakpoint_lines`
+  line is simulated live and the body reaches that line
+- **THEN** the run pauses at `<block>:<line>` and the simulation window's Locals
+  panel lists the body's variables (fetched via the DAP scopes/variables round-trip)
 
 #### Scenario: Break on output sets the wire breakpoint
 

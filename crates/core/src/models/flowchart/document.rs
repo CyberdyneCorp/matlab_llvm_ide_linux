@@ -104,6 +104,29 @@ impl FlowchartDocument {
             .collect()
     }
 
+    /// Source-line breakpoints set on each MATLAB Function block, as
+    /// `(block_id, lines)` (only blocks that carry at least one). The live
+    /// simulator honors these via `setBreakpoints { source:{name: block_id} }`
+    /// (matlab_llvm #354/#384), pausing the run when the body reaches a line.
+    pub fn matlab_fcn_source_breakpoints(&self) -> Vec<(String, Vec<i64>)> {
+        self.flows
+            .iter()
+            .flat_map(|f| f.nodes.iter())
+            .filter(|n| n.kind == NodeKind::SignalMatlabFcn)
+            .filter_map(|n| {
+                let mut lines: Vec<i64> = n
+                    .param_str("breakpoint_lines")?
+                    .split(',')
+                    .filter_map(|s| s.trim().parse::<i64>().ok())
+                    .filter(|&l| l > 0)
+                    .collect();
+                lines.sort_unstable();
+                lines.dedup();
+                (!lines.is_empty()).then(|| (n.id.clone(), lines))
+            })
+            .collect()
+    }
+
     /// Fresh empty document for the given dialect.
     pub fn empty(name: &str, kind: SchemaKind) -> FlowchartDocument {
         match kind {
@@ -568,6 +591,26 @@ mod tests {
         // Named sinks listed in order; an unnamed sink defaults to `simout`
         // (deduped against the first), and non-sink blocks are ignored.
         assert_eq!(doc.to_workspace_vars(), vec!["simout", "held"]);
+    }
+
+    #[test]
+    fn matlab_fcn_source_breakpoints_collect_by_block() {
+        use crate::services::flowchart_codec;
+        let json = r#"{"schema":"matforge.flowchart","version":"0.1.0",
+          "settings":{"kind":"signal_flow"},
+          "flows":[{"id":"f","kind":"function","name":"m","signature":{"inputs":[],"outputs":[]},
+            "nodes":[
+              {"id":"fcn","kind":"signal_matlab_fcn","data":{"params":{"breakpoint_lines":"3, 1, 3"}}},
+              {"id":"fcn2","kind":"signal_matlab_fcn","data":{"params":{"breakpoint_lines":""}}},
+              {"id":"g","kind":"signal_gain","data":{"params":{"breakpoint_lines":"5"}}}],
+            "edges":[]}]}"#;
+        let doc = flowchart_codec::decode_str(json).unwrap();
+        // Only MATLAB Function blocks with non-empty, sorted/deduped lines; a
+        // gain block's stray param and an empty list are ignored.
+        assert_eq!(
+            doc.matlab_fcn_source_breakpoints(),
+            vec![("fcn".to_string(), vec![1, 3])]
+        );
     }
 
     #[test]

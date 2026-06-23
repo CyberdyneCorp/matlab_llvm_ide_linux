@@ -53,6 +53,8 @@ pub fn open(
                 "state": format!("{:?}", vm.state.get()),
                 "samples": vm.sample_count.get(),
                 "signals": vm.signal_count(),
+                "source_stop": vm.source_stop.get().map(|(b, l)| format!("{b}:{l}")),
+                "locals": vm.locals.get().iter().map(|(n, _)| n.clone()).collect::<Vec<_>>(),
             })
         });
     }
@@ -446,6 +448,31 @@ fn send_dap(dap: &LiveSession, command: &str, args: Option<serde_json::Value>) {
     }
 }
 
+/// The `variablesReference` of the `Locals` scope in a DAP `scopes` response.
+fn locals_scope_ref(body: &serde_json::Value) -> Option<i64> {
+    body.get("scopes")?.as_array()?.iter().find_map(|s| {
+        (s.get("name")?.as_str()? == "Locals")
+            .then(|| s.get("variablesReference")?.as_i64())
+            .flatten()
+    })
+}
+
+/// `(name, value)` rows from a DAP `variables` response.
+fn parse_variables(body: &serde_json::Value) -> Vec<(String, String)> {
+    body.get("variables")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| {
+                    let name = v.get("name")?.as_str()?.to_string();
+                    let value = v.get("value")?.as_str().unwrap_or("").to_string();
+                    Some((name, value))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Send a simulation-control request to the live session.
 fn send_sim(dap: &LiveSession, req: &SimRequest) {
     if let Some(s) = dap.borrow_mut().as_mut() {
@@ -663,10 +690,41 @@ fn start_live_simulation(
                         },
                     );
                 }
+                // Install MATLAB Function source-line breakpoints (#354/#384):
+                // each block's body lines via setBreakpoints { source.name }.
+                for (block_id, lines) in vm2.document.with(|d| d.matlab_fcn_source_breakpoints()) {
+                    send_dap(
+                        &dap2,
+                        "setBreakpoints",
+                        Some(json!({
+                            "source": { "name": block_id },
+                            "breakpoints": lines.iter().map(|l| json!({ "line": l }))
+                                .collect::<Vec<_>>(),
+                        })),
+                    );
+                }
+            }
+            // Body locals (#385): on a source-line stop we ask for `scopes`,
+            // then `variables` for the Locals scope, then publish them.
+            DapMessage::Response { command, body, .. } if command.as_str() == "scopes" => {
+                if let Some(reference) = locals_scope_ref(body) {
+                    send_dap(
+                        &dap2,
+                        "variables",
+                        Some(json!({ "variablesReference": reference })),
+                    );
+                }
+            }
+            DapMessage::Response { command, body, .. } if command.as_str() == "variables" => {
+                vm2.locals.set(parse_variables(body));
             }
             _ => {
                 if let Some(ev) = sim_dap::parse_sim_event(&msg) {
                     vm2.on_sim_event(&ev);
+                    // A MATLAB Function source-line pause → fetch its body locals.
+                    if vm2.source_stop.get().is_some() {
+                        send_dap(&dap2, "scopes", Some(json!({ "frameId": 0 })));
+                    }
                 }
             }
         }
@@ -828,6 +886,66 @@ fn build_model_canvas(vm: &Rc<MflowLinkViewModel>) -> GtkBox {
     canvas.add_controller(pan);
 
     v.append(&canvas);
+
+    // Locals panel: when paused on a MATLAB Function source-line breakpoint
+    // (#354/#385), show where it stopped + the body's variables. Hidden
+    // otherwise.
+    let locals_box = GtkBox::new(Orientation::Vertical, 1);
+    locals_box.add_css_class("mf-panel-alt");
+    locals_box.add_css_class("mf-border-top");
+    locals_box.set_margin_start(8);
+    locals_box.set_margin_end(8);
+    locals_box.set_margin_top(4);
+    locals_box.set_margin_bottom(6);
+    let locals_head = Label::new(Some("LOCALS"));
+    locals_head.add_css_class("mf-panel-header");
+    locals_head.set_halign(gtk::Align::Start);
+    let locals_loc = Label::new(None);
+    locals_loc.add_css_class("mf-text-secondary");
+    locals_loc.set_halign(gtk::Align::Start);
+    let locals_vars = Label::new(None);
+    locals_vars.add_css_class("mf-mono");
+    locals_vars.set_halign(gtk::Align::Start);
+    locals_vars.set_selectable(true);
+    locals_vars.set_wrap(true);
+    locals_box.append(&locals_head);
+    locals_box.append(&locals_loc);
+    locals_box.append(&locals_vars);
+    locals_box.set_visible(false);
+    v.append(&locals_box);
+
+    let refresh_locals = {
+        let vm = vm.clone();
+        let locals_box = locals_box.clone();
+        let locals_loc = locals_loc.clone();
+        let locals_vars = locals_vars.clone();
+        move || match vm.source_stop.get() {
+            Some((block, line)) => {
+                locals_box.set_visible(true);
+                locals_loc.set_text(&format!("⏸ paused at {block}:{line}"));
+                let vars = vm.locals.get();
+                let text = if vars.is_empty() {
+                    "(no locals)".to_string()
+                } else {
+                    vars.iter()
+                        .map(|(n, val)| format!("{n} = {val}"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                };
+                locals_vars.set_text(&text);
+            }
+            None => locals_box.set_visible(false),
+        }
+    };
+    {
+        let r = refresh_locals.clone();
+        vm.source_stop.bind(move |_| r());
+    }
+    {
+        let r = refresh_locals.clone();
+        vm.locals.bind(move |_| r());
+    }
+
     v
 }
 

@@ -42,6 +42,23 @@ pub struct MflowLinkViewModel {
     pub snapshots: Property<Vec<(i64, i64)>>,
     /// Why the live run last paused (`stopped` reason), for the transport row.
     pub stop_reason: Property<Option<String>>,
+    /// When paused on a MATLAB Function source-line breakpoint: `(block_id,
+    /// line)` parsed from the stop description (`<block_id>:<line>`). `None`
+    /// otherwise.
+    pub source_stop: Property<Option<(String, i64)>>,
+    /// Body locals `(name, value)` captured at the current source-line stop,
+    /// fetched via the DAP `scopes`/`variables` round-trip (#385).
+    pub locals: Property<Vec<(String, String)>>,
+}
+
+/// Parse a `<block_id>:<line>` source-line stop description into its parts.
+/// Returns `None` for any other description (signal breakpoints, `stopTime
+/// reached`, …), which is how a source-line pause is told apart.
+fn parse_source_loc(desc: &str) -> Option<(String, i64)> {
+    let idx = desc.rfind(':')?;
+    let line: i64 = desc[idx + 1..].trim().parse().ok()?;
+    let block = desc[..idx].trim();
+    (!block.is_empty() && line > 0).then(|| (block.to_string(), line))
 }
 
 impl MflowLinkViewModel {
@@ -59,6 +76,8 @@ impl MflowLinkViewModel {
             live_signals: Property::new(BTreeMap::new()),
             snapshots: Property::new(Vec::new()),
             stop_reason: Property::new(None),
+            source_stop: Property::new(None),
+            locals: Property::new(Vec::new()),
         }
     }
 
@@ -98,6 +117,18 @@ impl MflowLinkViewModel {
                     }
                     self.stop_reason
                         .set(Some(description.clone().unwrap_or_else(|| reason.clone())));
+                    // A `breakpoint` stop whose description is `<block_id>:<line>`
+                    // is a MATLAB Function source-line pause (#354). Record it so
+                    // the UI can fetch + show body locals; otherwise clear.
+                    let src = (reason == "breakpoint")
+                        .then(|| description.as_deref().and_then(parse_source_loc))
+                        .flatten();
+                    if src.is_some() {
+                        self.source_stop.set(src);
+                    } else {
+                        self.source_stop.set(None);
+                        self.locals.set(Vec::new());
+                    }
                 }
             }
             SimEvent::Signal { block_id, t, value } => {
@@ -186,6 +217,9 @@ impl MflowLinkViewModel {
         if self.state.get() == SimState::Paused {
             self.state.set(SimState::Running);
         }
+        // Leaving the pause clears any source-line stop + its locals.
+        self.source_stop.set(None);
+        self.locals.set(Vec::new());
     }
 
     /// The process exited (clean or killed) — settle into Finished unless reset.
@@ -208,6 +242,8 @@ impl MflowLinkViewModel {
         self.live_signals.set(BTreeMap::new());
         self.snapshots.set(Vec::new());
         self.stop_reason.set(None);
+        self.source_stop.set(None);
+        self.locals.set(Vec::new());
     }
 
     /// Number of plotted signals — live edges in live mode, else trace columns.
@@ -400,6 +436,35 @@ mod tests {
         assert!(!vm.live.get());
         assert_eq!(vm.sim_time.get(), 0.0);
         assert!(vm.active_block.get().is_none());
+    }
+
+    #[test]
+    fn source_line_breakpoint_stop_is_recorded() {
+        use crate::services::sim_dap::SimEvent;
+        let vm = vm();
+        vm.start_live();
+        // A `breakpoint` stop with a `<block>:<line>` description is a MATLAB
+        // Function source-line pause (#354).
+        vm.on_sim_event(&SimEvent::Stopped {
+            reason: "breakpoint".into(),
+            description: Some("fcn:3".into()),
+        });
+        assert_eq!(vm.state.get(), SimState::Paused);
+        assert_eq!(vm.source_stop.get(), Some(("fcn".into(), 3)));
+
+        // A signal breakpoint (no `:line` form) is NOT a source-line stop.
+        vm.on_sim_event(&SimEvent::Stopped {
+            reason: "breakpoint".into(),
+            description: Some("sat_1 abs(value) > 1e3 (=2000)".into()),
+        });
+        assert_eq!(vm.source_stop.get(), None);
+
+        // Resume clears the source stop + locals.
+        vm.source_stop.set(Some(("fcn".into(), 3)));
+        vm.locals.set(vec![("a".into(), "4".into())]);
+        vm.resume();
+        assert_eq!(vm.source_stop.get(), None);
+        assert!(vm.locals.get().is_empty());
     }
 
     #[test]

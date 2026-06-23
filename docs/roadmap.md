@@ -53,6 +53,9 @@ draws plots — all driven by the tested MVVM core.
   **HDL** (D/T/JK/SR flip-flops, counter, shift register, RAM, ROM), and Kalman /
   LQR / DNN / RL / RF / pose / running-stats blocks — each with its simulator
   ports and inspector parameters, grouped into new palette sections.
+* **MATLAB Function source-line breakpoints** — click the editor gutter to set a
+  body-line breakpoint; the live simulation pauses there and the sim window's
+  **Locals** panel shows the body's variables (matlab_llvm #354/#384/#385).
 * **Breakpoints** — per-wire signal breakpoints (persist on the edge, marker on
   the canvas, installed against the source block on a live run).
 * **Image & N-D signals** — vector / N-D wire signals already stream as one trace

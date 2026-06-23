@@ -1971,9 +1971,10 @@ fn open_matlab_fcn_editor(fc: &Rc<FlowchartViewModel>, node_id: &str, canvas: &D
     root.append(&content);
 
     // Honesty note: line breakpoints persist but the simulator can't stop on
-    // them yet (it has signal/time breakpoints only — see "Break on output").
+    // Source-line breakpoints: the live simulation pauses on them and surfaces
+    // the body's locals (matlab_llvm #354/#384/#385).
     let hint = Label::new(Some(
-        "Line breakpoints persist in the model; the simulator does not stop on them yet.",
+        "Click the gutter to set a source-line breakpoint — the live run pauses there and shows the body's locals.",
     ));
     hint.add_css_class("mf-text-muted");
     hint.add_css_class("mf-fcn-hint");
