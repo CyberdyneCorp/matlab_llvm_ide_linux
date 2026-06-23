@@ -18,6 +18,7 @@ MATLABC = os.environ.get("MATLABC_PATH", "/home/leonardo/work/matlab_llvm/build/
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
 SIGNAL_MFLOW = os.path.join(FIXTURES, "signal.mflow")
 CHART_MFLOW = os.path.join(FIXTURES, "chart.mflow")
+WORKSPACE_MFLOW = os.path.join(FIXTURES, "workspace.mflow")
 
 
 def setup_project():
@@ -386,6 +387,32 @@ def scenario_mflowlink_simulate():
         app.close()
 
 
+def scenario_workspace_io_simulate():
+    print("scenario: a From Workspace -> To Workspace model simulates")
+    if not os.path.exists(MATLABC):
+        check("workspace I/O simulate (skipped: matlabc not found)", True, "skipped")
+        return
+    # workspace.mflow replays two inline time-series via From Workspace
+    # (linear + zoh) into two To Workspace sinks (`simout`, `held`). It also
+    # exercises the fixed-step `ode4` solver. We assert it streams + finishes.
+    app = App(env_extra={"MATFORGE_OPEN": PROJ, "MATFORGE_SIMULATE": WORKSPACE_MFLOW,
+                         "MATLABC_PATH": MATLABC})
+    try:
+        st = app.wait_for(lambda s: (s.get("mflowlink") or {}).get("samples", 0) > 0,
+                          timeout=30, what="workspace I/O run produced samples")
+        ml = st["mflowlink"]
+        check("From/To Workspace simulation streams samples", ml["samples"] > 0,
+              f"mflowlink={ml}")
+        check("both To Workspace sinks are logged", ml.get("signals", 0) >= 2,
+              f"signals={ml.get('signals')}")
+        st = app.wait_for(lambda s: (s.get("mflowlink") or {}).get("state") == "Finished",
+                          timeout=30, what="workspace I/O run finishes")
+        check("the workspace I/O run reaches Finished",
+              st["mflowlink"]["state"] == "Finished", f"state={st['mflowlink']['state']}")
+    finally:
+        app.close()
+
+
 def scenario_statechart_trace():
     print("scenario: the mStateflow window traces a state chart")
     if not os.path.exists(MATLABC):
@@ -417,6 +444,7 @@ def main():
     scenario_flowchart_editor()
     scenario_signal_editor_features()
     scenario_mflowlink_simulate()
+    scenario_workspace_io_simulate()
     scenario_statechart_trace()
     scenario_repl_workspace()
     scenario_inspect_and_plot()
