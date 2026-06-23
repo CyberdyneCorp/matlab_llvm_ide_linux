@@ -201,7 +201,13 @@ through the tested [`FlowchartViewModel`](../crates/core/src/viewmodels/flowchar
   body (seeded from the single-line expression when there's no body). The block's
   **ports follow the function signature** — `u1..uN` for the header arity plus a
   single `out` — and editing the body re-derives them, dropping wires to ports
-  that disappear.
+  that disappear. The editor is a proper code surface: a **line-number gutter**, a
+  visible **edit toolbar** (Undo / Redo / Cut / Copy / Paste — the keyboard
+  shortcuts work too), **find** (Ctrl+F), **current-line highlight**, and
+  **auto-indent** on Enter. Click a gutter line to set a **source-line
+  breakpoint** (persists on the block, drawn as a red dot — but the simulator
+  does not stop on these yet); use **Break on output** to set the signal
+  breakpoint the simulator *does* honor on the block's output wire(s).
 * **Wire breakpoints** (signal flow): **right-click a wire** to set a signal
   breakpoint condition (`value > 0`, `abs(value) >= 1`). The condition persists on
   the edge, the wire shows a red marker, and the breakpoint is installed against
