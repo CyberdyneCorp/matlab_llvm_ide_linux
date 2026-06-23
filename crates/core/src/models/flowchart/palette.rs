@@ -489,6 +489,9 @@ impl SignalFlowParamSpec {
                 Self::d("actionScale", "Action Scale", 1.0),
             ],
             SignalRf2Port => vec![Self::s("S", "S-parameters (2x2)", "0 1; 1 0").matrix()],
+            // N-D axis utilities (#393). Permute reorders axes per a 1-based
+            // order list; Squeeze drops singleton dims (no params).
+            SignalPermute => vec![Self::s("order", "Axis order (1-based)", "2 1").coeffs()],
             SignalPoseTransform => vec![
                 Self::d("x", "x", 0.0),
                 Self::d("y", "y", 0.0),

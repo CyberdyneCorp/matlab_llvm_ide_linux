@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::edge::FlowEdge;
-use super::node::FlowNode;
+use super::node::{FlowNode, NodeKind};
 
 /// Top-level on-disk container. One `.mflow` file = one document.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -82,6 +82,25 @@ impl FlowchartDocument {
                     .as_ref()
                     .map(|c| (e.from.node.clone(), c.clone()))
             })
+            .collect()
+    }
+
+    /// Variable names logged by every `signal_to_workspace` (To Workspace) sink,
+    /// in document order (defaulting to `simout` when the name is unset). These
+    /// are the trace columns the IDE can publish into the REPL workspace after a
+    /// run so `whos` / the Workspace panel can see them.
+    pub fn to_workspace_vars(&self) -> Vec<String> {
+        let mut seen = std::collections::HashSet::new();
+        self.flows
+            .iter()
+            .flat_map(|f| f.nodes.iter())
+            .filter(|n| n.kind == NodeKind::SignalToWorkspace)
+            .map(|n| {
+                n.param_str("variableName")
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or_else(|| "simout".to_string())
+            })
+            .filter(|name| seen.insert(name.clone()))
             .collect()
     }
 
@@ -526,6 +545,24 @@ mod tests {
             // Round-trips back to the same lowercase string.
             assert_eq!(serde_json::to_string(&decoded).unwrap(), json);
         }
+    }
+
+    #[test]
+    fn to_workspace_vars_lists_sink_variable_names() {
+        use crate::services::flowchart_codec;
+        let json = r#"{"schema":"matforge.flowchart","version":"0.1.0",
+          "settings":{"kind":"signal_flow"},
+          "flows":[{"id":"f","kind":"function","name":"m","signature":{"inputs":[],"outputs":[]},
+            "nodes":[
+              {"id":"a","kind":"signal_to_workspace","data":{"params":{"variableName":"simout"}}},
+              {"id":"b","kind":"signal_to_workspace","data":{"params":{"variableName":"held"}}},
+              {"id":"c","kind":"signal_to_workspace"},
+              {"id":"s","kind":"signal_scope"}],
+            "edges":[]}]}"#;
+        let doc = flowchart_codec::decode_str(json).unwrap();
+        // Named sinks listed in order; an unnamed sink defaults to `simout`
+        // (deduped against the first), and non-sink blocks are ignored.
+        assert_eq!(doc.to_workspace_vars(), vec!["simout", "held"]);
     }
 
     #[test]

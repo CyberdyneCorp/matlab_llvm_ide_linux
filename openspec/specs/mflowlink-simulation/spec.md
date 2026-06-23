@@ -66,6 +66,19 @@ be treated as an image.
 - **WHEN** the trace has only scalar or 1-D `v[i]` signals
 - **THEN** no image tile is shown and the signals appear on the overlay scope
 
+### Requirement: To Workspace publishes into the REPL workspace
+
+When a run finishes, the simulation window SHALL publish each `signal_to_workspace`
+(To Workspace) sink's logged series into the live REPL workspace as a column
+vector named by the block's `variableName`, so the outputs appear in the
+Workspace panel and `whos` (and can be inspected / plotted like any variable).
+Sinks with no logged column are skipped.
+
+#### Scenario: To Workspace outputs become workspace variables
+
+- **WHEN** a model with To Workspace sinks (`simout`, `held`) finishes simulating
+- **THEN** `simout` and `held` appear in the Workspace panel and `whos` lists them
+
 ### Requirement: Playback transport
 
 The simulation window SHALL provide play / pause / step / step-back / restart

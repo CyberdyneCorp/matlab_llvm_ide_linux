@@ -97,10 +97,63 @@ pub fn open(
             glib_proceed()
         });
     }
+    // When a run finishes, publish every To Workspace sink's series into the
+    // REPL workspace so `whos` / the Workspace panel can see it (Simulink-style
+    // "To Workspace"). Re-armed each time the run leaves the Finished state.
+    {
+        let app = app.clone();
+        let vm2 = vm.clone();
+        let exported = std::rc::Rc::new(std::cell::Cell::new(false));
+        vm.state.subscribe(move |s| match s {
+            SimState::Finished if !exported.get() => {
+                exported.set(true);
+                export_to_workspace(&app, &vm2);
+            }
+            SimState::Finished => {}
+            _ => exported.set(false),
+        });
+    }
     window.present();
 
     if autostart {
         start_simulation(app, &vm, &sim, path.as_deref());
+    }
+}
+
+/// Assign each To Workspace sink's logged series into the live REPL as a column
+/// vector, so the run's outputs appear in the Workspace panel and `whos`.
+fn export_to_workspace(app: &Rc<AppState>, vm: &Rc<MflowLinkViewModel>) {
+    let vars = vm.document.with(|d| d.to_workspace_vars());
+    if vars.is_empty() {
+        return;
+    }
+    // Map each To Workspace variable name to its logged column, if present.
+    let n = vm.signal_count();
+    let mut exported: Vec<String> = Vec::new();
+    for var in vars {
+        let Some(i) = (0..n).find(|&i| vm.scope_name(i).as_deref() == Some(var.as_str())) else {
+            continue;
+        };
+        let (_, ys) = vm.scope_series(i);
+        let body = ys
+            .iter()
+            .map(|v| v.to_string())
+            .collect::<Vec<_>>()
+            .join("; ");
+        // A valid MATLAB column-vector assignment; identifier names are safe
+        // because To Workspace variable names are validated identifiers.
+        app.repl_send(&format!("{var} = [{body}];"));
+        exported.push(var);
+    }
+    if !exported.is_empty() {
+        app.vm.console.log(
+            matforge_core::models::ConsoleLevel::Success,
+            format!(
+                "Exported {} to the workspace ({} — run `whos`)",
+                exported.len(),
+                exported.join(", ")
+            ),
+        );
     }
 }
 
