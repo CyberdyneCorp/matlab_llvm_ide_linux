@@ -33,7 +33,7 @@ impl SimTrace {
         if line.is_empty() || !line.contains(',') {
             return false;
         }
-        let fields: Vec<&str> = line.split(',').map(str::trim).collect();
+        let fields: Vec<&str> = split_top_level(line);
         let all_numeric = fields.iter().all(|f| f.parse::<f64>().is_ok());
 
         if self.columns.is_empty() {
@@ -132,6 +132,28 @@ impl SimTrace {
     }
 }
 
+/// Split a CSV line on commas that are **not** inside `[...]`, so image-pixel
+/// column names like `sBox[1,1]` (whose subscript carries a comma) survive as
+/// one field. Data rows contain no brackets, so this matches a plain split there.
+fn split_top_level(line: &str) -> Vec<&str> {
+    let mut fields = Vec::new();
+    let mut depth = 0i32;
+    let mut start = 0usize;
+    for (i, ch) in line.char_indices() {
+        match ch {
+            '[' => depth += 1,
+            ']' => depth = (depth - 1).max(0),
+            ',' if depth == 0 => {
+                fields.push(line[start..i].trim());
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    fields.push(line[start..].trim());
+    fields
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -147,6 +169,22 @@ mod tests {
         assert_eq!(t.signal_count(), 2);
         assert_eq!(t.signal_name(0), Some("src"));
         assert_eq!(t.signal_name(1), Some("scope"));
+    }
+
+    #[test]
+    fn image_pixel_columns_with_commas_parse_as_single_signals() {
+        // Image blocks log pixels as `base[i,j]` columns whose subscript carries
+        // a comma; a naive comma split would shatter the header and reject every
+        // data row (0 samples). Regression for the empty image-model scope.
+        let mut t = SimTrace::new();
+        assert!(!t.feed_line("t,sBox[1,1],sBox[1,2],sThr[2,1]"));
+        assert_eq!(t.columns, ["t", "sBox[1,1]", "sBox[1,2]", "sThr[2,1]"]);
+        assert_eq!(t.signal_count(), 3);
+        assert!(t.feed_line("0.0,5.0,6.0,1.0"));
+        assert_eq!(t.rows.len(), 1, "the data row is accepted, not dropped");
+        assert_eq!(t.signal_name(0), Some("sBox[1,1]"));
+        let (_, ys) = t.series(0);
+        assert_eq!(ys, vec![5.0]);
     }
 
     #[test]

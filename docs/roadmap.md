@@ -55,6 +55,12 @@ draws plots — all driven by the tested MVVM core.
   ports and inspector parameters, grouped into new palette sections.
 * **Breakpoints** — per-wire signal breakpoints (persist on the edge, marker on
   the canvas, installed against the source block on a live run).
+* **Image & N-D signals** — vector / N-D wire signals already stream as one trace
+  per element; 2-D and rank-3 colour **image signals** (`image_source` /
+  `image_filter` / `color_space` / `threshold`) are reconstructed from their
+  `base[i,j(,k)]` element traces and drawn as grayscale / RGB **heatmap tiles** in
+  the simulation window. Fixed-step Simulink solvers (`ode1`…`ode8`) now decode,
+  and pixel columns whose `[i,j]` subscript carries a comma parse correctly.
 * **Robustness** — new wires/blocks get collision-free ids (no duplicate-edge-id
   on save), and multi-input ports spread along a block face instead of collapsing.
 

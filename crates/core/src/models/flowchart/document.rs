@@ -328,9 +328,21 @@ pub enum SolverType {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SolverAlgorithm {
+    // Variable-step (adaptive).
     Ode45,
     Ode23,
+    Ode113,
     Ode15s,
+    Ode23s,
+    // Fixed-step (Simulink `odeN` Runge–Kutta family, as the compiler examples
+    // use — the simulator maps an unrecognized algorithm to classic RK4).
+    Ode1,
+    Ode2,
+    Ode3,
+    Ode4,
+    Ode5,
+    Ode8,
+    // Friendly aliases.
     Euler,
     Heun,
 }
@@ -495,6 +507,25 @@ mod tests {
         assert!(settings.solver.is_some());
         assert!(settings.snapshot.is_some());
         assert_eq!(doc.flows[0].nodes.len(), 0);
+    }
+
+    #[test]
+    fn solver_accepts_fixed_step_ode_algorithms() {
+        // The compiler examples (and Simulink) use fixed-step `odeN` solvers like
+        // `ode4`; the editor must decode them so those models open. Regression for
+        // "unknown variant `ode4`" rejecting image/HDL example models.
+        for (s, want) in [
+            ("ode4", SolverAlgorithm::Ode4),
+            ("ode1", SolverAlgorithm::Ode1),
+            ("ode113", SolverAlgorithm::Ode113),
+            ("ode23s", SolverAlgorithm::Ode23s),
+        ] {
+            let json = format!("\"{s}\"");
+            let decoded: SolverAlgorithm = serde_json::from_str(&json).unwrap();
+            assert_eq!(decoded, want);
+            // Round-trips back to the same lowercase string.
+            assert_eq!(serde_json::to_string(&decoded).unwrap(), json);
+        }
     }
 
     #[test]

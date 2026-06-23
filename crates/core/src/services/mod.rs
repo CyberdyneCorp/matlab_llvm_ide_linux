@@ -14,6 +14,7 @@ pub mod filesystem;
 pub mod flowchart_codec;
 pub mod fuzzy;
 pub mod highlighter;
+pub mod image_signals;
 pub mod markdown;
 pub mod media;
 pub mod mermaid;
