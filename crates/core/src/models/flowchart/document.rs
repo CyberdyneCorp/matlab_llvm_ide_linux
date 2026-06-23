@@ -353,6 +353,8 @@ pub enum SolverAlgorithm {
     Ode113,
     Ode15s,
     Ode23s,
+    Ode23t,
+    Ode23tb,
     // Fixed-step (Simulink `odeN` Runge–Kutta family, as the compiler examples
     // use — the simulator maps an unrecognized algorithm to classic RK4).
     Ode1,
@@ -538,6 +540,9 @@ mod tests {
             ("ode1", SolverAlgorithm::Ode1),
             ("ode113", SolverAlgorithm::Ode113),
             ("ode23s", SolverAlgorithm::Ode23s),
+            // Stiff variable-step solvers added by the compiler (#400/#402).
+            ("ode23t", SolverAlgorithm::Ode23t),
+            ("ode23tb", SolverAlgorithm::Ode23tb),
         ] {
             let json = format!("\"{s}\"");
             let decoded: SolverAlgorithm = serde_json::from_str(&json).unwrap();

@@ -321,6 +321,7 @@ impl SignalFlowParamSpec {
                 Self::d("decimation", "Decimation", 1.0).int(1),
             ],
             SignalToWorkspace => vec![Self::s("variableName", "Variable name", "simout")],
+            SignalScope3D => vec![Self::s("title", "Title", "")],
             // From Workspace: an inline `t v; t v; …` time-series replayed at sim
             // time (matlab_llvm#388), interpolated linearly or held (zoh).
             SignalFromWorkspace => vec![

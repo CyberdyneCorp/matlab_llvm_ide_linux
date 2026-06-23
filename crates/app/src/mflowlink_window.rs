@@ -926,6 +926,130 @@ fn collect_image_frames(
 }
 
 /// Render the detected image signals as grayscale / RGB heatmap tiles.
+/// The `(x, y)` path of each scope3d trajectory in the trace, up to the playback
+/// cursor — the figure traced by the point, not three separate time series.
+fn collect_trajectories(
+    vm: &Rc<MflowLinkViewModel>,
+) -> Vec<(
+    matforge_core::services::trajectory::TrajectorySignal,
+    Vec<(f64, f64)>,
+)> {
+    use matforge_core::services::trajectory::detect_trajectory_signals;
+    use std::collections::HashMap;
+
+    let pts = collect_points(vm);
+    // name -> its (truncated) value series.
+    let series: HashMap<String, Vec<(f64, f64)>> =
+        pts.into_iter().map(|(name, _c, p)| (name, p)).collect();
+    let names: Vec<String> = series.keys().cloned().collect();
+
+    detect_trajectory_signals(&names)
+        .into_iter()
+        .map(|tr| {
+            let xs = series.get(&tr.axis_name('x'));
+            let ys = series.get(&tr.axis_name('y'));
+            let path = match (xs, ys) {
+                (Some(xs), Some(ys)) => {
+                    xs.iter().zip(ys).map(|(&(_, x), &(_, y))| (x, y)).collect()
+                }
+                _ => Vec::new(),
+            };
+            (tr, path)
+        })
+        .collect()
+}
+
+/// Draw each trajectory's `(x, y)` path as an auto-framed polyline with the
+/// current point marked.
+fn draw_trajectories(
+    ctx: &gtk::cairo::Context,
+    w: f64,
+    h: f64,
+    trajs: &[(
+        matforge_core::services::trajectory::TrajectorySignal,
+        Vec<(f64, f64)>,
+    )],
+) {
+    let (br, bg, bb) = crate::theme_css::current().editor_bg.to_unit();
+    ctx.set_source_rgb(br, bg, bb);
+    let _ = ctx.paint();
+    let drawable: Vec<_> = trajs.iter().filter(|(_, p)| p.len() >= 2).collect();
+    if drawable.is_empty() {
+        return;
+    }
+    let pad = 12.0;
+    let label_h = 14.0;
+    let n = drawable.len() as f64;
+    let tile_w = ((w - pad * (n + 1.0)) / n).max(20.0);
+    let tile_h = (h - pad * 2.0 - label_h).max(20.0);
+
+    for (k, (tr, path)) in drawable.iter().enumerate() {
+        let ox = pad + k as f64 * (tile_w + pad);
+        let oy = pad + label_h;
+        let (tr_r, tr_g, tr_b) = crate::theme_css::current().text_secondary.to_unit();
+        ctx.set_source_rgb(tr_r, tr_g, tr_b);
+        ctx.select_font_face(
+            "monospace",
+            gtk::cairo::FontSlant::Normal,
+            gtk::cairo::FontWeight::Normal,
+        );
+        ctx.set_font_size(11.0);
+        ctx.move_to(ox, oy - 4.0);
+        let dims = if tr.has_z {
+            "x–y (of x,y,z)"
+        } else {
+            "x–y"
+        };
+        let _ = ctx.show_text(&format!("{} path  {}", tr.base, dims));
+
+        // Data bounds (equal-aspect square fit).
+        let (mut minx, mut maxx) = (f64::INFINITY, f64::NEG_INFINITY);
+        let (mut miny, mut maxy) = (f64::INFINITY, f64::NEG_INFINITY);
+        for &(x, y) in path.iter() {
+            minx = minx.min(x);
+            maxx = maxx.max(x);
+            miny = miny.min(y);
+            maxy = maxy.max(y);
+        }
+        let span = (maxx - minx).max(maxy - miny).max(1e-6);
+        let cx = (minx + maxx) / 2.0;
+        let cy = (miny + maxy) / 2.0;
+        let side = tile_w.min(tile_h);
+        let sx = ox + (tile_w - side) / 2.0;
+        let sy = oy + (tile_h - side) / 2.0;
+        let map = |x: f64, y: f64| {
+            // y up; center the data, scale to fit with a small margin.
+            let mx = sx + side * (0.1 + 0.8 * (x - cx + span / 2.0) / span);
+            let my = sy + side * (1.0 - (0.1 + 0.8 * (y - cy + span / 2.0) / span));
+            (mx, my)
+        };
+        // Frame.
+        let (lr, lg, lb) = crate::theme_css::current().border.to_unit();
+        ctx.set_source_rgb(lr, lg, lb);
+        ctx.set_line_width(1.0);
+        ctx.rectangle(sx, sy, side, side);
+        let _ = ctx.stroke();
+        // Path.
+        let (pr, pg, pb) = crate::theme_css::current().accent.to_unit();
+        ctx.set_source_rgb(pr, pg, pb);
+        ctx.set_line_width(1.6);
+        let (x0, y0) = map(path[0].0, path[0].1);
+        ctx.move_to(x0, y0);
+        for &(x, y) in &path[1..] {
+            let (mx, my) = map(x, y);
+            ctx.line_to(mx, my);
+        }
+        let _ = ctx.stroke();
+        // Current point.
+        let &(lx, ly) = path.last().unwrap();
+        let (cxp, cyp) = map(lx, ly);
+        let (gr, gg, gb) = crate::theme_css::current().green.to_unit();
+        ctx.set_source_rgb(gr, gg, gb);
+        ctx.arc(cxp, cyp, 3.5, 0.0, std::f64::consts::TAU);
+        let _ = ctx.fill();
+    }
+}
+
 fn draw_images(
     ctx: &gtk::cairo::Context,
     w: f64,
@@ -1136,6 +1260,37 @@ fn build_scopes(app: &Rc<AppState>, vm: &Rc<MflowLinkViewModel>, path: Option<Pa
         });
     }
     panel.append(&img_da);
+
+    // Trajectory strip: scope3d `base[x]/[y]/[z]` groups render as an x–y path
+    // plot (the figure the point traces). Hidden when there's no trajectory.
+    let traj_da = DrawingArea::new();
+    traj_da.set_hexpand(true);
+    traj_da.set_size_request(-1, 200);
+    traj_da.add_css_class("mf-thumb");
+    {
+        let vm = vm.clone();
+        traj_da.set_draw_func(move |_a, ctx, w, h| {
+            draw_trajectories(ctx, w as f64, h as f64, &collect_trajectories(&vm));
+        });
+    }
+    traj_da.set_visible(!collect_trajectories(vm).is_empty());
+    {
+        let vm2 = vm.clone();
+        let traj2 = traj_da.clone();
+        vm.sample_count.subscribe(move |_| {
+            traj2.set_visible(!collect_trajectories(&vm2).is_empty());
+            traj2.queue_draw();
+        });
+    }
+    {
+        let vm3 = vm.clone();
+        let traj3 = traj_da.clone();
+        vm.cursor.subscribe(move |_| {
+            traj3.set_visible(!collect_trajectories(&vm3).is_empty());
+            traj3.queue_draw();
+        });
+    }
+    panel.append(&traj_da);
 
     // Hover → crosshair readout.
     let motion = gtk::EventControllerMotion::new();

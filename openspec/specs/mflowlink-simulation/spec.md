@@ -66,6 +66,21 @@ be treated as an image.
 - **WHEN** the trace has only scalar or 1-D `v[i]` signals
 - **THEN** no image tile is shown and the signals appear on the overlay scope
 
+### Requirement: Trajectory-signal visualization
+
+The simulation window SHALL reconstruct **trajectory signals** from a
+`signal_scope3d` block's `base[x]` / `base[y]` (/ `base[z]`) column group and
+draw the `x–y` path the point traces (an equal-aspect plot with the current
+position marked), in addition to the per-axis traces on the overlay scope. The
+strip is shown only when the trace carries an `x`+`y` trajectory group, and the
+path reflects the playback cursor.
+
+#### Scenario: A 3-D scope renders an x–y path
+
+- **WHEN** a run logs a `signal_scope3d` block as `base[x]`/`base[y]`/`base[z]`
+- **THEN** the simulation window draws the `x–y` path of `base` with its latest
+  point marked, alongside the three time-series traces
+
 ### Requirement: To Workspace publishes into the REPL workspace
 
 When a run finishes, the simulation window SHALL publish each `signal_to_workspace`
