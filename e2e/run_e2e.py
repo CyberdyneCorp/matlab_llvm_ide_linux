@@ -409,6 +409,13 @@ def scenario_workspace_io_simulate():
                           timeout=30, what="workspace I/O run finishes")
         check("the workspace I/O run reaches Finished",
               st["mflowlink"]["state"] == "Finished", f"state={st['mflowlink']['state']}")
+        # On finish, the To Workspace sinks are published into the REPL workspace,
+        # so `whos` / the Workspace panel sees them.
+        want = {"simout", "held"}
+        st = app.wait_for(lambda s: want.issubset(set(s.get("workspace", []))),
+                          timeout=30, what="To Workspace vars appear in the Workspace panel")
+        check("To Workspace outputs appear in the Workspace panel (whos)",
+              want.issubset(set(st.get("workspace", []))), f"workspace={st.get('workspace')}")
     finally:
         app.close()
 

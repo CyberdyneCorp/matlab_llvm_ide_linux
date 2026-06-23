@@ -64,7 +64,13 @@ draws plots — all driven by the tested MVVM core.
   comma-bearing subscript is RFC-4180 **quoted** (`"sBox[1,1]"`) or bare.
 * **From / To Workspace** — the From Workspace source replays an inline
   `t v; …` time-series (linear / zoh interpolation, editable in the inspector)
-  into a To Workspace sink; round-trips and simulates end-to-end.
+  into a To Workspace sink; round-trips and simulates end-to-end. When a run
+  finishes, each To Workspace sink is **published into the REPL workspace** by its
+  `variableName`, so it shows in the Workspace panel and `whos` and can be
+  inspected / plotted.
+* **Full simulator block parity** — the editor library now exposes **every**
+  signal block the compiler implements (101 kinds), including the N-D axis
+  utilities **Permute** / **Squeeze**.
 * **Robustness** — new wires/blocks get collision-free ids (no duplicate-edge-id
   on save), and multi-input ports spread along a block face instead of collapsing.
 

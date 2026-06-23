@@ -337,6 +337,11 @@ pub enum NodeKind {
     SignalRf2Port,
     #[serde(rename = "signal_pose_transform")]
     SignalPoseTransform,
+    // 6.6.6 N-D axis utilities (compiler #393)
+    #[serde(rename = "signal_permute")]
+    SignalPermute,
+    #[serde(rename = "signal_squeeze")]
+    SignalSqueeze,
     // 6.7 State-chart
     #[serde(rename = "state")]
     State,
@@ -380,7 +385,7 @@ pub enum PortAnchor {
 
 impl NodeKind {
     /// Every kind, for palette enumeration + exhaustive tests.
-    pub const ALL: [NodeKind; 127] = [
+    pub const ALL: [NodeKind; 129] = [
         NodeKind::Start,
         NodeKind::End,
         NodeKind::Comment,
@@ -499,6 +504,8 @@ impl NodeKind {
         NodeKind::SignalRlAgent,
         NodeKind::SignalRf2Port,
         NodeKind::SignalPoseTransform,
+        NodeKind::SignalPermute,
+        NodeKind::SignalSqueeze,
         NodeKind::State,
         NodeKind::JunctionConnective,
         NodeKind::JunctionHistory,
@@ -583,7 +590,9 @@ impl NodeKind {
             | SignalFrom
             | SignalBusCreator
             | SignalBusSelector
-            | SignalReshape => C::SignalRouting,
+            | SignalReshape
+            | SignalPermute
+            | SignalSqueeze => C::SignalRouting,
             SignalLookup1D | SignalLookup2D | SignalLookupNd => C::SignalLookup,
             SignalSubsystem
             | SignalInport
@@ -748,6 +757,8 @@ impl NodeKind {
             SignalRlAgent => "RL Agent",
             SignalRf2Port => "RF 2-Port",
             SignalPoseTransform => "Pose Transform",
+            SignalPermute => "Permute",
+            SignalSqueeze => "Squeeze",
             State => "State",
             JunctionConnective => "Junction",
             JunctionHistory => "History Junction",
@@ -1705,6 +1716,33 @@ mod tests {
         // Sources have no inputs.
         assert!(names(SignalImageSource).is_empty());
         assert!(names(SignalRepeatingSequence).is_empty());
+    }
+
+    #[test]
+    fn nd_axis_utility_blocks_are_exposed() {
+        use super::super::palette::{library_blocks, NodeCategory, SignalFlowParamSpec};
+        use super::super::SchemaKind;
+        let lib: Vec<NodeKind> = library_blocks(SchemaKind::SignalFlow)
+            .into_iter()
+            .flat_map(|(_, k)| k)
+            .collect();
+        for (k, name) in [
+            (NodeKind::SignalPermute, "signal_permute"),
+            (NodeKind::SignalSqueeze, "signal_squeeze"),
+        ] {
+            assert_eq!(serde_json::to_string(&k).unwrap(), format!("\"{name}\""));
+            assert!(lib.contains(&k), "{k:?} missing from the library");
+            assert_eq!(k.category(), NodeCategory::SignalRouting);
+            // Single in → out (the routing default).
+            assert_eq!(k.default_ports().inputs.len(), 1);
+            assert_eq!(k.default_ports().outputs.len(), 1);
+        }
+        // Permute exposes a 1-based axis-order list; Squeeze has no params.
+        assert_eq!(
+            SignalFlowParamSpec::fields(NodeKind::SignalPermute)[0].key,
+            "order"
+        );
+        assert!(SignalFlowParamSpec::fields(NodeKind::SignalSqueeze).is_empty());
     }
 
     #[test]
