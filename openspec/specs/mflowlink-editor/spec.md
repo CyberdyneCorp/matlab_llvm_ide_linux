@@ -200,19 +200,42 @@ SHALL re-derive the ports, dropping wires to ports that disappear.
 
 The editor's signal-flow block library SHALL offer every block kind the
 simulator implements, including the MPC Controller (`signal_mpc_move`), From
-Workspace, n-D Lookup Table, If / Switch-Case Action subsystems, and the custom
-block, so models that use them open and are authorable in the editor.
+Workspace, n-D Lookup Table, If / Switch-Case Action subsystems, the custom
+block, and the toolbox families the simulator added under compiler issue #343 —
+Communications (`signal_awgn`, PSK/QAM mod·demod, `signal_error_rate`), DSP &
+image (`signal_fft`/`ifft`/`window`/`spectrum`/`biquad`/`lowpass`/`highpass`/
+`dcblock`/`dwt`/`idwt`/`image_filter`/`color_space`/`threshold`), HDL sequential
+(`signal_dff`/`tff`/`counter`/`jkff`/`srff`/`shift_register`/`ram`/`rom`), and
+estimation / ML / control (`signal_kalman`, `signal_lqr`, `signal_running_stats`,
+`signal_dnn_predict`, `signal_rl_agent`, `signal_rf_2port`,
+`signal_pose_transform`, `signal_repeating_sequence`, `signal_image_source`) — so
+models that use them open and are authorable in the editor. Each block SHALL
+carry the ports the simulator reads (e.g. `signal_error_rate` `tx`/`rx`,
+`signal_kalman` `z`/`u`, the HDL registers' `clk`/`reset`, `signal_ram`
+`addr`/`data`/`we`/`clk`) and expose its parameters in the inspector.
+
+The library SHALL group these into the **Communications**, **DSP & Image**, and
+**HDL** palette sections alongside the existing Sources / Continuous / Discrete /
+Math / Routing / Lookup / Sinks / Composite sections.
 
 #### Scenario: A simulator block is placeable
 
 - **WHEN** the user opens the Library
-- **THEN** the MPC Controller block (and the other simulator-supported blocks)
-  appear and can be dropped onto the canvas
+- **THEN** the MPC Controller block (and the other simulator-supported blocks,
+  including the Communications / DSP / HDL families) appear and can be dropped
+  onto the canvas
 
 #### Scenario: A model using the block opens
 
-- **WHEN** the user opens a model containing a `signal_mpc_move` block
+- **WHEN** the user opens a model containing a `signal_mpc_move` (or any #343
+  block such as `signal_kalman` or `signal_fft`)
 - **THEN** the model decodes and renders without an unknown-kind error
+
+#### Scenario: A new toolbox block has its simulator ports
+
+- **WHEN** an Error Rate (`signal_error_rate`) or HDL register block is dropped
+- **THEN** it exposes the simulator's named input ports (`tx`/`rx`,
+  `clk`/`reset`, …), each anchored to a block face rather than collapsed
 
 ### Requirement: Per-wire signal breakpoints
 
