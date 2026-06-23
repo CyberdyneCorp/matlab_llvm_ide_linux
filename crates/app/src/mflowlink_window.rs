@@ -804,6 +804,121 @@ fn resolve_window(vm: &Rc<MflowLinkViewModel>, view: ScopeView) -> (f64, f64, f6
     view.resolve(&points)
 }
 
+/// The latest frame of every 2-D / rank-3 **image signal** in the trace, keyed
+/// by its reconstructed shape. Pixel values follow `element_name` order
+/// (row-major, channel-innermost). Honours the one-shot playback cursor.
+fn collect_image_frames(
+    vm: &Rc<MflowLinkViewModel>,
+) -> Vec<(
+    matforge_core::services::image_signals::ImageSignal,
+    Vec<f64>,
+)> {
+    use matforge_core::services::image_signals::detect_image_signals;
+    use std::collections::HashMap;
+
+    // name -> latest value at/under the cursor.
+    let mut latest: HashMap<String, f64> = HashMap::new();
+    let mut names: Vec<String> = Vec::new();
+    for (name, _color, pts) in collect_points(vm) {
+        if let Some(&(_, v)) = pts.last() {
+            latest.insert(name.clone(), v);
+        }
+        names.push(name);
+    }
+
+    detect_image_signals(&names)
+        .into_iter()
+        .map(|img| {
+            let mut px = Vec::with_capacity(img.len());
+            for r in 0..img.rows {
+                for c in 0..img.cols {
+                    for ch in 0..img.channels {
+                        px.push(
+                            latest
+                                .get(&img.element_name(r, c, ch))
+                                .copied()
+                                .unwrap_or(0.0),
+                        );
+                    }
+                }
+            }
+            (img, px)
+        })
+        .collect()
+}
+
+/// Render the detected image signals as grayscale / RGB heatmap tiles.
+fn draw_images(
+    ctx: &gtk::cairo::Context,
+    w: f64,
+    h: f64,
+    frames: &[(
+        matforge_core::services::image_signals::ImageSignal,
+        Vec<f64>,
+    )],
+) {
+    use matforge_core::services::image_signals::{normalize, value_range};
+    let (br, bg, bb) = crate::theme_css::current().editor_bg.to_unit();
+    ctx.set_source_rgb(br, bg, bb);
+    let _ = ctx.paint();
+    if frames.is_empty() {
+        return;
+    }
+
+    let pad = 10.0;
+    let label_h = 14.0;
+    let n = frames.len() as f64;
+    let tile_w = ((w - pad * (n + 1.0)) / n).max(8.0);
+    let tile_h = (h - pad * 2.0 - label_h).max(8.0);
+
+    for (k, (img, px)) in frames.iter().enumerate() {
+        let ox = pad + k as f64 * (tile_w + pad);
+        let oy = pad + label_h;
+        // Label (base + dims).
+        let (tr, tg, tb) = crate::theme_css::current().text_secondary.to_unit();
+        ctx.set_source_rgb(tr, tg, tb);
+        ctx.select_font_face(
+            "monospace",
+            gtk::cairo::FontSlant::Normal,
+            gtk::cairo::FontWeight::Normal,
+        );
+        ctx.set_font_size(11.0);
+        ctx.move_to(ox, oy - 4.0);
+        let ch = if img.channels == 3 { " RGB" } else { "" };
+        let _ = ctx.show_text(&format!("{} {}×{}{}", img.base, img.rows, img.cols, ch));
+
+        // Fit the rows×cols grid into the tile, preserving aspect.
+        let cell = (tile_w / img.cols as f64)
+            .min(tile_h / img.rows as f64)
+            .max(1.0);
+        let range = value_range(px).unwrap_or((0.0, 1.0));
+        for r in 0..img.rows {
+            for c in 0..img.cols {
+                let base = (r * img.cols + c) * img.channels;
+                let (pr, pg, pb) = if img.channels == 3 {
+                    (
+                        normalize(px[base], range),
+                        normalize(px[base + 1], range),
+                        normalize(px[base + 2], range),
+                    )
+                } else {
+                    let g = normalize(px[base], range);
+                    (g, g, g)
+                };
+                ctx.set_source_rgb(pr, pg, pb);
+                ctx.rectangle(ox + c as f64 * cell, oy + r as f64 * cell, cell, cell);
+                let _ = ctx.fill();
+            }
+        }
+        // Thin border around the image.
+        let (lr, lg, lb) = crate::theme_css::current().border.to_unit();
+        ctx.set_source_rgb(lr, lg, lb);
+        ctx.set_line_width(1.0);
+        ctx.rectangle(ox, oy, img.cols as f64 * cell, img.rows as f64 * cell);
+        let _ = ctx.stroke();
+    }
+}
+
 /// Draw the overlay scope into `ctx` for the given view + interaction state.
 fn draw_scope(
     ctx: &gtk::cairo::Context,
@@ -911,6 +1026,38 @@ fn build_scopes(app: &Rc<AppState>, vm: &Rc<MflowLinkViewModel>, path: Option<Pa
     // it in a ScrolledWindow gives it a zero-size viewport allocation (the scope
     // renders into a 0×0 rect and shows blank). It fills the panel via vexpand.
     panel.append(&da);
+
+    // Image strip: any 2-D / rank-3 image signals (image_source / image_filter /
+    // color_space …) render as heatmap tiles instead of N unreadable pixel
+    // traces. Hidden when the trace carries no image-shaped signals.
+    let img_da = DrawingArea::new();
+    img_da.set_hexpand(true);
+    img_da.set_size_request(-1, 170);
+    img_da.add_css_class("mf-thumb");
+    {
+        let vm = vm.clone();
+        img_da.set_draw_func(move |_a, ctx, w, h| {
+            draw_images(ctx, w as f64, h as f64, &collect_image_frames(&vm));
+        });
+    }
+    img_da.set_visible(!collect_image_frames(vm).is_empty());
+    {
+        let vm2 = vm.clone();
+        let img_da2 = img_da.clone();
+        vm.sample_count.subscribe(move |_| {
+            img_da2.set_visible(!collect_image_frames(&vm2).is_empty());
+            img_da2.queue_draw();
+        });
+    }
+    {
+        let vm3 = vm.clone();
+        let img_da3 = img_da.clone();
+        vm.cursor.subscribe(move |_| {
+            img_da3.set_visible(!collect_image_frames(&vm3).is_empty());
+            img_da3.queue_draw();
+        });
+    }
+    panel.append(&img_da);
 
     // Hover → crosshair readout.
     let motion = gtk::EventControllerMotion::new();

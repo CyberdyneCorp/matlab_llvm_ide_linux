@@ -725,12 +725,23 @@ fn open_solver_popover(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>, anchor: 
     } else {
         1
     });
-    let algo_dd = gtk::DropDown::from_strings(&["ode45", "ode23", "ode15s", "euler", "heun"]);
+    let algo_dd = gtk::DropDown::from_strings(&[
+        "ode45", "ode23", "ode113", "ode15s", "ode23s", "ode1", "ode2", "ode3", "ode4", "ode5",
+        "ode8", "euler", "heun",
+    ]);
     algo_dd.set_selected(match cfg.algorithm {
         Some(A::Ode23) => 1,
-        Some(A::Ode15s) => 2,
-        Some(A::Euler) => 3,
-        Some(A::Heun) => 4,
+        Some(A::Ode113) => 2,
+        Some(A::Ode15s) => 3,
+        Some(A::Ode23s) => 4,
+        Some(A::Ode1) => 5,
+        Some(A::Ode2) => 6,
+        Some(A::Ode3) => 7,
+        Some(A::Ode4) => 8,
+        Some(A::Ode5) => 9,
+        Some(A::Ode8) => 10,
+        Some(A::Euler) => 11,
+        Some(A::Heun) => 12,
         _ => 0,
     });
     let loop_dd = gtk::DropDown::from_strings(&["trust_region", "newton", "off"]);
@@ -805,9 +816,17 @@ fn open_solver_popover(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>, anchor: 
                 }),
                 algorithm: Some(match algo_dd.selected() {
                     1 => A::Ode23,
-                    2 => A::Ode15s,
-                    3 => A::Euler,
-                    4 => A::Heun,
+                    2 => A::Ode113,
+                    3 => A::Ode15s,
+                    4 => A::Ode23s,
+                    5 => A::Ode1,
+                    6 => A::Ode2,
+                    7 => A::Ode3,
+                    8 => A::Ode4,
+                    9 => A::Ode5,
+                    10 => A::Ode8,
+                    11 => A::Euler,
+                    12 => A::Heun,
                     _ => A::Ode45,
                 }),
                 start_time: Some(f(&start, 0.0)),

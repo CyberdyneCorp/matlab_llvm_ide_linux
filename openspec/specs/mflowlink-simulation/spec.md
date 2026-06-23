@@ -40,6 +40,32 @@ by the `SimTrace` — no compiler involvement.
 - **THEN** only the rows whose time falls inside that window are written; and the
   PNG export writes the rendered scope beside the model file
 
+### Requirement: Image-signal visualization
+
+The simulation window SHALL reconstruct 2-D and rank-3 colour **image signals**
+from the flat per-element scope traces the simulator logs (`base[i,j]` /
+`base[i,j,k]`, 1-based) and render each as a heatmap tile (grayscale for a 2-D
+image, RGB for a rank-3 colour image) instead of N unreadable pixel traces. The
+strip is shown only when the trace carries image-shaped signals, and the tile
+reflects the frame at the current playback cursor. A 1-D vector signal SHALL NOT
+be treated as an image.
+
+#### Scenario: A 2-D image signal renders as a heatmap
+
+- **WHEN** a run logs an image block's pixels as `base[i,j]` element traces
+- **THEN** the simulation window draws a `rows×cols` grayscale heatmap tile for
+  that image
+
+#### Scenario: A colour image renders RGB
+
+- **WHEN** the pixels carry a third subscript (`base[i,j,k]`, `k` = channel)
+- **THEN** the tile renders in colour using the three channels per pixel
+
+#### Scenario: Scalar / vector signals are not images
+
+- **WHEN** the trace has only scalar or 1-D `v[i]` signals
+- **THEN** no image tile is shown and the signals appear on the overlay scope
+
 ### Requirement: Playback transport
 
 The simulation window SHALL provide play / pause / step / step-back / restart

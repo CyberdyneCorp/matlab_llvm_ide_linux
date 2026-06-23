@@ -98,6 +98,13 @@ round-tripping through the `.mflow` codec.
   fixed-step Euler config with a stop time persists, re-reads, and round-trips
   through the codec
 
+#### Scenario: Fixed-step odeN algorithms decode
+
+- **WHEN** a model declares a Simulink fixed-step solver (`ode1`/`ode2`/`ode3`/
+  `ode4`/`ode5`/`ode8`) or `ode113`/`ode23s`, as the compiler examples do
+- **THEN** the document decodes and the algorithm round-trips (rather than being
+  rejected as an unknown variant)
+
 #### Scenario: Undo restores the previous solver
 
 - **WHEN** the user changes the solver and then undoes
