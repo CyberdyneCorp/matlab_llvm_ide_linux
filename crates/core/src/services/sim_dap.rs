@@ -136,8 +136,13 @@ pub enum SimEvent {
     ZeroCrossing { block_id: String, t: f64 },
     /// A snapshot was pushed to the step-back ring.
     Snapshot { major_step: i64, depth: i64 },
-    /// The run stopped (entry / breakpoint / step / pause / crossing).
-    Stopped { reason: String },
+    /// The run stopped (entry / breakpoint / step / pause / crossing). The
+    /// `description` carries the human detail — notably `"stopTime reached"` at
+    /// the end of a run, which the viewmodel treats as completion.
+    Stopped {
+        reason: String,
+        description: Option<String>,
+    },
 }
 
 /// The block identifier from a signal/sample body: `blockId` (current) or the
@@ -192,6 +197,10 @@ pub fn parse_sim_event(msg: &DapMessage) -> Option<SimEvent> {
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_string(),
+            description: body
+                .get("description")
+                .and_then(Value::as_str)
+                .map(str::to_string),
         }),
         _ => None,
     }
@@ -316,7 +325,18 @@ mod tests {
         assert_eq!(
             event(r#"{"type":"event","event":"stopped","body":{"reason":"breakpoint"}}"#),
             SimEvent::Stopped {
-                reason: "breakpoint".into()
+                reason: "breakpoint".into(),
+                description: None,
+            }
+        );
+        // End-of-run carries the `stopTime reached` description (matlabc sim DAP).
+        assert_eq!(
+            event(
+                r#"{"type":"event","event":"stopped","body":{"reason":"step","description":"stopTime reached"}}"#
+            ),
+            SimEvent::Stopped {
+                reason: "step".into(),
+                description: Some("stopTime reached".into()),
             }
         );
     }

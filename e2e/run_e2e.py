@@ -420,6 +420,30 @@ def scenario_workspace_io_simulate():
         app.close()
 
 
+def scenario_workspace_io_live():
+    print("scenario: a live --sim-dap run also publishes To Workspace outputs")
+    if not os.path.exists(MATLABC):
+        check("live workspace I/O (skipped: matlabc not found)", True, "skipped")
+        return
+    # MATFORGE_SIMULATE_LIVE drives the interactive live path (Simulate -> Play),
+    # which ends in a `stopTime reached` stop rather than a process exit. Regression
+    # for the To Workspace export not firing on the live path.
+    app = App(env_extra={"MATFORGE_OPEN": PROJ, "MATFORGE_SIMULATE": WORKSPACE_MFLOW,
+                         "MATFORGE_SIMULATE_LIVE": "1", "MATLABC_PATH": MATLABC})
+    try:
+        st = app.wait_for(lambda s: (s.get("mflowlink") or {}).get("state") == "Finished",
+                          timeout=40, what="live run reaches Finished")
+        check("a live --sim-dap run reaches Finished at stopTime",
+              st["mflowlink"]["state"] == "Finished", f"mflowlink={st['mflowlink']}")
+        want = {"simout", "held"}
+        st = app.wait_for(lambda s: want.issubset(set(s.get("workspace", []))),
+                          timeout=30, what="To Workspace vars appear after a live run")
+        check("To Workspace outputs appear in the Workspace after a live run (whos)",
+              want.issubset(set(st.get("workspace", []))), f"workspace={st.get('workspace')}")
+    finally:
+        app.close()
+
+
 def scenario_statechart_trace():
     print("scenario: the mStateflow window traces a state chart")
     if not os.path.exists(MATLABC):
@@ -452,6 +476,7 @@ def main():
     scenario_signal_editor_features()
     scenario_mflowlink_simulate()
     scenario_workspace_io_simulate()
+    scenario_workspace_io_live()
     scenario_statechart_trace()
     scenario_repl_workspace()
     scenario_inspect_and_plot()
