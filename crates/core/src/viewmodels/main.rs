@@ -50,6 +50,9 @@ pub struct MainViewModel {
     /// The most recent video file path seen in program output (e.g. a
     /// `VideoWriter` "wrote …mp4/.avi" line). The GTK side plays it back.
     pub last_video: Property<Option<String>>,
+    /// The most recent sim3d scene HTML a run exported (`sim3d.export(w, …)`).
+    /// The GTK side opens it in the embedded 3-D Scene viewer.
+    pub last_scene3d: Property<Option<String>>,
     fs: Rc<dyn FileSystem>,
     clipboard: Rc<dyn Clipboard>,
     picker: Rc<dyn FilePicker>,
@@ -81,6 +84,7 @@ impl MainViewModel {
             settings,
             pending_plot: Property::new(None),
             last_video: Property::new(None),
+            last_scene3d: Property::new(None),
             fs,
             clipboard,
             picker,

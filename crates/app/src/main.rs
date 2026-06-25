@@ -207,6 +207,31 @@ fn build_main_window(app: &Application) {
         });
     }
 
+    // When a sim3d script exports a scene (`sim3d.export(w, '…html')`), open it
+    // in the embedded 3-D Scene viewer.
+    {
+        let app2 = app.clone();
+        let last_scene3d = app.vm.last_scene3d.clone();
+        last_scene3d.subscribe(move |v| {
+            let Some(path) = v.as_ref().map(std::path::PathBuf::from) else {
+                return;
+            };
+            if path.exists() {
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                app2.vm.toast.show(format!("🧊 3-D scene {name}"));
+                crate::e2e::record_scene3d_generated(&path);
+                // The window is suppressed under the e2e harness (the test
+                // asserts on the recorded scene, not an un-introspectable view).
+                if !crate::e2e::is_active() {
+                    scene3d_window::open(&app2, &path);
+                }
+            }
+        });
+    }
+
     // Save the session (layout + open tabs + folder) on a clean window close.
     {
         let app = app.clone();

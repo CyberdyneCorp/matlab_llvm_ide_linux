@@ -4,13 +4,15 @@
 //! loop briefly (fine for the small programs the IDE compiles); streaming the
 //! long-lived REPL/DAP processes off-thread is a later phase.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::rc::Rc;
+use std::time::SystemTime;
 
 use matforge_core::models::ConsoleLevel;
 use matforge_core::services::run::RunPlan;
 use matforge_core::services::settings::Settings;
+use matforge_core::services::sim3d;
 use matforge_core::viewmodels::MainViewModel;
 
 use crate::process::{run_streaming, RUN_EXIT_PREFIX};
@@ -35,6 +37,15 @@ pub fn run(vm: Rc<MainViewModel>, settings: &Settings) {
     let out_dir = std::env::temp_dir();
     let plan = RunPlan::new(&source, &out_dir);
     vm.status_bar.set_message(format!("Running {}…", plan.stem));
+
+    // sim3d scripts write a Babylon HTML via `sim3d.export(w, '…html')`; collect
+    // the export paths so we can open the produced scene after the run. The
+    // program runs in `out_dir`, so relative paths resolve there.
+    let scene_paths = match std::fs::read_to_string(&source) {
+        Ok(text) if sim3d::uses_sim3d(&text) => sim3d::exported_scene_paths(&text),
+        _ => Vec::new(),
+    };
+    let scene_dir = out_dir.clone();
 
     // 1. matlabc -emit-llvm source > stem.ll
     let emit = Command::new(&settings.matlabc_path)
@@ -68,11 +79,29 @@ pub fn run(vm: Rc<MainViewModel>, settings: &Settings) {
     // The Symbolic Math Toolbox lives in `libmatlab_sym.so` next to matlabc; the
     // runtime dlopens it by bare soname, so point the loader at that directory.
     let lib_dir = settings.matlabc_path.parent();
+    let run_start = SystemTime::now();
     let started = run_streaming(&plan.bin_path, &out_dir, true, lib_dir, move |line| {
         if let Some(code) = line.strip_prefix(RUN_EXIT_PREFIX) {
             vm.toolbar.is_running.set(false);
             vm.status_bar
                 .set_message(format!("Finished {stem} (exit {code})"));
+            // Open any sim3d scene this run freshly wrote (the GTK subscription
+            // on `last_scene3d` shows it in the 3-D Scene viewer).
+            for rel in &scene_paths {
+                let path = if Path::new(rel).is_absolute() {
+                    PathBuf::from(rel)
+                } else {
+                    scene_dir.join(rel)
+                };
+                let fresh = std::fs::metadata(&path)
+                    .and_then(|m| m.modified())
+                    .map(|m| m >= run_start)
+                    .unwrap_or(false);
+                if fresh {
+                    vm.last_scene3d
+                        .set(Some(path.to_string_lossy().into_owned()));
+                }
+            }
         } else {
             vm.feed_repl_line(&line);
         }

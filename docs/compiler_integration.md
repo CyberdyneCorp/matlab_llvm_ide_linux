@@ -78,6 +78,32 @@ via `pretty_kind_tag` (not a bare "Unknown Block"); the inspector surfaces its
 stored params as free-form rows. The same fallback covers params present on a
 typed 3-D block that aren't in its curated schema.
 
+## sim3d scripts (`sim3d.export` → 3-D Scene viewer)
+
+`sim3d` is the compiler's MATLAB command-line 3-D API — `sim3d.World()`,
+`sim3d.Actor(name, shape)`, transform properties, `w.add/open/run/close`, and
+`sim3d.export(w, 'scene.html')` — which writes the same self-contained Babylon.js
+HTML as `-emit-mflowlink-babylon`, authored entirely from `.m` code (no `.mflow`).
+
+When you **Run** a `.m` file that uses sim3d, the IDE opens the exported scene in
+the embedded 3-D Scene viewer automatically:
+
+1. The Run pipeline compiles + links + executes the program in a temp working
+   directory; `sim3d.export(w, 'x.html')` writes `x.html` there.
+2. `sim3d.export` prints no marker, so the IDE finds the output by reading the
+   literal path(s) the script passes to `sim3d.export`
+   ([`services/sim3d.rs`](../crates/core/src/services/sim3d.rs)); a call with no
+   path uses the default `sim3d_scene.html`.
+3. After the run, `runner.rs` resolves each path against the run directory, and if
+   the file was freshly written, sets `MainViewModel::last_scene3d`. A subscription
+   in `main.rs` opens it via [`scene3d_window`](../crates/app/src/scene3d_window.rs)
+   — the same embedded WebKitGTK viewer the flowchart 3-D Scene action uses.
+
+This mirrors the `VideoWriter` → `last_video` → `video_view` flow. Computed export
+paths and the interactive REPL path are not auto-detected (a literal path in a
+Run-ed file is); a future compiler-side `___MF_SCENE3D___ path=…` sentinel (like
+`VideoWriter`'s `___MF_VID___`) would cover those too.
+
 ## REPL (`matlabc -repl`)
 
 The live REPL is wired end-to-end. `app/src/process.rs::ReplSession` spawns
