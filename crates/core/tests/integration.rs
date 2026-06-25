@@ -257,3 +257,86 @@ fn dap_reaches_stopped_at_breakpoint() {
         "matlabc -dap did not reach a stopped event at the breakpoint"
     );
 }
+
+/// Resolve a 3-D example model shipped with `matlab_llvm` (sibling of the
+/// `matlabc` build dir), or `None` to skip. Override with `$MATFORGE_3D_EXAMPLE`.
+fn example_3d_model() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("MATFORGE_3D_EXAMPLE") {
+        let p = PathBuf::from(p);
+        return p.exists().then_some(p);
+    }
+    let binary = matlabc()?;
+    // <repo>/build/matlabc -> <repo>/examples/mflowlink/3d/orbit_cube.mflow
+    let repo = binary.parent()?.parent()?;
+    let model = repo.join("examples/mflowlink/3d/orbit_cube.mflow");
+    model.exists().then_some(model)
+}
+
+#[test]
+fn three_d_model_loads_detects_and_round_trips() {
+    use matforge_core::models::flowchart::NodeKind;
+    use matforge_core::services::{flowchart_codec, scene3d};
+
+    let Some(model) = example_3d_model() else {
+        eprintln!("skipping: no 3-D example model (set $MATFORGE_3D_EXAMPLE)");
+        return;
+    };
+    let text = std::fs::read_to_string(&model).unwrap();
+
+    // The editor loads a model authored outside the IDE without dropping nodes,
+    // even though the `signal_*3d` scene blocks are not typed.
+    let doc = flowchart_codec::decode_str(&text).expect("3-D example should load");
+    let nodes: Vec<&_> = doc.flows.iter().flat_map(|f| f.nodes.iter()).collect();
+    assert!(!nodes.is_empty(), "model should have nodes");
+
+    // The world block is present, untyped, with its raw kind preserved.
+    let world = nodes
+        .iter()
+        .find(|n| n.kind_tag() == "signal_world3d")
+        .expect("model should contain a signal_world3d block");
+    assert_eq!(world.kind, NodeKind::Unknown);
+
+    // Detection fires on both the raw text and the loaded document.
+    assert!(scene3d::source_has_scene3d(&text));
+    assert!(scene3d::document_has_scene3d(&doc));
+
+    // Re-encode → decode yields an identical document (lossless round-trip).
+    let encoded = flowchart_codec::encode_string(&doc).unwrap();
+    assert!(encoded.contains("signal_world3d"));
+    assert_eq!(doc, flowchart_codec::decode_str(&encoded).unwrap());
+}
+
+#[test]
+fn emit_mflowlink_babylon_produces_a_scene() {
+    let Some(binary) = matlabc() else {
+        eprintln!("skipping: matlabc not found");
+        return;
+    };
+    let Some(model) = example_3d_model() else {
+        eprintln!("skipping: no 3-D example model (set $MATFORGE_3D_EXAMPLE)");
+        return;
+    };
+    let out = std::env::temp_dir().join(format!(
+        "matforge_it_{}_{}_scene.html",
+        std::process::id(),
+        matforge_core::models::next_id()
+    ));
+    let status = Command::new(&binary)
+        .arg("-emit-mflowlink-babylon")
+        .arg(&model)
+        .arg("-o")
+        .arg(&out)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .expect("matlabc should run");
+
+    let html = std::fs::read_to_string(&out).unwrap_or_default();
+    std::fs::remove_file(&out).ok();
+
+    assert!(status.success(), "babylon emit should succeed");
+    assert!(
+        html.to_lowercase().contains("babylon"),
+        "output should be a Babylon.js scene"
+    );
+}

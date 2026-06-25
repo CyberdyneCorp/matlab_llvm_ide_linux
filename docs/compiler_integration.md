@@ -47,6 +47,28 @@ Linux has no `build_and_run.sh`; the Run pipeline reproduces
 3. `./<stem>` — stdout is streamed back through the REPL sentinel router so any
    emitted figures land in the Plots panel.
 
+## mflowLink 3-D Scene (`matlabc -emit-mflowlink-babylon`)
+
+Signal-flow models that use the compiler's `signal_*3d` scene blocks
+(`signal_world3d`, `signal_actor3d`, `signal_light3d`, `signal_camera3d`,
+`signal_sensor3d`, `signal_collision3d`) can be rendered as an interactive 3-D
+scene. The lane is the `Babylon` variant of
+[`ExportTarget`](../crates/core/src/services/codegen.rs); the IDE persists the
+model and runs `matlabc -emit-mflowlink-babylon <model.mflow> -o <model.scene.html>`,
+producing a self-contained Babylon.js viewer with orbit/zoom/pan/play built in.
+
+The **3-D Scene** button (flowchart toolbar and mflowLink window) is shown only
+when [`scene3d::document_has_scene3d`](../crates/core/src/services/scene3d.rs)
+detects a scene block in the model. The generated HTML opens in an embedded
+WebKitGTK window when the IDE is built with the `scene3d` feature, otherwise in the
+system browser. `MATFORGE_BABYLON_INLINE=<bundle.js>` inlines a Babylon runtime so
+the embedded viewer renders offline.
+
+Because the IDE does not yet type the `signal_*3d` block kinds, they load as
+`NodeKind::Unknown` with the original `kind` tag preserved on the `FlowNode`
+(`raw_kind`), so 3-D models authored elsewhere round-trip through the editor
+without losing blocks or parameters.
+
 ## REPL (`matlabc -repl`)
 
 The live REPL is wired end-to-end. `app/src/process.rs::ReplSession` spawns

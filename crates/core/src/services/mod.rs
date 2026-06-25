@@ -21,6 +21,7 @@ pub mod mermaid;
 pub mod parsers;
 pub mod preferences;
 pub mod run;
+pub mod scene3d;
 pub mod scope;
 pub mod sentinels;
 pub mod settings;

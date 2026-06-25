@@ -11,20 +11,75 @@ use super::palette::NodeCategory;
 
 /// One block in a flow. Only `id`/`kind` are strictly required on disk; the
 /// rest carry schema defaults filled in by the codec.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct FlowNode {
     pub id: String,
     pub kind: NodeKind,
-    #[serde(default)]
     pub label: String,
-    #[serde(default)]
     pub ports: FlowPorts,
-    #[serde(default)]
     pub data: NodeData,
-    #[serde(default)]
     pub ui: FlowUi,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub parent: Option<String>,
+    /// On-disk `kind` tag preserved verbatim when `kind` is [`NodeKind::Unknown`]
+    /// — `None` for every typed kind. Lets models with blocks the IDE does not
+    /// type (e.g. `signal_*3d`) round-trip without data loss. Set only by the
+    /// codec; not part of the on-disk schema.
+    pub raw_kind: Option<String>,
+}
+
+/// On-disk shape of a [`FlowNode`]: identical field order to the historical
+/// derived codec, but with `kind` as a raw string so unknown block kinds survive
+/// a load/save cycle. `FlowNode`'s hand-written [`Serialize`]/[`Deserialize`]
+/// map through this, keeping output byte-for-byte compatible for typed kinds.
+#[derive(Serialize, Deserialize)]
+struct FlowNodeRepr {
+    id: String,
+    kind: String,
+    #[serde(default)]
+    label: String,
+    #[serde(default)]
+    ports: FlowPorts,
+    #[serde(default)]
+    data: NodeData,
+    #[serde(default)]
+    ui: FlowUi,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    parent: Option<String>,
+}
+
+impl Serialize for FlowNode {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        FlowNodeRepr {
+            id: self.id.clone(),
+            kind: self.kind_tag(),
+            label: self.label.clone(),
+            ports: self.ports.clone(),
+            data: self.data.clone(),
+            ui: self.ui.clone(),
+            parent: self.parent.clone(),
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FlowNode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let repr = FlowNodeRepr::deserialize(deserializer)?;
+        let (kind, raw_kind) = match NodeKind::from_tag(&repr.kind) {
+            Some(kind) => (kind, None),
+            None => (NodeKind::Unknown, Some(repr.kind)),
+        };
+        Ok(FlowNode {
+            id: repr.id,
+            kind,
+            label: repr.label,
+            ports: repr.ports,
+            data: repr.data,
+            ui: repr.ui,
+            parent: repr.parent,
+            raw_kind,
+        })
+    }
 }
 
 impl FlowNode {
@@ -44,7 +99,17 @@ impl FlowNode {
             data,
             ui,
             parent: None,
+            raw_kind: None,
         }
+    }
+
+    /// The on-disk `kind` tag for this node: the typed kind's tag, or the
+    /// preserved raw tag when the kind is [`NodeKind::Unknown`].
+    pub fn kind_tag(&self) -> String {
+        self.kind
+            .tag()
+            .or_else(|| self.raw_kind.clone())
+            .unwrap_or_default()
     }
 
     /// World-space bounding rect `(x, y, w, h)` from the stored position +
@@ -364,6 +429,13 @@ pub enum NodeKind {
     ChartFnMatlab,
     #[serde(rename = "chart_fn_truth_table")]
     ChartFnTruthTable,
+    /// A block kind the IDE does not (yet) type — e.g. the compiler's
+    /// `signal_*3d` scene-graph blocks. The original `kind` tag is preserved on
+    /// the owning [`FlowNode`] (`raw_kind`) so such models round-trip losslessly.
+    /// Never written to disk as `"unknown"`: `FlowNode`'s codec restores the raw
+    /// tag. Excluded from [`NodeKind::ALL`] — it is not a palette block.
+    #[serde(skip)]
+    Unknown,
 }
 
 /// Geometric shape used for the node body.
@@ -387,6 +459,25 @@ pub enum PortAnchor {
 }
 
 impl NodeKind {
+    /// The on-disk `kind` tag for a *typed* variant, derived from this enum's
+    /// own serde mapping (the single source of truth). Returns `None` for
+    /// [`NodeKind::Unknown`], whose tag is carried by the owning [`FlowNode`].
+    pub fn tag(self) -> Option<String> {
+        if self == NodeKind::Unknown {
+            return None;
+        }
+        match serde_json::to_value(self) {
+            Ok(serde_json::Value::String(s)) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Resolve an on-disk `kind` tag to its typed variant, or `None` when the
+    /// IDE does not type that kind (caller maps `None` to [`NodeKind::Unknown`]).
+    pub fn from_tag(tag: &str) -> Option<NodeKind> {
+        serde_json::from_value(serde_json::Value::String(tag.to_string())).ok()
+    }
+
     /// Every kind, for palette enumeration + exhaustive tests.
     pub const ALL: [NodeKind; 130] = [
         NodeKind::Start,
@@ -526,6 +617,7 @@ impl NodeKind {
         use NodeCategory as C;
         use NodeKind::*;
         match self {
+            Unknown => C::Other,
             Start | End | Comment => C::Other,
             IfBlock | ForLoop | WhileLoop | BreakBlock | ContinueBlock | ReturnBlock => {
                 C::ControlFlow
@@ -645,6 +737,7 @@ impl NodeKind {
     pub fn display_name(self) -> &'static str {
         use NodeKind::*;
         match self {
+            Unknown => "Unknown Block",
             Start => "Start",
             End => "End",
             Comment => "Comment",

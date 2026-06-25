@@ -23,6 +23,7 @@ use matforge_core::models::flowchart::{
 };
 use matforge_core::models::ConsoleLevel;
 use matforge_core::services::codegen::ExportTarget;
+use matforge_core::services::scene3d;
 use matforge_core::viewmodels::flowchart::{ZOOM_MAX, ZOOM_MIN};
 use matforge_core::viewmodels::FlowchartViewModel;
 
@@ -1193,6 +1194,22 @@ fn build_flow_toolbar(
             });
         }
         bar.append(&sim);
+
+        // 3-D Scene — only for models that carry `signal_*3d` scene blocks.
+        if fc.document.with(scene3d::document_has_scene3d) {
+            let scene = Button::with_label("3-D Scene");
+            scene.add_css_class("mf-tool");
+            scene.set_tooltip_text(Some(
+                "Render the mflowLink 3-D scene (matlabc -emit-mflowlink-babylon)",
+            ));
+            let app = app.clone();
+            let fc = fc.clone();
+            let path = path.clone();
+            scene.connect_clicked(move |_| {
+                open_scene3d(&app, &fc, path.as_deref());
+            });
+            bar.append(&scene);
+        }
 
         // Solver settings (settings.solver) — drives `matlabc -simulate`.
         let solver = Button::with_label("Solver…");
@@ -2775,6 +2792,85 @@ pub(crate) fn emit_artifact(
             app.vm
                 .status_bar
                 .set_message(format!("Export {} failed", target.flag()));
+            None
+        }
+        Err(e) => {
+            app.vm
+                .console
+                .log(ConsoleLevel::Error, format!("matlabc: {e}"));
+            None
+        }
+    }
+}
+
+/// Generate the mflowLink 3-D scene (`matlabc -emit-mflowlink-babylon`) and open
+/// it in the interactive 3-D Scene window. The compiler writes a self-contained
+/// Babylon.js HTML; we hand it to [`crate::scene3d_window::open`]. Returns the
+/// generated HTML path, or `None` on any failure (logged to the console).
+///
+/// Set `MATFORGE_BABYLON_INLINE=<bundle.js>` to inline a Babylon runtime so the
+/// embedded WebView renders with no network access.
+pub(crate) fn open_scene3d(
+    app: &Rc<AppState>,
+    fc: &Rc<FlowchartViewModel>,
+    path: Option<&Path>,
+) -> Option<PathBuf> {
+    let mflow = persist_for_codegen(app, fc, path)?;
+    render_scene3d_from_path(app, &mflow)
+}
+
+/// Generate and open the 3-D scene for an on-disk `.mflow` that is already
+/// current (the mflowLink window persists its model before calling this).
+pub(crate) fn render_scene3d_from_path(app: &Rc<AppState>, mflow: &Path) -> Option<PathBuf> {
+    if !app.settings.matlabc_path.exists() {
+        app.vm.console.log(
+            ConsoleLevel::Error,
+            "matlabc not found — cannot render 3-D scene",
+        );
+        return None;
+    }
+    let html = mflow.with_extension("scene.html");
+    app.vm.status_bar.set_message("Rendering 3-D scene…");
+
+    let mut cmd = Command::new(&app.settings.matlabc_path);
+    cmd.arg(ExportTarget::Babylon.flag())
+        .arg(mflow)
+        .arg("-o")
+        .arg(&html);
+    if let Ok(bundle) = std::env::var("MATFORGE_BABYLON_INLINE") {
+        if !bundle.is_empty() {
+            cmd.arg("--babylon-inline").arg(bundle);
+        }
+    }
+
+    match cmd.output() {
+        Ok(o) if o.status.success() => {
+            // Some lanes write to stdout rather than `-o`; cover both so the
+            // viewer always has a file to load.
+            if !html.exists() && !o.stdout.is_empty() {
+                if let Err(e) = std::fs::write(&html, &o.stdout) {
+                    app.vm
+                        .console
+                        .log(ConsoleLevel::Error, format!("write scene HTML failed: {e}"));
+                    return None;
+                }
+            }
+            if !html.exists() {
+                app.vm
+                    .console
+                    .log(ConsoleLevel::Error, "matlabc produced no 3-D scene output");
+                return None;
+            }
+            crate::scene3d_window::open(app, &html);
+            Some(html)
+        }
+        Ok(o) => {
+            for line in String::from_utf8_lossy(&o.stderr).lines() {
+                app.vm.console.log(ConsoleLevel::Error, line.to_string());
+            }
+            app.vm
+                .status_bar
+                .set_message("3-D scene generation failed");
             None
         }
         Err(e) => {

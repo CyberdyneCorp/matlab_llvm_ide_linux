@@ -231,6 +231,7 @@ fn build_transport(
         let vm = vm.clone();
         let dap = dap.clone();
         let timer = timer.clone();
+        let path = path.clone();
         play.connect_clicked(move |_| match vm.state.get() {
             // First Play boots a live --sim-dap session (paused at entry).
             SimState::Idle => start_live_simulation(&app, &vm, &dap, path.as_deref()),
@@ -437,7 +438,63 @@ fn build_transport(
         });
     }
 
+    // 3-D Scene — only when the model carries `signal_*3d` scene blocks.
+    if vm
+        .document
+        .with(matforge_core::services::scene3d::document_has_scene3d)
+    {
+        let scene = Button::with_label("3-D Scene");
+        scene.add_css_class("mf-tool");
+        scene.set_tooltip_text(Some(
+            "Render the mflowLink 3-D scene (matlabc -emit-mflowlink-babylon)",
+        ));
+        let app = app.clone();
+        let vm = vm.clone();
+        let path = path.clone();
+        scene.connect_clicked(move |_| {
+            open_scene3d_from_window(&app, &vm, path.as_deref());
+        });
+        bar.append(&scene);
+    }
+
     bar
+}
+
+/// Persist the mflowLink window's current document, then render and open its
+/// 3-D scene. Reuses the editor's Babylon emit so behavior is identical.
+fn open_scene3d_from_window(
+    app: &Rc<AppState>,
+    vm: &Rc<MflowLinkViewModel>,
+    path: Option<&Path>,
+) {
+    let owned;
+    let file: &Path = match path {
+        Some(p) => p,
+        None => {
+            owned = std::env::temp_dir().join("matforge_scene.mflow");
+            &owned
+        }
+    };
+    let json = match vm
+        .document
+        .with(matforge_core::services::flowchart_codec::encode_string)
+    {
+        Ok(j) => j,
+        Err(e) => {
+            app.vm
+                .console
+                .log(matforge_core::models::ConsoleLevel::Error, format!("encode: {e}"));
+            return;
+        }
+    };
+    if std::fs::write(file, json).is_err() {
+        app.vm.console.log(
+            matforge_core::models::ConsoleLevel::Error,
+            "could not write model for 3-D scene",
+        );
+        return;
+    }
+    crate::flowchart_view::render_scene3d_from_path(app, file);
 }
 
 /// Send a generic DAP request (handshake verbs) to the live session.
