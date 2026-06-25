@@ -21,6 +21,7 @@ CHART_MFLOW = os.path.join(FIXTURES, "chart.mflow")
 WORKSPACE_MFLOW = os.path.join(FIXTURES, "workspace.mflow")
 FCN_BP_MFLOW = os.path.join(FIXTURES, "fcn_breakpoint.mflow")
 SCENE3D_MFLOW = os.path.join(FIXTURES, "scene3d.mflow")
+SIM3D_DEMO = os.path.join(FIXTURES, "sim3d_demo.m")
 
 
 def setup_project():
@@ -429,6 +430,28 @@ def scenario_scene3d_viewer():
         app.close()
 
 
+def scenario_sim3d_run():
+    """Running a sim3d .m script compiles+executes it; sim3d.export writes a
+    Babylon HTML which the IDE auto-opens in the 3-D Scene viewer. The window is
+    suppressed under e2e, so we assert on `scene3d_generated`. Needs matlabc."""
+    print("scenario: running a sim3d script opens its exported 3-D scene")
+    if not os.path.exists(MATLABC):
+        check("sim3d run (skipped: matlabc not found)", True, "skipped")
+        return
+    # MATFORGE_RUN runs the opened file once on launch (compile -> link -> exec).
+    app = App(env_extra={"MATFORGE_OPEN": PROJ, "MATFORGE_FILE": SIM3D_DEMO,
+                         "MATFORGE_RUN": "1", "MATLABC_PATH": MATLABC})
+    try:
+        st = app.wait_for(lambda s: (s.get("scene3d_generated") or {}).get("count", 0) >= 1,
+                          timeout=45, what="sim3d scene exported and opened")
+        gen = st["scene3d_generated"]
+        check("running a sim3d script exports and opens a 3-D scene",
+              gen.get("count", 0) >= 1 and gen.get("path", "").endswith(".html"),
+              f"scene3d_generated={gen}")
+    finally:
+        app.close()
+
+
 def scenario_workspace_io_simulate():
     print("scenario: a From Workspace -> To Workspace model simulates")
     if not os.path.exists(MATLABC):
@@ -541,6 +564,7 @@ def main():
     scenario_flowchart_editor()
     scenario_signal_editor_features()
     scenario_scene3d_viewer()
+    scenario_sim3d_run()
     scenario_mflowlink_simulate()
     scenario_workspace_io_simulate()
     scenario_workspace_io_live()

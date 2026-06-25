@@ -25,6 +25,7 @@ pub mod scene3d;
 pub mod scope;
 pub mod sentinels;
 pub mod settings;
+pub mod sim3d;
 pub mod sim_dap;
 pub mod sim_trace;
 pub mod system_bridge;
