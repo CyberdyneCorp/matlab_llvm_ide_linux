@@ -2508,13 +2508,24 @@ fn node_fields(node: &FlowNode) -> Vec<(String, FieldKey)> {
             fields.push(s("on event  (one EVENT: code per line)", FieldKey::OnEvent));
         }
         kind if kind.is_signal_flow() => {
-            for spec in SignalFlowParamSpec::fields(kind) {
+            let specs = SignalFlowParamSpec::fields(kind);
+            let known: std::collections::HashSet<&str> = specs.iter().map(|sp| sp.key).collect();
+            for spec in &specs {
                 fields.push(s(spec.label, FieldKey::Param(spec.key.to_string())));
             }
+            // Also surface any extra params the model carries that the schema
+            // doesn't list (e.g. less-common signal_*3d params like
+            // collisionShape / friction / emissive / urdf), keyed by raw name.
+            if let Some(params) = &node.data.params {
+                for key in params.keys() {
+                    if !known.contains(key.as_str()) {
+                        fields.push(s(key, FieldKey::Param(key.clone())));
+                    }
+                }
+            }
         }
-        // Untyped blocks (e.g. the compiler's `signal_*3d` scene blocks) have no
-        // param schema in the IDE, so surface whatever params the model carries
-        // as free-form editable rows keyed by their raw name.
+        // Truly untyped blocks: surface whatever params the model carries as
+        // free-form editable rows keyed by their raw name.
         Unknown => {
             if let Some(params) = &node.data.params {
                 for key in params.keys() {

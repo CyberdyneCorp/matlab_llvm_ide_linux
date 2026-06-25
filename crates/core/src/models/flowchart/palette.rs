@@ -29,6 +29,7 @@ pub enum NodeCategory {
     SignalComms,
     SignalDsp,
     SignalHdl,
+    Signal3D,
     // State-chart document categories
     ChartStates,
     ChartJunctions,
@@ -57,6 +58,7 @@ impl NodeCategory {
             SignalComms => "Communications",
             SignalDsp => "DSP & Image",
             SignalHdl => "HDL",
+            Signal3D => "3-D Scene",
             ChartStates => "States",
             ChartJunctions => "Junctions",
             ChartFunctions => "Chart Functions",
@@ -84,6 +86,7 @@ impl NodeCategory {
             SignalComms => palette::ACCENT_BLUE,
             SignalDsp => palette::ACCENT_CYAN,
             SignalHdl => palette::ACCENT_GREEN,
+            Signal3D => palette::ACCENT_BLUE,
             ChartStates => palette::ACCENT_ORANGE,
             ChartJunctions => palette::ACCENT_CYAN,
             ChartFunctions => palette::ACCENT_MAGENTA,
@@ -105,6 +108,7 @@ impl NodeCategory {
                 | SignalComms
                 | SignalDsp
                 | SignalHdl
+                | Signal3D
         )
     }
 
@@ -120,7 +124,7 @@ impl NodeCategory {
     }
 
     /// Display order for the signal-flow palette.
-    pub fn signal_flow_order() -> [NodeCategory; 11] {
+    pub fn signal_flow_order() -> [NodeCategory; 12] {
         use NodeCategory::*;
         [
             SignalSources,
@@ -132,6 +136,7 @@ impl NodeCategory {
             SignalHdl,
             SignalRouting,
             SignalLookup,
+            Signal3D,
             SignalSinks,
             SignalComposite,
         ]
@@ -256,6 +261,12 @@ impl SignalFlowParamSpec {
         const ACTIVATIONS: &[&str] = &["relu", "tanh", "sigmoid", "linear"];
         const ACTION_TYPES: &[&str] = &["discrete", "continuous"];
         const INTERP: &[&str] = &["linear", "zoh"];
+        // 3-D scene block choices (compiler mflow-3d-animation).
+        const SHAPE_3D: &[&str] = &["box", "sphere", "cylinder", "cone", "capsule", "plane"];
+        const ENGINE_3D: &[&str] = &["havok", "ammo", "none"];
+        const LIGHT_3D: &[&str] = &["directional", "point", "spot"];
+        const CAMERA_3D: &[&str] = &["static", "follow"];
+        const SENSOR_3D: &[&str] = &["depth", "semantic", "lidar", "rgb"];
         match kind {
             SignalConstant => vec![Self::d("value", "Value", 1.0)],
             SignalStep => vec![
@@ -322,6 +333,66 @@ impl SignalFlowParamSpec {
             ],
             SignalToWorkspace => vec![Self::s("variableName", "Variable name", "simout")],
             SignalScope3D => vec![Self::s("title", "Title", "")],
+            // 3-D scene graph blocks (compiler -emit-mflowlink-babylon). Param
+            // names match the compiler's `signal_*3d` blocks exactly; extra params
+            // present in a model but not listed here still show in the inspector.
+            SignalWorld3D => vec![
+                Self::s("gravity", "Gravity (x,y,z)", "0,0,-9.81"),
+                Self::s("viewpoint", "Viewpoint (x,y,z)", "8,8,6"),
+                Self::s("engine", "Physics engine", "havok").choices(ENGINE_3D),
+                Self::s("physics", "Physics", "false").choices(BOOL_CHOICES),
+                Self::s("showGround", "Show ground", "true").choices(BOOL_CHOICES),
+                Self::s("showAxes", "Show axes", "true").choices(BOOL_CHOICES),
+                Self::s("background", "Background (r,g,b)", "0.07,0.08,0.1"),
+                Self::d("pacingRate", "Pacing rate", 1.0),
+            ],
+            SignalActor3D => vec![
+                Self::s("name", "Name", ""),
+                Self::s("shape", "Shape", "box").choices(SHAPE_3D),
+                Self::s("mesh", "Mesh (.glb/.gltf/.stl/.obj)", ""),
+                Self::s("size", "Size (x,y,z)", "1,1,1"),
+                Self::d("radius", "Radius", 0.5),
+                Self::d("height", "Height", 1.0),
+                Self::s("color", "Color (r,g,b)", "0.6,0.6,0.6"),
+                Self::d("opacity", "Opacity", 1.0),
+                Self::s("parent", "Parent actor", ""),
+                Self::s("translation", "Translation (x,y,z)", ""),
+                Self::s("rotation", "Rotation (roll,pitch,yaw)", ""),
+                Self::s("scale", "Scale (x,y,z)", ""),
+                Self::s("physics", "Physics", "false").choices(BOOL_CHOICES),
+                Self::d("mass", "Mass", 1.0),
+            ],
+            SignalLight3D => vec![
+                Self::s("type", "Type", "directional").choices(LIGHT_3D),
+                Self::s("color", "Color (r,g,b)", "1,1,1"),
+                Self::d("intensity", "Intensity", 0.8),
+                Self::s("position", "Position (x,y,z)", "0,0,10"),
+                Self::s("direction", "Direction (x,y,z)", "-0.5,-0.5,-1"),
+            ],
+            SignalCamera3D => vec![
+                Self::s("mode", "Mode", "static").choices(CAMERA_3D),
+                Self::s("position", "Position (x,y,z)", "8,8,6"),
+                Self::s("target", "Target (x,y,z)", "0,0,0"),
+                Self::s("follow", "Follow actor", ""),
+                Self::d("fov", "Field of view (rad)", 0.8),
+            ],
+            SignalSensor3D => vec![
+                Self::s("kind", "Sensor kind", "depth").choices(SENSOR_3D),
+                Self::d("rows", "Rows", 8.0).int(1),
+                Self::d("cols", "Cols", 8.0).int(1),
+                Self::d("fov", "Field of view (rad)", 1.0),
+                Self::s("position", "Position (x,y,z)", "0,0,3"),
+                Self::s("target", "Target (x,y,z)", "0,0,0"),
+                Self::d("range", "Range", 50.0),
+                Self::s("follow", "Follow actor", ""),
+                Self::d("noise", "Noise", 0.0),
+                Self::d("seed", "Seed", 1.0).int(0),
+            ],
+            SignalCollision3D => vec![
+                Self::d("radiusA", "Radius A", 0.5),
+                Self::d("radiusB", "Radius B", 0.5),
+                Self::d("stiffness", "Stiffness", 100.0),
+            ],
             // From Workspace: an inline `t v; t v; …` time-series replayed at sim
             // time (matlab_llvm#388), interpolated linearly or held (zoh).
             SignalFromWorkspace => vec![
@@ -645,7 +716,7 @@ mod tests {
     #[test]
     fn display_orders_are_complete() {
         assert_eq!(NodeCategory::control_flow_order().len(), 6);
-        assert_eq!(NodeCategory::signal_flow_order().len(), 11);
+        assert_eq!(NodeCategory::signal_flow_order().len(), 12);
         assert_eq!(NodeCategory::state_chart_order().len(), 3);
         // signal order starts with Sources, ends with Composite
         let order = NodeCategory::signal_flow_order();

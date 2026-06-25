@@ -283,18 +283,17 @@ fn three_d_model_loads_detects_and_round_trips() {
     };
     let text = std::fs::read_to_string(&model).unwrap();
 
-    // The editor loads a model authored outside the IDE without dropping nodes,
-    // even though the `signal_*3d` scene blocks are not typed.
+    // The editor loads a model authored outside the IDE without dropping nodes.
     let doc = flowchart_codec::decode_str(&text).expect("3-D example should load");
     let nodes: Vec<&_> = doc.flows.iter().flat_map(|f| f.nodes.iter()).collect();
     assert!(!nodes.is_empty(), "model should have nodes");
 
-    // The world block is present, untyped, with its raw kind preserved.
+    // The world block is present as a first-class typed 3-D scene block.
     let world = nodes
         .iter()
         .find(|n| n.kind_tag() == "signal_world3d")
         .expect("model should contain a signal_world3d block");
-    assert_eq!(world.kind, NodeKind::Unknown);
+    assert_eq!(world.kind, NodeKind::SignalWorld3D);
 
     // Detection fires on both the raw text and the loaded document.
     assert!(scene3d::source_has_scene3d(&text));

@@ -64,11 +64,19 @@ WebKitGTK window when the IDE is built with the `scene3d` feature, otherwise in 
 system browser. `MATFORGE_BABYLON_INLINE=<bundle.js>` inlines a Babylon runtime so
 the embedded viewer renders offline.
 
-Because the IDE does not yet type the `signal_*3d` block kinds, they load as
-`NodeKind::Unknown` with the original `kind` tag preserved on the `FlowNode`
-(`raw_kind`), so 3-D models authored elsewhere round-trip through the editor
-without losing blocks or parameters. They render with their real names (e.g.
-**World 3-D**, **Actor 3-D**) via `pretty_kind_tag`, not a bare "Unknown Block".
+The six `signal_*3d` scene blocks (`SignalWorld3D`, `SignalActor3D`,
+`SignalLight3D`, `SignalCamera3D`, `SignalSensor3D`, `SignalCollision3D`) are
+first-class typed blocks: they appear in the signal-flow palette under a **3-D
+Scene** category, the inspector shows their parameters with labels and
+validation (`SignalFlowParamSpec`), and the actor exposes signal-driven
+`translation`/`rotation`/`scale` input ports.
+
+Any *other* untyped block kind still loads as `NodeKind::Unknown` with the
+original `kind` tag preserved on the `FlowNode` (`raw_kind`) so a model
+round-trips without losing blocks or parameters, rendering with its real name
+via `pretty_kind_tag` (not a bare "Unknown Block"); the inspector surfaces its
+stored params as free-form rows. The same fallback covers params present on a
+typed 3-D block that aren't in its curated schema.
 
 ## REPL (`matlabc -repl`)
 

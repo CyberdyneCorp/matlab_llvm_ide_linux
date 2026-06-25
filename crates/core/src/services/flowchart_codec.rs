@@ -137,10 +137,10 @@ mod tests {
     }
 
     #[test]
-    fn untyped_3d_scene_blocks_round_trip_losslessly() {
-        // Regression: a model authored outside the IDE (compiler `signal_*3d`
-        // scene blocks the IDE does not yet type) must load without dropping
-        // nodes and re-save without losing the kind or its params.
+    fn three_d_scene_and_unknown_blocks_round_trip_losslessly() {
+        // The compiler's signal_*3d scene blocks are typed; a genuinely-unknown
+        // kind still loads (as Unknown) without dropping nodes or losing params,
+        // and the whole document re-saves verbatim.
         use crate::models::flowchart::NodeKind;
 
         let json = r#"{
@@ -149,26 +149,28 @@ mod tests {
                 "nodes":[
                     {"id":"w","kind":"signal_world3d","data":{"params":{"gravity":"-9.81"}}},
                     {"id":"a","kind":"signal_actor3d","label":"Cube","data":{"params":{"shape":"box"}}},
+                    {"id":"x","kind":"signal_future_widget","data":{"params":{"foo":"bar"}}},
                     {"id":"g","kind":"signal_gain"}
                 ],"edges":[]}]
         }"#;
 
         let doc = decode_str(json).expect("3-D model should load");
         let nodes = &doc.flows[0].nodes;
-        assert_eq!(nodes.len(), 3, "no node should be dropped");
+        assert_eq!(nodes.len(), 4, "no node should be dropped");
 
-        // Untyped scene blocks load as Unknown but keep their raw kind tag.
-        assert_eq!(nodes[0].kind, NodeKind::Unknown);
-        assert_eq!(nodes[0].kind_tag(), "signal_world3d");
-        assert_eq!(nodes[1].kind, NodeKind::Unknown);
-        assert_eq!(nodes[1].kind_tag(), "signal_actor3d");
-        // A typed block alongside them is unaffected.
-        assert_eq!(nodes[2].kind, NodeKind::SignalGain);
+        // The 3-D scene blocks are now first-class typed kinds.
+        assert_eq!(nodes[0].kind, NodeKind::SignalWorld3D);
+        assert_eq!(nodes[1].kind, NodeKind::SignalActor3D);
+        // A kind the IDE does not type still loads as Unknown, tag preserved.
+        assert_eq!(nodes[2].kind, NodeKind::Unknown);
+        assert_eq!(nodes[2].kind_tag(), "signal_future_widget");
+        assert_eq!(nodes[3].kind, NodeKind::SignalGain);
 
-        // Re-encode → the original kinds and params survive verbatim.
+        // Re-encode → every kind and param survives verbatim.
         let encoded = encode_string(&doc).unwrap();
         assert!(encoded.contains("\"signal_world3d\""));
         assert!(encoded.contains("\"signal_actor3d\""));
+        assert!(encoded.contains("\"signal_future_widget\""));
         assert!(encoded.contains("\"shape\""));
         assert!(!encoded.contains("\"unknown\""));
 

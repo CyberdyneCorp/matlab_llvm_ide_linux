@@ -448,6 +448,19 @@ pub enum NodeKind {
     // 6.6.7 3-D trajectory scope (compiler #406)
     #[serde(rename = "signal_scope3d")]
     SignalScope3D,
+    // 6.6.8 3-D scene graph (compiler mflow-3d-animation / -emit-mflowlink-babylon)
+    #[serde(rename = "signal_world3d")]
+    SignalWorld3D,
+    #[serde(rename = "signal_actor3d")]
+    SignalActor3D,
+    #[serde(rename = "signal_light3d")]
+    SignalLight3D,
+    #[serde(rename = "signal_camera3d")]
+    SignalCamera3D,
+    #[serde(rename = "signal_sensor3d")]
+    SignalSensor3D,
+    #[serde(rename = "signal_collision3d")]
+    SignalCollision3D,
     // 6.7 State-chart
     #[serde(rename = "state")]
     State,
@@ -517,7 +530,7 @@ impl NodeKind {
     }
 
     /// Every kind, for palette enumeration + exhaustive tests.
-    pub const ALL: [NodeKind; 130] = [
+    pub const ALL: [NodeKind; 136] = [
         NodeKind::Start,
         NodeKind::End,
         NodeKind::Comment,
@@ -639,6 +652,12 @@ impl NodeKind {
         NodeKind::SignalPermute,
         NodeKind::SignalSqueeze,
         NodeKind::SignalScope3D,
+        NodeKind::SignalWorld3D,
+        NodeKind::SignalActor3D,
+        NodeKind::SignalLight3D,
+        NodeKind::SignalCamera3D,
+        NodeKind::SignalSensor3D,
+        NodeKind::SignalCollision3D,
         NodeKind::State,
         NodeKind::JunctionConnective,
         NodeKind::JunctionHistory,
@@ -679,6 +698,8 @@ impl NodeKind {
             SignalScope | SignalDisplay | SignalToWorkspace | SignalTerminator | SignalScope3D => {
                 C::SignalSinks
             }
+            SignalWorld3D | SignalActor3D | SignalLight3D | SignalCamera3D | SignalSensor3D
+            | SignalCollision3D => C::Signal3D,
             SignalAwgn | SignalPskMod | SignalPskDemod | SignalQamMod | SignalQamDemod
             | SignalErrorRate => C::SignalComms,
             SignalFft | SignalIfft | SignalWindow | SignalSpectrum | SignalBiquad
@@ -897,6 +918,12 @@ impl NodeKind {
             SignalPermute => "Permute",
             SignalSqueeze => "Squeeze",
             SignalScope3D => "3-D Scope",
+            SignalWorld3D => "World 3-D",
+            SignalActor3D => "Actor 3-D",
+            SignalLight3D => "Light 3-D",
+            SignalCamera3D => "Camera 3-D",
+            SignalSensor3D => "Sensor 3-D",
+            SignalCollision3D => "Collision 3-D",
             State => "State",
             JunctionConnective => "Junction",
             JunctionHistory => "History Junction",
@@ -1068,6 +1095,16 @@ impl NodeKind {
             },
             SignalScope | SignalDisplay | SignalToWorkspace | SignalTerminator | SignalOutport
             | SignalGoto => (id == "in").then_some(Left),
+            // 3-D actor transform inputs on the left.
+            SignalActor3D => matches!(id, "translation" | "rotation" | "scale").then_some(Left),
+            // Sensor emits on the right.
+            SignalSensor3D => (id == "out").then_some(Right),
+            // Collision: pose inputs left, contact/force outputs right.
+            SignalCollision3D => match id {
+                "poseA" | "poseB" => Some(Left),
+                "out" | "force" => Some(Right),
+                _ => None,
+            },
             SignalSubsystem | SignalEnabledSubsystem | SignalTriggeredSubsystem => {
                 if id.starts_with("out") {
                     Some(Right)
@@ -1201,6 +1238,26 @@ impl NodeKind {
             SignalScope3D => FlowPorts {
                 inputs: vec![p("x"), p("y"), p("z")],
                 outputs: vec![],
+            },
+            // 3-D scene config blocks: read by the emit lane, no signal ports.
+            SignalWorld3D | SignalLight3D | SignalCamera3D => FlowPorts {
+                inputs: vec![],
+                outputs: vec![],
+            },
+            // Actor: optional signal-driven transform inputs (unconnected ⇒ identity).
+            SignalActor3D => FlowPorts {
+                inputs: vec![p("translation"), p("rotation"), p("scale")],
+                outputs: vec![],
+            },
+            // Virtual sensor: emits its N-D reading.
+            SignalSensor3D => FlowPorts {
+                inputs: vec![],
+                outputs: vec![p("out")],
+            },
+            // Collision: two pose inputs; a contact boolean + penalty force out.
+            SignalCollision3D => FlowPorts {
+                inputs: vec![p("poseA"), p("poseB")],
+                outputs: vec![p("out"), p("force")],
             },
             SignalSubsystem | SignalEnabledSubsystem | SignalTriggeredSubsystem => FlowPorts {
                 inputs: vec![p("in1")],
@@ -1917,6 +1974,56 @@ mod tests {
     }
 
     #[test]
+    fn scene3d_blocks_are_typed_and_authorable() {
+        use super::super::palette::{library_blocks, NodeCategory, SignalFlowParamSpec};
+        use super::super::SchemaKind;
+        use NodeKind::*;
+
+        let scene = [
+            (SignalWorld3D, "signal_world3d"),
+            (SignalActor3D, "signal_actor3d"),
+            (SignalLight3D, "signal_light3d"),
+            (SignalCamera3D, "signal_camera3d"),
+            (SignalSensor3D, "signal_sensor3d"),
+            (SignalCollision3D, "signal_collision3d"),
+        ];
+
+        let lib: Vec<NodeKind> = library_blocks(SchemaKind::SignalFlow)
+            .into_iter()
+            .flat_map(|(_, k)| k)
+            .collect();
+
+        for (kind, tag) in scene {
+            // Serde tag round-trips both ways.
+            assert_eq!(serde_json::to_string(&kind).unwrap(), format!("\"{tag}\""));
+            assert_eq!(
+                serde_json::from_str::<NodeKind>(&format!("\"{tag}\"")).unwrap(),
+                kind
+            );
+            // Grouped under the 3-D Scene category and signal-flow dialect.
+            assert_eq!(kind.category(), NodeCategory::Signal3D);
+            assert!(kind.is_signal_flow());
+            // Placeable from the palette with at least one tunable parameter.
+            assert!(lib.contains(&kind), "{tag} missing from palette");
+            assert!(
+                !SignalFlowParamSpec::fields(kind).is_empty(),
+                "{tag} has no params"
+            );
+        }
+
+        // Actor exposes signal-driven transform inputs, anchored on the left.
+        let actor_ports = SignalActor3D.default_ports();
+        let ins: Vec<&str> = actor_ports.inputs.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ins, vec!["translation", "rotation", "scale"]);
+        for p in &actor_ports.inputs {
+            assert!(SignalActor3D.signal_flow_port_anchor(&p.id).is_some());
+        }
+        // World/light/camera are config blocks with no signal ports.
+        assert!(SignalWorld3D.default_ports().inputs.is_empty());
+        assert!(SignalWorld3D.default_ports().outputs.is_empty());
+    }
+
+    #[test]
     fn pretty_kind_tag_titles_untyped_3d_blocks() {
         assert_eq!(pretty_kind_tag("signal_world3d"), "World 3-D");
         assert_eq!(pretty_kind_tag("signal_actor3d"), "Actor 3-D");
@@ -1928,10 +2035,11 @@ mod tests {
     fn unknown_block_titles_use_the_preserved_raw_kind() {
         // An Unknown node carrying a raw tag prettifies it; without one it stays
         // a generic "Unknown Block"; typed kinds return None (use display_name).
-        let json = r#"{"id":"w","kind":"signal_world3d"}"#;
+        // Use a kind the IDE does not type (the signal_*3d blocks are now typed).
+        let json = r#"{"id":"w","kind":"signal_future_widget"}"#;
         let node: FlowNode = serde_json::from_str(json).unwrap();
         assert_eq!(node.kind, NodeKind::Unknown);
-        assert_eq!(node.unknown_title().as_deref(), Some("World 3-D"));
+        assert_eq!(node.unknown_title().as_deref(), Some("Future Widget"));
 
         let typed = FlowNode::new(
             "g",

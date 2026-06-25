@@ -40,3 +40,10 @@
 - [x] 6.1 Render untyped `signal_*3d` blocks with their real kind name (`pretty_kind_tag` → "World 3-D", "Actor 3-D") on the canvas and in the block inspector, instead of a bare "Unknown Block". Confirmed the real flag is `-emit-mflowlink-babylon … -o <html>`.
 - [x] 6.2 Make `scene3d` a **default** feature so the embedded window works on a plain `cargo run`; `--no-default-features` for a minimal browser-fallback build. Added `libwebkitgtk-6.0-dev` to both CI jobs.
 - [x] 6.3 Dedicated e2e scenario (`scenario_scene3d_viewer`) + committed `e2e/fixtures/scene3d.mflow`: asserts the 3-D model loads, `has_scene3d`, the gated button shows, and clicking it generates `*.scene.html` (window suppressed under e2e). Full suite 42/42.
+- [x] 6.4 Generic params editor for untyped blocks: the inspector surfaces `data.params` as editable rows for `Unknown` kinds (and any extra params on typed blocks not in their schema). Regression test added.
+
+## 7. Typed 3-D scene blocks (authoring — was the deferred follow-up)
+
+- [x] 7.1 Add six first-class `NodeKind` variants (`SignalWorld3D/Actor3D/Light3D/Camera3D/Sensor3D/Collision3D`) with serde tags, `display_name`, a new `NodeCategory::Signal3D` ("3-D Scene") in the signal-flow palette, ports (actor transform inputs; sensor/collision I/O), and port anchors.
+- [x] 7.2 Param schemas (`SignalFlowParamSpec::fields`) per block matching the compiler's param names (shape/color/size, gravity/viewpoint/engine, light type, camera mode, sensor kind, collision radii) with enum dropdowns and number/integer validation.
+- [x] 7.3 Tests: serde round-trip, category/palette membership, ports/anchors, param schemas; updated round-trip + integration tests now assert the 3-D blocks load typed (and keep the `Unknown` path for genuinely-unknown kinds). 475 core + 19 app + 7 integration green; e2e 42/42.

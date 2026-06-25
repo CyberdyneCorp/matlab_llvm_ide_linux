@@ -26,8 +26,9 @@ view 2-D scopes.
 - New build/runtime dependency on **WebKitGTK 6.0** (`webkit6` crate + `libwebkitgtk-6.0`),
   reflected in the Debian package `depends` and the build documentation.
 
-Out of scope (follow-up): authoring the `signal_*3d` scene-graph blocks in the IDE palette /
-`NodeKind`. This change delivers the **viewer** only.
+This change delivers the **viewer** first; a follow-up (now included — see tasks §7) also
+types the six `signal_*3d` scene-graph blocks as first-class palette blocks with parameter
+schemas, so they can be authored and edited in the IDE, not only viewed.
 
 ## Capabilities
 
