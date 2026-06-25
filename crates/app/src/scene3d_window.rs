@@ -44,7 +44,10 @@ fn open_in_browser(app: &Rc<AppState>, html: &Path) {
             .set_message("Opened 3-D scene in the system browser"),
         Err(e) => app.vm.console.log(
             ConsoleLevel::Error,
-            format!("could not open the 3-D scene ({e}); generated at {}", html.display()),
+            format!(
+                "could not open the 3-D scene ({e}); generated at {}",
+                html.display()
+            ),
         ),
     }
 }

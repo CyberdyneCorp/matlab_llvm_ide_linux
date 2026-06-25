@@ -31,7 +31,9 @@ pub fn is_scene3d_kind(tag: &str) -> bool {
 /// Matches the JSON `"kind": "<tag>"` form (whitespace-insensitive after the
 /// colon) so a stray substring elsewhere cannot produce a false positive.
 pub fn source_has_scene3d(mflow: &str) -> bool {
-    SCENE3D_KINDS.iter().any(|kind| source_mentions_kind(mflow, kind))
+    SCENE3D_KINDS
+        .iter()
+        .any(|kind| source_mentions_kind(mflow, kind))
 }
 
 /// Whether a loaded document contains a 3-D scene block. Re-encodes the document

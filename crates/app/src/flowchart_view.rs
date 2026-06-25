@@ -87,6 +87,7 @@ pub fn build_flowchart_view(
                 "matlab_inputs": matlab_inputs,
                 "zoom": fc.zoom.get(),
                 "can_undo": fc.can_undo(),
+                "has_scene3d": fc.document.with(scene3d::document_has_scene3d),
             })
         });
     }
@@ -1202,6 +1203,7 @@ fn build_flow_toolbar(
             scene.set_tooltip_text(Some(
                 "Render the mflowLink 3-D scene (matlabc -emit-mflowlink-babylon)",
             ));
+            crate::e2e::set_scene3d_button(&scene);
             let app = app.clone();
             let fc = fc.clone();
             let path = path.clone();
@@ -1727,7 +1729,11 @@ fn build_inspector_body(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>) -> Scro
             };
             let Some(node) = fc.node(&id) else { return };
 
-            let title = Label::new(Some(node.kind.display_name()));
+            // Untyped blocks (e.g. `signal_*3d`) show their real kind name.
+            let title_text = node
+                .unknown_title()
+                .unwrap_or_else(|| node.kind.display_name().to_string());
+            let title = Label::new(Some(&title_text));
             title.add_css_class("mf-empty-title");
             title.set_halign(gtk::Align::Start);
             body.append(&title);
@@ -2861,16 +2867,19 @@ pub(crate) fn render_scene3d_from_path(app: &Rc<AppState>, mflow: &Path) -> Opti
                     .log(ConsoleLevel::Error, "matlabc produced no 3-D scene output");
                 return None;
             }
-            crate::scene3d_window::open(app, &html);
+            crate::e2e::record_scene3d_generated(&html);
+            // Under the e2e harness the window/browser is suppressed: the test
+            // asserts the scene was generated, not on an un-introspectable view.
+            if !crate::e2e::is_active() {
+                crate::scene3d_window::open(app, &html);
+            }
             Some(html)
         }
         Ok(o) => {
             for line in String::from_utf8_lossy(&o.stderr).lines() {
                 app.vm.console.log(ConsoleLevel::Error, line.to_string());
             }
-            app.vm
-                .status_bar
-                .set_message("3-D scene generation failed");
+            app.vm.status_bar.set_message("3-D scene generation failed");
             None
         }
         Err(e) => {

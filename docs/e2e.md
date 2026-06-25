@@ -50,6 +50,7 @@ Headless / CI: wrap with Xvfb — `xvfb-run -a just e2e`.
 | explorer double-click | single- then double-clicks a tree row | single click selects only; double click opens the tab | |
 | flowchart editor | opens a demo chart, clicks a BLOCKS palette row | the chart loads with nodes/edges; the palette adds a node | |
 | signal editor features | opens the demo signal chart and applies one `MATFORGE_FLOW_OP` per launch | a wire selects (`selected_edge`), deletes (`edges` drops), takes a breakpoint (`edge_breakpoints`), and the MATLAB Function block's ports follow its signature (`matlab_inputs`) | |
+| 3-D Scene viewer | opens a `signal_*3d` model, clicks the gated **3-D Scene** button | the model loads (untyped 3-D blocks present), `has_scene3d` is true, the button shows, and clicking it generates a `*.scene.html` (`scene3d_generated`; the window is suppressed under e2e) | ✓ |
 | mflowLink simulate | opens the signal-flow window (autostart) | the simulation streams samples and reaches `Finished` | ✓ |
 | MATLAB Function source breakpoint | autostarts a model with `breakpoint_lines` live | the run pauses at `fcn:2` (`source_stop`) and the body locals (`u1`, …) are surfaced | ✓ |
 | workspace I/O simulate | autostarts a From Workspace → To Workspace model (`ode4`) | streams samples into both `To Workspace` sinks and reaches `Finished` | ✓ |

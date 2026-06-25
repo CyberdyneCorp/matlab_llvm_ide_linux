@@ -67,7 +67,8 @@ the embedded viewer renders offline.
 Because the IDE does not yet type the `signal_*3d` block kinds, they load as
 `NodeKind::Unknown` with the original `kind` tag preserved on the `FlowNode`
 (`raw_kind`), so 3-D models authored elsewhere round-trip through the editor
-without losing blocks or parameters.
+without losing blocks or parameters. They render with their real names (e.g.
+**World 3-D**, **Actor 3-D**) via `pretty_kind_tag`, not a bare "Unknown Block".
 
 ## REPL (`matlabc -repl`)
 

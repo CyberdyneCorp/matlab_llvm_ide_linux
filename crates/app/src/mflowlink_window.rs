@@ -462,11 +462,7 @@ fn build_transport(
 
 /// Persist the mflowLink window's current document, then render and open its
 /// 3-D scene. Reuses the editor's Babylon emit so behavior is identical.
-fn open_scene3d_from_window(
-    app: &Rc<AppState>,
-    vm: &Rc<MflowLinkViewModel>,
-    path: Option<&Path>,
-) {
+fn open_scene3d_from_window(app: &Rc<AppState>, vm: &Rc<MflowLinkViewModel>, path: Option<&Path>) {
     let owned;
     let file: &Path = match path {
         Some(p) => p,
@@ -481,9 +477,10 @@ fn open_scene3d_from_window(
     {
         Ok(j) => j,
         Err(e) => {
-            app.vm
-                .console
-                .log(matforge_core::models::ConsoleLevel::Error, format!("encode: {e}"));
+            app.vm.console.log(
+                matforge_core::models::ConsoleLevel::Error,
+                format!("encode: {e}"),
+            );
             return;
         }
     };

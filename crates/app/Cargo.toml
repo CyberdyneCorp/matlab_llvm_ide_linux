@@ -48,5 +48,9 @@ libc = "0.2"
 webkit6 = { version = "0.4", optional = true }
 
 [features]
-# Release packaging builds with this on (see [package.metadata.deb].depends).
+# On by default so the embedded 3-D Scene viewer works out of the box (the
+# `.deb` depends on libwebkitgtk-6.0-4; see [package.metadata.deb].depends).
+# Build with `--no-default-features` for a minimal build with no WebKitGTK
+# dependency — the 3-D Scene action then opens the scene in the system browser.
+default = ["scene3d"]
 scene3d = ["dep:webkit6"]

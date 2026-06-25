@@ -753,6 +753,11 @@ fn node_label(node: &FlowNode) -> String {
     if !node.label.is_empty() {
         return node.label.clone();
     }
+    // Untyped blocks (e.g. the compiler's `signal_*3d` scene blocks) show their
+    // real kind name instead of a bare "Unknown Block".
+    if let Some(title) = node.unknown_title() {
+        return title;
+    }
     let d = &node.data;
     let some = |o: &Option<String>| o.clone().filter(|s| !s.is_empty());
     match node.kind {

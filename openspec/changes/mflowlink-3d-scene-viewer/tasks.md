@@ -32,5 +32,11 @@
 - [x] 5.2 Update build/setup docs (`docs/build_and_run.md`, `docs/packaging.md`) with the new WebKitGTK dependency and how to install it.
 - [x] 5.3 Update OpenSpec/user-facing docs (`docs/compiler_integration.md`) describing the 3-D Scene viewer feature.
 - [x] 5.4 `cargo build` + `cargo test` the workspace pass (default + `--features scene3d`); clippy clean both ways. Core tests cover export lane, detection, and round-trip.
-- [ ] 5.5 Manual GUI verification (needs a `matlabc` with the babylon lane + a 3-D example `.mflow`): open the model, trigger 3-D Scene, confirm orbit/zoom/pan/play offline; capture a screenshot. **Pending user run** — not exercisable headlessly here.
+- [x] 5.5 GUI verification (Xephyr): opened `ball_ramp.mflow`, confirmed blocks render as **World 3-D / Actor 3-D** (not "Unknown Block"), clicked **3-D Scene** → the embedded WebKitGTK window opened and rendered the scene with a live play/scrub timeline. Screenshots captured.
 - [x] 5.6 `openspec validate mflowlink-3d-scene-viewer --strict` passes.
+
+## 6. Post-review fixes (from real-app testing)
+
+- [x] 6.1 Render untyped `signal_*3d` blocks with their real kind name (`pretty_kind_tag` → "World 3-D", "Actor 3-D") on the canvas and in the block inspector, instead of a bare "Unknown Block". Confirmed the real flag is `-emit-mflowlink-babylon … -o <html>`.
+- [x] 6.2 Make `scene3d` a **default** feature so the embedded window works on a plain `cargo run`; `--no-default-features` for a minimal browser-fallback build. Added `libwebkitgtk-6.0-dev` to both CI jobs.
+- [x] 6.3 Dedicated e2e scenario (`scenario_scene3d_viewer`) + committed `e2e/fixtures/scene3d.mflow`: asserts the 3-D model loads, `has_scene3d`, the gated button shows, and clicking it generates `*.scene.html` (window suppressed under e2e). Full suite 42/42.

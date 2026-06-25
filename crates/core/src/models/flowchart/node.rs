@@ -133,6 +133,20 @@ impl FlowNode {
             .map(ParamValue::display_string)
     }
 
+    /// Human-readable title for an untyped block ([`NodeKind::Unknown`]): the
+    /// raw `kind` tag prettified (e.g. `signal_world3d` → `World 3-D`), falling
+    /// back to `"Unknown Block"` if no raw tag was preserved. Returns `None` for
+    /// typed kinds, whose label comes from [`NodeKind::display_name`].
+    pub fn unknown_title(&self) -> Option<String> {
+        if self.kind != NodeKind::Unknown {
+            return None;
+        }
+        Some(match self.raw_kind.as_deref() {
+            Some(tag) if !tag.is_empty() => pretty_kind_tag(tag),
+            _ => "Unknown Block".to_string(),
+        })
+    }
+
     /// A `params` value parsed as `f64`, if present and numeric.
     pub fn param_f64(&self, key: &str) -> Option<f64> {
         match self.data.params.as_ref()?.get(key)? {
@@ -141,6 +155,30 @@ impl FlowNode {
             ParamValue::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
         }
     }
+}
+
+/// Prettify a raw block `kind` tag for display — drop a `signal_` prefix,
+/// title-case each underscore-separated word, and render a trailing `3d` as
+/// ` 3-D`. E.g. `signal_world3d` → `World 3-D`, `signal_collision3d` →
+/// `Collision 3-D`, `signal_foo_bar` → `Foo Bar`.
+pub fn pretty_kind_tag(tag: &str) -> String {
+    fn capitalize(s: &str) -> String {
+        let mut chars = s.chars();
+        match chars.next() {
+            Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+            None => String::new(),
+        }
+    }
+    tag.strip_prefix("signal_")
+        .unwrap_or(tag)
+        .split('_')
+        .map(|part| match part.strip_suffix("3d") {
+            Some("") => "3-D".to_string(),
+            Some(base) => format!("{} 3-D", capitalize(base)),
+            None => capitalize(part),
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Block kinds defined by schema §6. Serde raw values match the JSON `kind`
@@ -1876,6 +1914,34 @@ mod tests {
             .flat_map(|(_, k)| k)
             .collect();
         assert!(lib.contains(&k));
+    }
+
+    #[test]
+    fn pretty_kind_tag_titles_untyped_3d_blocks() {
+        assert_eq!(pretty_kind_tag("signal_world3d"), "World 3-D");
+        assert_eq!(pretty_kind_tag("signal_actor3d"), "Actor 3-D");
+        assert_eq!(pretty_kind_tag("signal_collision3d"), "Collision 3-D");
+        assert_eq!(pretty_kind_tag("signal_foo_bar"), "Foo Bar");
+    }
+
+    #[test]
+    fn unknown_block_titles_use_the_preserved_raw_kind() {
+        // An Unknown node carrying a raw tag prettifies it; without one it stays
+        // a generic "Unknown Block"; typed kinds return None (use display_name).
+        let json = r#"{"id":"w","kind":"signal_world3d"}"#;
+        let node: FlowNode = serde_json::from_str(json).unwrap();
+        assert_eq!(node.kind, NodeKind::Unknown);
+        assert_eq!(node.unknown_title().as_deref(), Some("World 3-D"));
+
+        let typed = FlowNode::new(
+            "g",
+            NodeKind::SignalGain,
+            "",
+            FlowPorts::default(),
+            NodeData::default(),
+            FlowUi::default(),
+        );
+        assert_eq!(typed.unknown_title(), None);
     }
 
     #[test]

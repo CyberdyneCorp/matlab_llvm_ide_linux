@@ -20,6 +20,7 @@ SIGNAL_MFLOW = os.path.join(FIXTURES, "signal.mflow")
 CHART_MFLOW = os.path.join(FIXTURES, "chart.mflow")
 WORKSPACE_MFLOW = os.path.join(FIXTURES, "workspace.mflow")
 FCN_BP_MFLOW = os.path.join(FIXTURES, "fcn_breakpoint.mflow")
+SCENE3D_MFLOW = os.path.join(FIXTURES, "scene3d.mflow")
 
 
 def setup_project():
@@ -388,6 +389,46 @@ def scenario_mflowlink_simulate():
         app.close()
 
 
+def scenario_scene3d_viewer():
+    """A 3-D model (compiler `signal_*3d` scene blocks the IDE does not type)
+    opens losslessly as named blocks and exposes the gated 3-D Scene action.
+    Clicking it runs the babylon emit; the window is suppressed under e2e, so we
+    assert on the generated scene (matlabc-gated)."""
+    print("scenario: a 3-D model exposes the 3-D Scene action and renders a scene")
+    # Loads + gating need no matlabc; the model is a committed fixture.
+    app = App(env_extra={"MATFORGE_OPEN": PROJ, "MATFORGE_FILE": SCENE3D_MFLOW,
+                         "MATLABC_PATH": MATLABC})
+    try:
+        st = app.wait_for(lambda s: (s.get("flowchart") or {}).get("nodes", 0) > 0,
+                          timeout=10, what="3-D model loaded")
+        fc = st["flowchart"]
+        # Untyped signal_*3d blocks round-trip into the editor without loss.
+        check("the 3-D model loads its blocks (world + actors)",
+              fc["nodes"] >= 3, f"flowchart={fc}")
+        # Detection gates the action to genuine 3-D models.
+        check("the model is detected as a 3-D scene", fc.get("has_scene3d") is True,
+              f"has_scene3d={fc.get('has_scene3d')}")
+        # The gated 3-D Scene button is present (rect published).
+        bx, by, bw, bh = app.wait_rect("scene3d_button_rect")
+        check("the 3-D Scene action is offered for a 3-D model", bw > 0 and bh > 0,
+              f"button=[{bx},{by},{bw},{bh}]")
+
+        if not os.path.exists(MATLABC):
+            check("3-D scene generation (skipped: matlabc not found)", True, "skipped")
+            return
+
+        # Click it -> matlabc emits a self-contained Babylon HTML.
+        app.click_window(bx + bw // 2, by + bh // 2)
+        st = app.wait_for(lambda s: (s.get("scene3d_generated") or {}).get("count", 0) >= 1,
+                          timeout=25, what="3-D scene generated")
+        gen = st["scene3d_generated"]
+        check("clicking 3-D Scene generates a Babylon scene HTML",
+              gen.get("count", 0) >= 1 and gen.get("path", "").endswith(".scene.html"),
+              f"scene3d_generated={gen}")
+    finally:
+        app.close()
+
+
 def scenario_workspace_io_simulate():
     print("scenario: a From Workspace -> To Workspace model simulates")
     if not os.path.exists(MATLABC):
@@ -499,6 +540,7 @@ def main():
     scenario_explorer_double_click()
     scenario_flowchart_editor()
     scenario_signal_editor_features()
+    scenario_scene3d_viewer()
     scenario_mflowlink_simulate()
     scenario_workspace_io_simulate()
     scenario_workspace_io_live()
