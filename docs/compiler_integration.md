@@ -47,6 +47,37 @@ Linux has no `build_and_run.sh`; the Run pipeline reproduces
 3. `./<stem>` — stdout is streamed back through the REPL sentinel router so any
    emitted figures land in the Plots panel.
 
+## mflowLink 3-D Scene (`matlabc -emit-mflowlink-babylon`)
+
+Signal-flow models that use the compiler's `signal_*3d` scene blocks
+(`signal_world3d`, `signal_actor3d`, `signal_light3d`, `signal_camera3d`,
+`signal_sensor3d`, `signal_collision3d`) can be rendered as an interactive 3-D
+scene. The lane is the `Babylon` variant of
+[`ExportTarget`](../crates/core/src/services/codegen.rs); the IDE persists the
+model and runs `matlabc -emit-mflowlink-babylon <model.mflow> -o <model.scene.html>`,
+producing a self-contained Babylon.js viewer with orbit/zoom/pan/play built in.
+
+The **3-D Scene** button (flowchart toolbar and mflowLink window) is shown only
+when [`scene3d::document_has_scene3d`](../crates/core/src/services/scene3d.rs)
+detects a scene block in the model. The generated HTML opens in an embedded
+WebKitGTK window when the IDE is built with the `scene3d` feature, otherwise in the
+system browser. `MATFORGE_BABYLON_INLINE=<bundle.js>` inlines a Babylon runtime so
+the embedded viewer renders offline.
+
+The six `signal_*3d` scene blocks (`SignalWorld3D`, `SignalActor3D`,
+`SignalLight3D`, `SignalCamera3D`, `SignalSensor3D`, `SignalCollision3D`) are
+first-class typed blocks: they appear in the signal-flow palette under a **3-D
+Scene** category, the inspector shows their parameters with labels and
+validation (`SignalFlowParamSpec`), and the actor exposes signal-driven
+`translation`/`rotation`/`scale` input ports.
+
+Any *other* untyped block kind still loads as `NodeKind::Unknown` with the
+original `kind` tag preserved on the `FlowNode` (`raw_kind`) so a model
+round-trips without losing blocks or parameters, rendering with its real name
+via `pretty_kind_tag` (not a bare "Unknown Block"); the inspector surfaces its
+stored params as free-form rows. The same fallback covers params present on a
+typed 3-D block that aren't in its curated schema.
+
 ## REPL (`matlabc -repl`)
 
 The live REPL is wired end-to-end. `app/src/process.rs::ReplSession` spawns

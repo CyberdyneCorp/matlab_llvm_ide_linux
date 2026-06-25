@@ -11,10 +11,16 @@ pub enum ExportTarget {
     Cpp,
     Llvm,
     SystemVerilog,
+    /// The mflowLink 3-D scene: `matlabc -emit-mflowlink-babylon` produces a
+    /// self-contained interactive Babylon.js HTML viewer. Unlike the text lanes
+    /// this opens in an embedded 3-D Scene window rather than the editor, so it
+    /// is intentionally excluded from [`ExportTarget::all`].
+    Babylon,
 }
 
 impl ExportTarget {
-    /// Every lane, in menu order.
+    /// Every text-export lane, in menu order. The Babylon lane is excluded — it
+    /// is surfaced through the gated 3-D Scene action, not the Export menu.
     pub fn all() -> [ExportTarget; 6] {
         use ExportTarget::*;
         [Matlab, DumpChart, C, Cpp, Llvm, SystemVerilog]
@@ -29,6 +35,7 @@ impl ExportTarget {
             ExportTarget::Cpp => "-emit-cpp",
             ExportTarget::Llvm => "-emit-llvm",
             ExportTarget::SystemVerilog => "-emit-systemverilog",
+            ExportTarget::Babylon => "-emit-mflowlink-babylon",
         }
     }
 
@@ -42,6 +49,7 @@ impl ExportTarget {
             ExportTarget::Cpp => "cpp",
             ExportTarget::Llvm => "ll",
             ExportTarget::SystemVerilog => "sv",
+            ExportTarget::Babylon => "html",
         }
     }
 
@@ -54,6 +62,7 @@ impl ExportTarget {
             ExportTarget::Cpp => "C++ (.cpp)",
             ExportTarget::Llvm => "LLVM IR (.ll)",
             ExportTarget::SystemVerilog => "SystemVerilog (.sv)",
+            ExportTarget::Babylon => "3-D Scene (.html)",
         }
     }
 }
@@ -85,5 +94,17 @@ mod tests {
 
         // Every lane has a non-empty label.
         assert!(all.iter().all(|t| !t.label().is_empty()));
+    }
+
+    #[test]
+    fn babylon_lane_is_html_and_outside_the_text_export_menu() {
+        // The 3-D scene lane carries the compiler flag and an .html extension,
+        assert_eq!(ExportTarget::Babylon.flag(), "-emit-mflowlink-babylon");
+        assert_eq!(ExportTarget::Babylon.extension(), "html");
+        assert!(!ExportTarget::Babylon.label().is_empty());
+
+        // …but is deliberately not part of the generic text Export menu (it
+        // opens a 3-D Scene window instead of loading text into the editor).
+        assert!(!ExportTarget::all().contains(&ExportTarget::Babylon));
     }
 }

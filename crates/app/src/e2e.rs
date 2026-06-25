@@ -30,6 +30,12 @@ thread_local! {
     static DEBUG_NEXT: RefCell<Option<gtk::Widget>> = const { RefCell::new(None) };
     static DEBUG_CONTINUE: RefCell<Option<gtk::Widget>> = const { RefCell::new(None) };
     static FLOWCHART_PALETTE: RefCell<Option<gtk::Widget>> = const { RefCell::new(None) };
+    static SCENE3D_BUTTON: RefCell<Option<gtk::Widget>> = const { RefCell::new(None) };
+
+    // Records each successful 3-D scene generation: `{count, path}`. The display
+    // (WebView / browser) is suppressed under e2e, so the harness asserts that
+    // the babylon emit produced an HTML rather than on an un-introspectable window.
+    static SCENE3D_GENERATED: RefCell<Option<serde_json::Value>> = const { RefCell::new(None) };
 
     // State probes for surfaces whose view models are not held on `app.vm`
     // (flowchart tabs and the standalone mflowLink / mStateflow windows). Each
@@ -42,6 +48,33 @@ thread_local! {
 /// Record the BLOCKS palette list of the active flowchart tab (drive target).
 pub fn set_flowchart_palette(w: &impl IsA<gtk::Widget>) {
     FLOWCHART_PALETTE.with(|c| *c.borrow_mut() = Some(w.clone().upcast()));
+}
+
+/// Record the flowchart toolbar / mflowLink window 3-D Scene button (drive
+/// target). Only present for models that contain 3-D scene blocks.
+pub fn set_scene3d_button(w: &impl IsA<gtk::Widget>) {
+    SCENE3D_BUTTON.with(|c| *c.borrow_mut() = Some(w.clone().upcast()));
+}
+
+/// Note a successful 3-D scene generation (`{count, path}`). The display step is
+/// suppressed under e2e (see [`is_active`]) so this is the assertable signal.
+pub fn record_scene3d_generated(path: &std::path::Path) {
+    SCENE3D_GENERATED.with(|c| {
+        let mut slot = c.borrow_mut();
+        let count = slot
+            .as_ref()
+            .and_then(|v| v.get("count"))
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0)
+            + 1;
+        *slot = Some(json!({ "count": count, "path": path.to_string_lossy() }));
+    });
+}
+
+/// Whether the e2e state harness is driving the app (env var set at launch).
+/// Used to suppress the 3-D Scene window so the scenario stays deterministic.
+pub fn is_active() -> bool {
+    std::env::var_os("MATFORGE_E2E_STATE").is_some()
 }
 
 /// Publish the active flowchart tab's state (node/edge counts, selection, zoom).
@@ -186,6 +219,8 @@ pub fn install_state_dump(app: Rc<AppState>, path: PathBuf) {
             "debug_next_rect": DEBUG_NEXT.with(|c| c.borrow().as_ref().and_then(rect_in_window)),
             "debug_continue_rect": DEBUG_CONTINUE.with(|c| c.borrow().as_ref().and_then(rect_in_window)),
             "flowchart_palette_rect": FLOWCHART_PALETTE.with(|c| c.borrow().as_ref().and_then(rect_in_window)),
+            "scene3d_button_rect": SCENE3D_BUTTON.with(|c| c.borrow().as_ref().and_then(rect_in_window)),
+            "scene3d_generated": SCENE3D_GENERATED.with(|c| c.borrow().clone()),
             "flowchart": FLOWCHART_PROBE.with(|c| c.borrow().as_ref().map(|f| f())),
             "mflowlink": MFLOWLINK_PROBE.with(|c| c.borrow().as_ref().map(|f| f())),
             "statechart": STATECHART_PROBE.with(|c| c.borrow().as_ref().map(|f| f())),

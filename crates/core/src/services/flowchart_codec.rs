@@ -137,6 +137,49 @@ mod tests {
     }
 
     #[test]
+    fn three_d_scene_and_unknown_blocks_round_trip_losslessly() {
+        // The compiler's signal_*3d scene blocks are typed; a genuinely-unknown
+        // kind still loads (as Unknown) without dropping nodes or losing params,
+        // and the whole document re-saves verbatim.
+        use crate::models::flowchart::NodeKind;
+
+        let json = r#"{
+            "schema":"matforge.flowchart","version":"0.2.0",
+            "flows":[{"id":"f","kind":"program","name":"scene",
+                "nodes":[
+                    {"id":"w","kind":"signal_world3d","data":{"params":{"gravity":"-9.81"}}},
+                    {"id":"a","kind":"signal_actor3d","label":"Cube","data":{"params":{"shape":"box"}}},
+                    {"id":"x","kind":"signal_future_widget","data":{"params":{"foo":"bar"}}},
+                    {"id":"g","kind":"signal_gain"}
+                ],"edges":[]}]
+        }"#;
+
+        let doc = decode_str(json).expect("3-D model should load");
+        let nodes = &doc.flows[0].nodes;
+        assert_eq!(nodes.len(), 4, "no node should be dropped");
+
+        // The 3-D scene blocks are now first-class typed kinds.
+        assert_eq!(nodes[0].kind, NodeKind::SignalWorld3D);
+        assert_eq!(nodes[1].kind, NodeKind::SignalActor3D);
+        // A kind the IDE does not type still loads as Unknown, tag preserved.
+        assert_eq!(nodes[2].kind, NodeKind::Unknown);
+        assert_eq!(nodes[2].kind_tag(), "signal_future_widget");
+        assert_eq!(nodes[3].kind, NodeKind::SignalGain);
+
+        // Re-encode → every kind and param survives verbatim.
+        let encoded = encode_string(&doc).unwrap();
+        assert!(encoded.contains("\"signal_world3d\""));
+        assert!(encoded.contains("\"signal_actor3d\""));
+        assert!(encoded.contains("\"signal_future_widget\""));
+        assert!(encoded.contains("\"shape\""));
+        assert!(!encoded.contains("\"unknown\""));
+
+        // Decoding the re-encoded text yields an identical document (stable).
+        let again = decode_str(&encoded).unwrap();
+        assert_eq!(doc, again);
+    }
+
+    #[test]
     fn decodes_hand_authored_minimal_doc() {
         // Only id + kind on the node; codec fills defaults.
         let json = r#"{

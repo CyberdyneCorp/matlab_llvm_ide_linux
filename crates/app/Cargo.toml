@@ -21,7 +21,10 @@ copyright = "2026, Leonardo Araujo dos Santos"
 extended-description = "GTK4 desktop front-end for the matlab_llvm compiler: editor with syntax highlighting, REPL, flowchart editor, plots, and compile/run integration."
 section = "devel"
 priority = "optional"
-depends = "$auto, libgtk-4-1"
+# libwebkitgtk-6.0-4 is required only when the release is built with the
+# `scene3d` feature (the embedded 3-D Scene viewer). $auto picks it up from the
+# linked binary; it is listed explicitly so a feature build always declares it.
+depends = "$auto, libgtk-4-1, libwebkitgtk-6.0-4"
 assets = [
     ["target/release/matforge", "usr/bin/", "755"],
     ["resources/matforge.desktop", "usr/share/applications/", "644"],
@@ -36,3 +39,18 @@ gtk = { package = "gtk4", version = "0.9", features = ["v4_12"] }
 cairo-rs = { version = "0.20", features = ["png"] }
 serde_json = { workspace = true }
 libc = "0.2"
+# Embedded 3-D Scene viewer (mflowLink Babylon HTML). Optional so the default
+# build needs no WebKitGTK; enable with `--features scene3d` (requires
+# libwebkitgtk-6.0-dev at build time, libwebkitgtk-6.0-4 at run time). Without
+# the feature the 3-D Scene action opens the generated HTML in the system browser.
+# 0.4.x tracks the gtk4 0.9 generation this crate uses (webkit6 0.5+ needs
+# gtk4 0.10/0.11, which conflicts on the `links = "gtk-4"` native library).
+webkit6 = { version = "0.4", optional = true }
+
+[features]
+# On by default so the embedded 3-D Scene viewer works out of the box (the
+# `.deb` depends on libwebkitgtk-6.0-4; see [package.metadata.deb].depends).
+# Build with `--no-default-features` for a minimal build with no WebKitGTK
+# dependency — the 3-D Scene action then opens the scene in the system browser.
+default = ["scene3d"]
+scene3d = ["dep:webkit6"]

@@ -4,6 +4,11 @@ MatForge builds to a single `matforge` binary that needs GTK 4 (`libgtk-4-1`) at
 runtime. The compiler (`matlabc`) is located at runtime via `$MATLABC_PATH` or
 `~/.config/matforge/config.toml`, so it is **not** bundled.
 
+When built with the `scene3d` feature (the embedded 3-D Scene viewer), the binary
+also needs WebKitGTK 6.0 (`libwebkitgtk-6.0-4`) at runtime. Release `.deb` builds
+turn the feature on and declare this dependency; the default build does not link
+WebKitGTK and falls back to opening the scene in the system browser.
+
 ## Local install (no root, recommended for dev)
 
 ```sh
@@ -36,8 +41,9 @@ cargo install cargo-deb     # one-time
 just deb                    # -> target/debian/matforge_<version>_amd64.deb
 ```
 
-Packaging metadata (maintainer, depends on `libgtk-4-1`, asset map) lives in the
-`[package.metadata.deb]` block of `crates/app/Cargo.toml`.
+Packaging metadata (maintainer, depends on `libgtk-4-1` and `libwebkitgtk-6.0-4`,
+asset map) lives in the `[package.metadata.deb]` block of `crates/app/Cargo.toml`.
+Build the release `.deb` with the 3-D viewer via `cargo deb -- --features scene3d`.
 
 ## Flatpak
 

@@ -1,0 +1,113 @@
+{
+  "schema": "matforge.flowchart",
+  "version": "0.1.0",
+  "entry": "ball_ramp",
+  "settings": {
+    "kind": "signal_flow",
+    "solver": {
+      "type": "fixed_step",
+      "algorithm": "ode4",
+      "startTime": 0.0,
+      "stopTime": 5.0,
+      "zeroCrossing": false
+    }
+  },
+  "flows": [
+    {
+      "id": "flow_ramp",
+      "kind": "program",
+      "name": "ball_ramp",
+      "signature": {
+        "inputs": [],
+        "outputs": []
+      },
+      "nodes": [
+        {
+          "id": "world",
+          "kind": "signal_world3d",
+          "label": "",
+          "ports": {
+            "in": [],
+            "out": []
+          },
+          "data": {
+            "params": {
+              "engine": "havok",
+              "gravity": "0,0,-9.81",
+              "output": "ball_ramp.html",
+              "physics": true,
+              "showGround": true,
+              "viewpoint": "9,9,5"
+            }
+          },
+          "ui": {
+            "position": {
+              "x": 40.0,
+              "y": 40.0
+            }
+          }
+        },
+        {
+          "id": "ramp",
+          "kind": "signal_actor3d",
+          "label": "",
+          "ports": {
+            "in": [],
+            "out": []
+          },
+          "data": {
+            "params": {
+              "collisionShape": "box",
+              "color": "0.5,0.45,0.4",
+              "friction": 0.6,
+              "mass": 0.0,
+              "name": "ramp",
+              "physics": true,
+              "restitution": 0.2,
+              "rotation": "0,0.5,0",
+              "shape": "box",
+              "size": "6,4,0.3",
+              "translation": "0,0,1.5"
+            }
+          },
+          "ui": {
+            "position": {
+              "x": 40.0,
+              "y": 136.0
+            }
+          }
+        },
+        {
+          "id": "ball",
+          "kind": "signal_actor3d",
+          "label": "",
+          "ports": {
+            "in": [],
+            "out": []
+          },
+          "data": {
+            "params": {
+              "collisionShape": "sphere",
+              "color": "0.9,0.5,0.2",
+              "friction": 0.4,
+              "mass": 1.0,
+              "name": "ball",
+              "physics": true,
+              "radius": 0.4,
+              "restitution": 0.6,
+              "shape": "sphere",
+              "translation": "-1.5,0,4.0"
+            }
+          },
+          "ui": {
+            "position": {
+              "x": 40.0,
+              "y": 231.3111111111111
+            }
+          }
+        }
+      ],
+      "edges": []
+    }
+  ]
+}

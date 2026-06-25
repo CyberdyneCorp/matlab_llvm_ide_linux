@@ -16,10 +16,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install GTK 4
+      - name: Install GTK 4 + WebKitGTK
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-4-dev pkg-config
+          sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev pkg-config
       - uses: dtolnay/rust-toolchain@1.92.0
         with:
           components: rustfmt, clippy
@@ -40,10 +40,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install GTK 4 + headless X
+      - name: Install GTK 4 + WebKitGTK + headless X
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-4-dev pkg-config xvfb dbus-x11 python3-pip
+          sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev pkg-config xvfb dbus-x11 python3-pip
       - uses: dtolnay/rust-toolchain@1.92.0
       - uses: Swatinem/rust-cache@v2
       - name: Install e2e harness deps

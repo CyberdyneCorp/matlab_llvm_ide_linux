@@ -23,6 +23,7 @@ use matforge_core::models::flowchart::{
 };
 use matforge_core::models::ConsoleLevel;
 use matforge_core::services::codegen::ExportTarget;
+use matforge_core::services::scene3d;
 use matforge_core::viewmodels::flowchart::{ZOOM_MAX, ZOOM_MIN};
 use matforge_core::viewmodels::FlowchartViewModel;
 
@@ -86,6 +87,7 @@ pub fn build_flowchart_view(
                 "matlab_inputs": matlab_inputs,
                 "zoom": fc.zoom.get(),
                 "can_undo": fc.can_undo(),
+                "has_scene3d": fc.document.with(scene3d::document_has_scene3d),
             })
         });
     }
@@ -1194,6 +1196,23 @@ fn build_flow_toolbar(
         }
         bar.append(&sim);
 
+        // 3-D Scene — only for models that carry `signal_*3d` scene blocks.
+        if fc.document.with(scene3d::document_has_scene3d) {
+            let scene = Button::with_label("3-D Scene");
+            scene.add_css_class("mf-tool");
+            scene.set_tooltip_text(Some(
+                "Render the mflowLink 3-D scene (matlabc -emit-mflowlink-babylon)",
+            ));
+            crate::e2e::set_scene3d_button(&scene);
+            let app = app.clone();
+            let fc = fc.clone();
+            let path = path.clone();
+            scene.connect_clicked(move |_| {
+                open_scene3d(&app, &fc, path.as_deref());
+            });
+            bar.append(&scene);
+        }
+
         // Solver settings (settings.solver) — drives `matlabc -simulate`.
         let solver = Button::with_label("Solver…");
         solver.add_css_class("mf-tool");
@@ -1710,7 +1729,11 @@ fn build_inspector_body(app: &Rc<AppState>, fc: &Rc<FlowchartViewModel>) -> Scro
             };
             let Some(node) = fc.node(&id) else { return };
 
-            let title = Label::new(Some(node.kind.display_name()));
+            // Untyped blocks (e.g. `signal_*3d`) show their real kind name.
+            let title_text = node
+                .unknown_title()
+                .unwrap_or_else(|| node.kind.display_name().to_string());
+            let title = Label::new(Some(&title_text));
             title.add_css_class("mf-empty-title");
             title.set_halign(gtk::Align::Start);
             body.append(&title);
@@ -2485,8 +2508,29 @@ fn node_fields(node: &FlowNode) -> Vec<(String, FieldKey)> {
             fields.push(s("on event  (one EVENT: code per line)", FieldKey::OnEvent));
         }
         kind if kind.is_signal_flow() => {
-            for spec in SignalFlowParamSpec::fields(kind) {
+            let specs = SignalFlowParamSpec::fields(kind);
+            let known: std::collections::HashSet<&str> = specs.iter().map(|sp| sp.key).collect();
+            for spec in &specs {
                 fields.push(s(spec.label, FieldKey::Param(spec.key.to_string())));
+            }
+            // Also surface any extra params the model carries that the schema
+            // doesn't list (e.g. less-common signal_*3d params like
+            // collisionShape / friction / emissive / urdf), keyed by raw name.
+            if let Some(params) = &node.data.params {
+                for key in params.keys() {
+                    if !known.contains(key.as_str()) {
+                        fields.push(s(key, FieldKey::Param(key.clone())));
+                    }
+                }
+            }
+        }
+        // Truly untyped blocks: surface whatever params the model carries as
+        // free-form editable rows keyed by their raw name.
+        Unknown => {
+            if let Some(params) = &node.data.params {
+                for key in params.keys() {
+                    fields.push(s(key, FieldKey::Param(key.clone())));
+                }
             }
         }
         _ => {}
@@ -2786,6 +2830,88 @@ pub(crate) fn emit_artifact(
     }
 }
 
+/// Generate the mflowLink 3-D scene (`matlabc -emit-mflowlink-babylon`) and open
+/// it in the interactive 3-D Scene window. The compiler writes a self-contained
+/// Babylon.js HTML; we hand it to [`crate::scene3d_window::open`]. Returns the
+/// generated HTML path, or `None` on any failure (logged to the console).
+///
+/// Set `MATFORGE_BABYLON_INLINE=<bundle.js>` to inline a Babylon runtime so the
+/// embedded WebView renders with no network access.
+pub(crate) fn open_scene3d(
+    app: &Rc<AppState>,
+    fc: &Rc<FlowchartViewModel>,
+    path: Option<&Path>,
+) -> Option<PathBuf> {
+    let mflow = persist_for_codegen(app, fc, path)?;
+    render_scene3d_from_path(app, &mflow)
+}
+
+/// Generate and open the 3-D scene for an on-disk `.mflow` that is already
+/// current (the mflowLink window persists its model before calling this).
+pub(crate) fn render_scene3d_from_path(app: &Rc<AppState>, mflow: &Path) -> Option<PathBuf> {
+    if !app.settings.matlabc_path.exists() {
+        app.vm.console.log(
+            ConsoleLevel::Error,
+            "matlabc not found — cannot render 3-D scene",
+        );
+        return None;
+    }
+    let html = mflow.with_extension("scene.html");
+    app.vm.status_bar.set_message("Rendering 3-D scene…");
+
+    let mut cmd = Command::new(&app.settings.matlabc_path);
+    cmd.arg(ExportTarget::Babylon.flag())
+        .arg(mflow)
+        .arg("-o")
+        .arg(&html);
+    if let Ok(bundle) = std::env::var("MATFORGE_BABYLON_INLINE") {
+        if !bundle.is_empty() {
+            cmd.arg("--babylon-inline").arg(bundle);
+        }
+    }
+
+    match cmd.output() {
+        Ok(o) if o.status.success() => {
+            // Some lanes write to stdout rather than `-o`; cover both so the
+            // viewer always has a file to load.
+            if !html.exists() && !o.stdout.is_empty() {
+                if let Err(e) = std::fs::write(&html, &o.stdout) {
+                    app.vm
+                        .console
+                        .log(ConsoleLevel::Error, format!("write scene HTML failed: {e}"));
+                    return None;
+                }
+            }
+            if !html.exists() {
+                app.vm
+                    .console
+                    .log(ConsoleLevel::Error, "matlabc produced no 3-D scene output");
+                return None;
+            }
+            crate::e2e::record_scene3d_generated(&html);
+            // Under the e2e harness the window/browser is suppressed: the test
+            // asserts the scene was generated, not on an un-introspectable view.
+            if !crate::e2e::is_active() {
+                crate::scene3d_window::open(app, &html);
+            }
+            Some(html)
+        }
+        Ok(o) => {
+            for line in String::from_utf8_lossy(&o.stderr).lines() {
+                app.vm.console.log(ConsoleLevel::Error, line.to_string());
+            }
+            app.vm.status_bar.set_message("3-D scene generation failed");
+            None
+        }
+        Err(e) => {
+            app.vm
+                .console
+                .log(ConsoleLevel::Error, format!("matlabc: {e}"));
+            None
+        }
+    }
+}
+
 /// Run `matlabc -emit-matlab` and return the generated source as text (for the
 /// live preview pane). Does not write or open anything; `Err` carries a short
 /// message to show in the pane.
@@ -2806,5 +2932,39 @@ fn preview_matlab(
         Ok(o) if o.status.success() => Ok(String::from_utf8_lossy(&o.stdout).into_owned()),
         Ok(o) => Err(String::from_utf8_lossy(&o.stderr).into_owned()),
         Err(e) => Err(format!("matlabc: {e}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{node_fields, FieldKey};
+    use matforge_core::services::flowchart_codec;
+
+    #[test]
+    fn untyped_3d_block_exposes_its_params_as_editable_fields() {
+        // A model with an untyped signal_actor3d carrying params. The inspector
+        // must surface each param as an editable row so it can be read/changed.
+        let json = r#"{
+            "schema":"matforge.flowchart","version":"0.2.0",
+            "flows":[{"id":"f","kind":"program","name":"scene","edges":[],
+                "nodes":[{"id":"a","kind":"signal_actor3d",
+                    "data":{"params":{"shape":"box","color":"1,0,0","size":"2,1,1"}}}]}]
+        }"#;
+        let doc = flowchart_codec::decode_str(json).unwrap();
+        let node = &doc.flows[0].nodes[0];
+
+        let fields = node_fields(node);
+        // Label row first, then one Param row per stored param.
+        assert!(matches!(fields[0].1, FieldKey::Label));
+        let param_keys: Vec<&str> = fields
+            .iter()
+            .filter_map(|(_, k)| match k {
+                FieldKey::Param(p) => Some(p.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(param_keys.contains(&"shape"), "params: {param_keys:?}");
+        assert!(param_keys.contains(&"color"), "params: {param_keys:?}");
+        assert!(param_keys.contains(&"size"), "params: {param_keys:?}");
     }
 }
