@@ -2512,6 +2512,16 @@ fn node_fields(node: &FlowNode) -> Vec<(String, FieldKey)> {
                 fields.push(s(spec.label, FieldKey::Param(spec.key.to_string())));
             }
         }
+        // Untyped blocks (e.g. the compiler's `signal_*3d` scene blocks) have no
+        // param schema in the IDE, so surface whatever params the model carries
+        // as free-form editable rows keyed by their raw name.
+        Unknown => {
+            if let Some(params) = &node.data.params {
+                for key in params.keys() {
+                    fields.push(s(key, FieldKey::Param(key.clone())));
+                }
+            }
+        }
         _ => {}
     }
     fields
@@ -2911,5 +2921,39 @@ fn preview_matlab(
         Ok(o) if o.status.success() => Ok(String::from_utf8_lossy(&o.stdout).into_owned()),
         Ok(o) => Err(String::from_utf8_lossy(&o.stderr).into_owned()),
         Err(e) => Err(format!("matlabc: {e}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{node_fields, FieldKey};
+    use matforge_core::services::flowchart_codec;
+
+    #[test]
+    fn untyped_3d_block_exposes_its_params_as_editable_fields() {
+        // A model with an untyped signal_actor3d carrying params. The inspector
+        // must surface each param as an editable row so it can be read/changed.
+        let json = r#"{
+            "schema":"matforge.flowchart","version":"0.2.0",
+            "flows":[{"id":"f","kind":"program","name":"scene","edges":[],
+                "nodes":[{"id":"a","kind":"signal_actor3d",
+                    "data":{"params":{"shape":"box","color":"1,0,0","size":"2,1,1"}}}]}]
+        }"#;
+        let doc = flowchart_codec::decode_str(json).unwrap();
+        let node = &doc.flows[0].nodes[0];
+
+        let fields = node_fields(node);
+        // Label row first, then one Param row per stored param.
+        assert!(matches!(fields[0].1, FieldKey::Label));
+        let param_keys: Vec<&str> = fields
+            .iter()
+            .filter_map(|(_, k)| match k {
+                FieldKey::Param(p) => Some(p.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(param_keys.contains(&"shape"), "params: {param_keys:?}");
+        assert!(param_keys.contains(&"color"), "params: {param_keys:?}");
+        assert!(param_keys.contains(&"size"), "params: {param_keys:?}");
     }
 }
