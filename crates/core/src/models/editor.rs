@@ -102,6 +102,18 @@ impl EditorTab {
             true
         }
     }
+
+    /// Set (or replace) the breakpoint config at `line`, creating the breakpoint
+    /// if it does not exist. Used by the breakpoint editor to author a
+    /// condition / log message / hit count.
+    pub fn set_breakpoint_config(&mut self, line: usize, cfg: BreakpointConfig) {
+        self.breakpoints.insert(line, cfg);
+    }
+
+    /// Remove the breakpoint at `line` if present.
+    pub fn remove_breakpoint(&mut self, line: usize) {
+        self.breakpoints.remove(&line);
+    }
 }
 
 #[cfg(test)]
@@ -123,6 +135,24 @@ mod tests {
         assert!(t.breakpoints.contains_key(&3));
         assert!(!t.toggle_breakpoint(3));
         assert!(t.breakpoints.is_empty());
+    }
+
+    #[test]
+    fn set_breakpoint_config_creates_and_replaces() {
+        let mut t = EditorTab::text("a.m", "Matlab", "");
+        // Authoring on a line with no breakpoint creates a conditional one.
+        t.set_breakpoint_config(
+            5,
+            BreakpointConfig {
+                condition: Some("k==3".into()),
+                ..Default::default()
+            },
+        );
+        assert!(t.breakpoints[&5].is_conditional());
+        // Re-applying replaces the config (e.g. clearing back to plain).
+        t.set_breakpoint_config(5, BreakpointConfig::plain());
+        assert!(t.breakpoints.contains_key(&5));
+        assert!(!t.breakpoints[&5].is_conditional());
     }
 
     #[test]

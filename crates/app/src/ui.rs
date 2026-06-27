@@ -1844,16 +1844,43 @@ fn build_debug_panel(app: &Rc<AppState>) -> ScrolledWindow {
         app.clone().vm.editor.tabs.bind(move |tabs| {
             clear_list(&bp_list);
             for t in tabs {
-                for line in t.breakpoints.keys() {
-                    let btn = Button::with_label(&format!("● {}:{}", t.name, line));
+                for (line, cfg) in &t.breakpoints {
+                    let row = GtkBox::new(Orientation::Horizontal, 4);
+                    row.set_margin_start(8);
+                    // ◆ marks a conditional/log/hit breakpoint; ● a plain one.
+                    let plain = !cfg.is_conditional() && !cfg.is_log_point() && !cfg.has_hit_count();
+                    let glyph = if plain { "●" } else { "◆" };
+                    let detail = cfg
+                        .condition
+                        .as_deref()
+                        .map(|c| format!("  if {c}"))
+                        .or_else(|| cfg.hit_condition.as_deref().map(|h| format!("  hits {h}")))
+                        .or_else(|| cfg.log_message.as_deref().map(|_| "  log".to_string()))
+                        .unwrap_or_default();
+                    let btn = Button::with_label(&format!("{glyph} {}:{}{}", t.name, line, detail));
                     btn.set_has_frame(false);
                     btn.set_halign(gtk::Align::Start);
+                    btn.set_hexpand(true);
                     btn.add_css_class("mf-row");
-                    let app = app.clone();
                     let id = t.id;
                     let line = *line;
-                    btn.connect_clicked(move |_| app.vm.editor.request_goto(id, line));
-                    bp_list.append(&btn);
+                    {
+                        let app = app.clone();
+                        btn.connect_clicked(move |_| app.vm.editor.request_goto(id, line));
+                    }
+                    let edit = Button::with_label("⋯");
+                    edit.set_has_frame(false);
+                    edit.add_css_class("mf-header-action");
+                    edit.set_tooltip_text(Some("Edit condition / log / hit count"));
+                    {
+                        let app = app.clone();
+                        edit.connect_clicked(move |b| {
+                            open_breakpoint_editor(&app, b, None, id, line);
+                        });
+                    }
+                    row.append(&btn);
+                    row.append(&edit);
+                    bp_list.append(&row);
                 }
             }
         });
@@ -1898,21 +1925,44 @@ fn build_debug_panel(app: &Rc<AppState>) -> ScrolledWindow {
         }
     });
 
-    // Locals.
+    // Locals — each row's value is editable: Enter sends `setVariable`.
     panel.append(&sub_header("LOCALS"));
     let locals_list = ListBox::new();
     panel.append(&locals_list);
-    app.vm.debug.locals.bind(move |locals| {
-        clear_list(&locals_list);
-        for v in locals {
-            let ty = v
-                .type_hint
-                .as_deref()
-                .map(|t| format!("  [{t}]"))
-                .unwrap_or_default();
-            locals_list.append(&row_label(&format!("{} = {}{}", v.name, v.value, ty)));
-        }
-    });
+    {
+        let app = app.clone();
+        app.clone().vm.debug.locals.bind(move |locals| {
+            clear_list(&locals_list);
+            for v in locals {
+                let row = GtkBox::new(Orientation::Horizontal, 4);
+                row.set_margin_start(8);
+                row.set_margin_end(8);
+                let name = Label::new(Some(&format!("{} =", v.name)));
+                name.set_halign(gtk::Align::Start);
+                let value = Entry::new();
+                value.set_text(&v.value);
+                value.set_hexpand(true);
+                if let Some(t) = v.type_hint.as_deref() {
+                    value.set_tooltip_text(Some(t));
+                }
+                // Expandable (struct/object/array) locals aren't settable as a
+                // scalar value — show them read-only.
+                if v.is_expandable() {
+                    value.set_editable(false);
+                    value.set_can_focus(false);
+                } else {
+                    let app = app.clone();
+                    let var_name = v.name.clone();
+                    value.connect_activate(move |e| {
+                        app.set_debug_variable(&var_name, e.text().trim());
+                    });
+                }
+                row.append(&name);
+                row.append(&value);
+                locals_list.append(&row);
+            }
+        });
+    }
 
     // Watch.
     panel.append(&sub_header("WATCH"));
@@ -3882,6 +3932,103 @@ pub fn main_window() -> Option<ApplicationWindow> {
 }
 
 /// Attach a right-click "Plot As…" / Inspect menu to a workspace variable row.
+/// Open the breakpoint editor popover for `line` on tab `tab_id`, anchored to
+/// `parent` (optionally pointing at `point` within it). Lets the user author the
+/// breakpoint's condition / log message / hit count, or remove it.
+pub(crate) fn open_breakpoint_editor(
+    app: &Rc<AppState>,
+    parent: &impl IsA<gtk::Widget>,
+    point: Option<(f64, f64)>,
+    tab_id: u64,
+    line: usize,
+) {
+    use matforge_core::models::BreakpointConfig;
+
+    let cur = app
+        .vm
+        .editor
+        .tabs
+        .with(|tabs| {
+            tabs.iter()
+                .find(|t| t.id == tab_id)
+                .and_then(|t| t.breakpoints.get(&line).cloned())
+        })
+        .unwrap_or_default();
+
+    let pop = gtk::Popover::new();
+    pop.set_parent(parent);
+    if let Some((x, y)) = point {
+        pop.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+    }
+    let menu = GtkBox::new(Orientation::Vertical, 6);
+    menu.set_margin_top(8);
+    menu.set_margin_bottom(8);
+    menu.set_margin_start(8);
+    menu.set_margin_end(8);
+
+    let title = Label::new(Some(&format!("Breakpoint — line {line}")));
+    title.add_css_class("mf-panel-header");
+    title.set_halign(gtk::Align::Start);
+    menu.append(&title);
+
+    let field = |placeholder: &str, value: Option<&str>| -> Entry {
+        let e = Entry::new();
+        e.set_placeholder_text(Some(placeholder));
+        e.set_width_chars(28);
+        if let Some(v) = value {
+            e.set_text(v);
+        }
+        e
+    };
+    let cond = field("Condition — e.g. x > 3", cur.condition.as_deref());
+    let logm = field("Log message — printed, no pause", cur.log_message.as_deref());
+    let hit = field("Hit count — e.g. >= 3", cur.hit_condition.as_deref());
+    menu.append(&cond);
+    menu.append(&logm);
+    menu.append(&hit);
+
+    let buttons = GtkBox::new(Orientation::Horizontal, 6);
+    let apply = Button::with_label("Apply");
+    apply.add_css_class("mf-run");
+    let remove = Button::with_label("Remove");
+    remove.add_css_class("mf-stop");
+    buttons.append(&apply);
+    buttons.append(&remove);
+    menu.append(&buttons);
+
+    let opt = |e: &Entry| -> Option<String> {
+        let t = e.text().to_string();
+        let t = t.trim();
+        (!t.is_empty()).then(|| t.to_string())
+    };
+    {
+        let app = app.clone();
+        let pop = pop.clone();
+        let (cond, logm, hit) = (cond.clone(), logm.clone(), hit.clone());
+        apply.connect_clicked(move |_| {
+            let cfg = BreakpointConfig {
+                condition: opt(&cond),
+                log_message: opt(&logm),
+                hit_condition: opt(&hit),
+            };
+            app.vm.editor.set_breakpoint_config(tab_id, line, cfg);
+            app.refresh_breakpoints();
+            pop.popdown();
+        });
+    }
+    {
+        let app = app.clone();
+        let pop = pop.clone();
+        remove.connect_clicked(move |_| {
+            app.vm.editor.remove_breakpoint(tab_id, line);
+            app.refresh_breakpoints();
+            pop.popdown();
+        });
+    }
+    pop.set_child(Some(&menu));
+    pop.popup();
+}
+
 fn attach_var_menu(btn: &Button, app: &Rc<AppState>, name: &str) {
     use matforge_core::models::PlotKind;
     let pop = gtk::Popover::new();

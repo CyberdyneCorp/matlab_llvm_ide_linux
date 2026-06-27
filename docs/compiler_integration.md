@@ -127,7 +127,11 @@ machine (idle → launching → running → paused → terminated). The transpor
 → configurationDone`, then on `stopped` fetches `stackTrace → scopes → variables`
 to populate the call stack, locals, and the editor's execution-line marker.
 Stepping (continue/pause/next/stepIn/stepOut/stepBack) and gutter-click
-breakpoints are all wired.
+breakpoints are all wired. Right-clicking the gutter (or the Breakpoints list's
+⋯ button) opens a breakpoint editor for the line's **condition / log message /
+hit count**, re-sent on `setBreakpoints`. Locals are **editable**: committing a
+value sends `setVariable` against the frame's Locals scope and the panel
+re-reads the frame's variables.
 
 > **Status:** the `matlabc -dap` adapter is functional. The earlier
 > segfault-before-`stopped` blocker is resolved — the compiler's own DAP scenario
