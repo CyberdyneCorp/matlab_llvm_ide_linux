@@ -26,6 +26,9 @@ pub struct AppState {
     dbg_file: RefCell<Option<PathBuf>>,
     /// Pending watch evaluations: DAP request seq → expression.
     dbg_watch_pending: RefCell<HashMap<i64, String>>,
+    /// The current frame's Locals scope `variablesReference`, captured from the
+    /// last `scopes` response — the container `setVariable` edits against.
+    dbg_locals_ref: RefCell<Option<i64>>,
 }
 
 impl AppState {
@@ -39,6 +42,7 @@ impl AppState {
             dbg_thread: RefCell::new(1),
             dbg_file: RefCell::new(None),
             dbg_watch_pending: RefCell::new(HashMap::new()),
+            dbg_locals_ref: RefCell::new(None),
         })
     }
 
@@ -259,6 +263,21 @@ impl AppState {
         }
     }
 
+    /// Edit a local variable while paused: send `setVariable` against the current
+    /// frame's Locals scope. The panel refreshes from the adapter's response.
+    pub fn set_debug_variable(self: &Rc<Self>, name: &str, value: &str) {
+        let Some(reference) = *self.dbg_locals_ref.borrow() else {
+            self.vm
+                .console
+                .log(ConsoleLevel::Warning, "Not paused — can't set a variable");
+            return;
+        };
+        self.send_request(
+            "setVariable",
+            Some(json!({ "variablesReference": reference, "name": name, "value": value })),
+        );
+    }
+
     /// Tear down any running debug session.
     pub fn stop_debug(self: &Rc<Self>) {
         if self.dap.borrow().is_some() {
@@ -269,6 +288,7 @@ impl AppState {
         self.vm.editor.clear_execution_lines();
         self.vm.toolbar.is_debugging.set(false);
         self.vm.workspace.live.set(false);
+        *self.dbg_locals_ref.borrow_mut() = None;
     }
 
     /// Re-send the active tab's breakpoints if a debug session is live.
@@ -401,8 +421,13 @@ impl AppState {
                 }
             }
             "scopes" => match locals_reference(body) {
-                Some(r) => self.send_request("variables", Some(json!({ "variablesReference": r }))),
+                Some(r) => {
+                    // Remember the Locals container so `setVariable` can edit it.
+                    *self.dbg_locals_ref.borrow_mut() = Some(r);
+                    self.send_request("variables", Some(json!({ "variablesReference": r })));
+                }
                 None => {
+                    *self.dbg_locals_ref.borrow_mut() = None;
                     let frames = self.dbg_frames.borrow().clone();
                     self.vm.debug.on_stopped(frames, vec![]);
                 }
@@ -432,6 +457,13 @@ impl AppState {
                     .set_message(format!("Paused on error: {}", exc.message));
                 self.vm.debug.set_exception(exc);
             }
+            "setVariable" => {
+                // The adapter applied the edit; re-read the frame's locals so the
+                // panel + Workspace mirror show the new value.
+                if let Some(r) = *self.dbg_locals_ref.borrow() {
+                    self.send_request("variables", Some(json!({ "variablesReference": r })));
+                }
+            }
             _ => {}
         }
     }
@@ -458,6 +490,8 @@ impl AppState {
             "continued" => {
                 self.vm.debug.on_running();
                 self.vm.editor.clear_execution_lines();
+                // The frame is gone; its Locals reference no longer applies.
+                *self.dbg_locals_ref.borrow_mut() = None;
             }
             "output" => {
                 if let Some(text) = body.get("output").and_then(Value::as_str) {

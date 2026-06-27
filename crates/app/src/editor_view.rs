@@ -181,6 +181,23 @@ pub fn build_code_view(
     }
     gutter.add_controller(click);
 
+    // Right-click the gutter to author a breakpoint's condition / log / hit count
+    // at the clicked line (creating it if absent).
+    let rclick = gtk::GestureClick::new();
+    rclick.set_button(gtk::gdk::BUTTON_SECONDARY);
+    {
+        let view = view.clone();
+        let app = app.clone();
+        let gutter4 = gutter.clone();
+        rclick.connect_released(move |_g, _n, x, y| {
+            let (_, by) = view.window_to_buffer_coords(TextWindowType::Widget, 0, y as i32);
+            let (iter, _) = view.line_at_y(by);
+            let line = iter.line() as usize + 1;
+            crate::ui::open_breakpoint_editor(&app, &gutter4, Some((x, y)), tab_id, line);
+        });
+    }
+    gutter.add_controller(rclick);
+
     // F9 toggles a breakpoint at the cursor line; Tab completes the identifier
     // under the cursor (MATLAB code) — falling back to a literal tab off a word.
     let keys = gtk::EventControllerKey::new();

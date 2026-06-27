@@ -142,6 +142,22 @@ impl EditorViewModel {
         });
     }
 
+    /// Set (or replace) the breakpoint config at `line` on tab `id`, creating
+    /// the breakpoint if absent (the breakpoint editor's apply path).
+    pub fn set_breakpoint_config(
+        &self,
+        id: u64,
+        line: usize,
+        cfg: crate::models::BreakpointConfig,
+    ) {
+        self.mutate(id, |t| t.set_breakpoint_config(line, cfg));
+    }
+
+    /// Remove the breakpoint at `line` on tab `id`, if present.
+    pub fn remove_breakpoint(&self, id: u64, line: usize) {
+        self.mutate(id, |t| t.remove_breakpoint(line));
+    }
+
     /// Set the paused execution line on `id` and clear it on every other tab.
     pub fn set_execution_line(&self, id: u64, line: Option<usize>) {
         self.tabs.update(|tabs| {
@@ -290,6 +306,24 @@ mod tests {
         vm.toggle_breakpoint(id, 3);
         assert!(vm.active_tab().unwrap().breakpoints.contains_key(&3));
         vm.toggle_breakpoint(id, 3);
+        assert!(vm.active_tab().unwrap().breakpoints.is_empty());
+    }
+
+    #[test]
+    fn set_and_remove_breakpoint_config_on_tab() {
+        use crate::models::BreakpointConfig;
+        let vm = EditorViewModel::new();
+        let id = vm.open_text("a", "Matlab", "");
+        vm.set_breakpoint_config(
+            id,
+            7,
+            BreakpointConfig {
+                condition: Some("i == 2".into()),
+                ..Default::default()
+            },
+        );
+        assert!(vm.active_tab().unwrap().breakpoints[&7].is_conditional());
+        vm.remove_breakpoint(id, 7);
         assert!(vm.active_tab().unwrap().breakpoints.is_empty());
     }
 
