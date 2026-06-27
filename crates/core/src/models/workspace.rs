@@ -138,6 +138,23 @@ impl MatrixView {
         }
         Some((lo, hi))
     }
+
+    /// True when this matrix has the shape of a `sim3d.capture` trajectory:
+    /// `N`-by-(≥4) `[t, x, y, z, …]` with at least two frames (matlab_llvm #420).
+    pub fn is_capture_trajectory(&self) -> bool {
+        self.rows >= 2 && self.cols >= 4
+    }
+
+    /// The X–Y ground track of a capture trajectory: columns `x` (index 1) and
+    /// `y` (index 2) as `(xs, ys)`. `None` if the matrix is not capture-shaped.
+    pub fn capture_trajectory_xy(&self) -> Option<(Vec<f64>, Vec<f64>)> {
+        if !self.is_capture_trajectory() {
+            return None;
+        }
+        let xs = self.cells.iter().map(|r| r[1]).collect();
+        let ys = self.cells.iter().map(|r| r[2]).collect();
+        Some((xs, ys))
+    }
 }
 
 /// One row in the structured Variable Inspector (struct/object field).
@@ -247,6 +264,34 @@ mod tests {
     fn matrix_range_ignores_non_finite() {
         let m = MatrixView::new("M", vec![vec![f64::NAN, 5.0, f64::INFINITY, 1.0]]);
         assert_eq!(m.value_range(), Some((1.0, 5.0)));
+    }
+
+    #[test]
+    fn capture_trajectory_extracts_xy_columns() {
+        // sim3d.capture shape: [t, x, y, z, rx, ry, rz].
+        let m = MatrixView::new(
+            "traj",
+            vec![
+                vec![0.0, 1.0, 2.0, 3.0, 0.0, 0.0, 0.0],
+                vec![0.1, 4.0, 5.0, 6.0, 0.0, 0.0, 0.0],
+            ],
+        );
+        assert!(m.is_capture_trajectory());
+        assert_eq!(
+            m.capture_trajectory_xy(),
+            Some((vec![1.0, 4.0], vec![2.0, 5.0]))
+        );
+    }
+
+    #[test]
+    fn non_capture_shapes_have_no_trajectory() {
+        // Too few columns (not [t,x,y,z,…]).
+        let thin = MatrixView::new("v", vec![vec![1.0, 2.0], vec![3.0, 4.0]]);
+        assert!(!thin.is_capture_trajectory());
+        assert_eq!(thin.capture_trajectory_xy(), None);
+        // Single frame.
+        let one = MatrixView::new("one", vec![vec![0.0, 1.0, 2.0, 3.0]]);
+        assert!(!one.is_capture_trajectory());
     }
 
     #[test]

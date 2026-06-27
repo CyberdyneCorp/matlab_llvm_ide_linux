@@ -142,6 +142,14 @@ impl AppState {
         self.inspect_variable(name);
     }
 
+    /// Plot a named workspace variable as a sim3d.capture trajectory (X–Y ground
+    /// track). Captures the value over the REPL; the figure is created when it
+    /// arrives, if the value is a capture-shaped matrix (matlab_llvm #420).
+    pub fn plot_variable_trajectory(self: &Rc<Self>, name: &str) {
+        self.vm.request_trajectory_plot(name);
+        self.inspect_variable(name);
+    }
+
     /// Plot the currently inspected workspace variable as a line series.
     pub fn plot_inspected(self: &Rc<Self>) {
         use matforge_core::models::{PlotFigure, PlotKind};
