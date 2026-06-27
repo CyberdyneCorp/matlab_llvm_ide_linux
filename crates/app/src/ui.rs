@@ -1859,6 +1859,33 @@ fn build_debug_panel(app: &Rc<AppState>) -> ScrolledWindow {
         });
     }
 
+    // Exception banner — shown only while paused on an uncaught error()
+    // (matlab_llvm #404/#405). Hidden otherwise.
+    let exc_label = Label::new(None);
+    exc_label.add_css_class("mf-log-error");
+    exc_label.set_halign(gtk::Align::Start);
+    exc_label.set_xalign(0.0);
+    exc_label.set_wrap(true);
+    exc_label.set_selectable(true);
+    exc_label.set_margin_start(8);
+    exc_label.set_margin_end(8);
+    exc_label.set_margin_top(4);
+    exc_label.set_margin_bottom(4);
+    exc_label.set_visible(false);
+    panel.append(&exc_label);
+    app.vm.debug.last_exception.bind(move |exc| match exc {
+        Some(e) => {
+            let id = if e.exception_id.is_empty() {
+                String::new()
+            } else {
+                format!(" [{}]", e.exception_id)
+            };
+            exc_label.set_text(&format!("⛔ {}{id}", e.message));
+            exc_label.set_visible(true);
+        }
+        None => exc_label.set_visible(false),
+    });
+
     // Call stack.
     panel.append(&sub_header("CALL STACK"));
     let stack_list = ListBox::new();

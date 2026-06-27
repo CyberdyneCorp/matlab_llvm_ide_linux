@@ -418,6 +418,20 @@ impl AppState {
                 self.vm.workspace.set_from_debug_locals(&locals);
                 self.vm.debug.on_stopped(frames, locals);
             }
+            "exceptionInfo" => {
+                let exc = parse_exception_info(body);
+                self.vm.console.log(
+                    ConsoleLevel::Error,
+                    match &exc.exception_id {
+                        id if id.is_empty() => exc.message.clone(),
+                        id => format!("{id}: {}", exc.message),
+                    },
+                );
+                self.vm
+                    .status_bar
+                    .set_message(format!("Paused on error: {}", exc.message));
+                self.vm.debug.set_exception(exc);
+            }
             _ => {}
         }
     }
@@ -431,6 +445,14 @@ impl AppState {
             "stopped" => {
                 let tid = body.get("threadId").and_then(Value::as_i64).unwrap_or(1);
                 *self.dbg_thread.borrow_mut() = tid;
+                // An exception stop (the run hit an uncaught `error()` with the
+                // "error" exception filter armed) carries why in a follow-up
+                // `exceptionInfo`; a normal stop clears any prior exception.
+                if body.get("reason").and_then(Value::as_str) == Some("exception") {
+                    self.send_request("exceptionInfo", Some(json!({ "threadId": tid })));
+                } else {
+                    self.vm.debug.last_exception.set(None);
+                }
                 self.send_request("stackTrace", Some(json!({ "threadId": tid })));
             }
             "continued" => {
@@ -548,6 +570,22 @@ fn locals_reference(body: &Value) -> Option<i64> {
         .filter(|r| *r != 0)
 }
 
+/// Parse an `exceptionInfo` response body into a [`DapException`]. The message
+/// prefers `details.message`, falling back to the top-level `description`.
+fn parse_exception_info(body: &Value) -> matforge_core::models::DapException {
+    let str_at = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).map(str::to_string);
+    let details = body.get("details");
+    let message = details
+        .and_then(|d| str_at(d, "message"))
+        .or_else(|| str_at(body, "description"))
+        .unwrap_or_default();
+    matforge_core::models::DapException {
+        exception_id: str_at(body, "exceptionId").unwrap_or_default(),
+        message,
+        stack_trace: details.and_then(|d| str_at(d, "stackTrace")),
+    }
+}
+
 fn parse_variables(body: &Value) -> Vec<DapVariable> {
     body.get("variables")
         .and_then(Value::as_array)
@@ -575,4 +613,32 @@ fn parse_variables(body: &Value) -> Vec<DapVariable> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_exception_info;
+    use serde_json::json;
+
+    #[test]
+    fn exception_info_prefers_details_message() {
+        let body = json!({
+            "exceptionId": "matlab.error",
+            "description": "top-level desc",
+            "breakMode": "always",
+            "details": { "message": "Undefined function 'foo'", "stackTrace": "  at f (a.m:3)\n" }
+        });
+        let exc = parse_exception_info(&body);
+        assert_eq!(exc.exception_id, "matlab.error");
+        assert_eq!(exc.message, "Undefined function 'foo'");
+        assert_eq!(exc.stack_trace.as_deref(), Some("  at f (a.m:3)\n"));
+    }
+
+    #[test]
+    fn exception_info_falls_back_to_description() {
+        let body = json!({ "exceptionId": "matlab.error", "description": "just a desc" });
+        let exc = parse_exception_info(&body);
+        assert_eq!(exc.message, "just a desc");
+        assert!(exc.stack_trace.is_none());
+    }
 }

@@ -159,6 +159,29 @@ impl DapEvaluation {
     }
 }
 
+/// The exception the debugger paused on (`stopped` reason `"exception"` +
+/// the `exceptionInfo` response). Surfaces the MATLAB `error()` identifier and
+/// message (matlab_llvm #404/#405) so the IDE can show why the run stopped.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DapException {
+    /// The DAP `exceptionId` (e.g. `"matlab.error"`).
+    pub exception_id: String,
+    /// Human-readable error message (the `description` / `details.message`).
+    pub message: String,
+    /// Optional formatted backtrace text from `details.stackTrace`.
+    pub stack_trace: Option<String>,
+}
+
+impl DapException {
+    pub fn new(exception_id: impl Into<String>, message: impl Into<String>) -> DapException {
+        DapException {
+            exception_id: exception_id.into(),
+            message: message.into(),
+            stack_trace: None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

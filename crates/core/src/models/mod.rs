@@ -17,8 +17,8 @@ mod workspace;
 pub use compiler::{CompilerTarget, NumericMode, OptimizationProfile};
 pub use console::{ConsoleLevel, ConsoleMessage, ConsoleTab};
 pub use debug::{
-    DapEvaluation, DapStackFrame, DapVariable, DataAccess, DataBreakpoint, ExceptionFilter,
-    FunctionBreakpoint,
+    DapEvaluation, DapException, DapStackFrame, DapVariable, DataAccess, DataBreakpoint,
+    ExceptionFilter, FunctionBreakpoint,
 };
 pub use editor::{BreakpointConfig, EditorTab, TabKind};
 pub use ids::next_id;

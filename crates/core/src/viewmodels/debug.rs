@@ -4,7 +4,7 @@
 //! itself lives in the app; this VM is driven by decoded DAP events and is
 //! tested by feeding those events directly.
 
-use crate::models::{DapEvaluation, DapStackFrame, DapVariable};
+use crate::models::{DapEvaluation, DapException, DapStackFrame, DapVariable};
 use crate::observable::Property;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -25,6 +25,10 @@ pub struct DebugViewModel {
     pub evaluations: Property<Vec<DapEvaluation>>,
     pub supports_data_breakpoints: Property<bool>,
     pub supports_step_back: Property<bool>,
+    /// The exception the run last paused on (`stopped` reason `"exception"`),
+    /// populated from the `exceptionInfo` response. `None` unless the current
+    /// pause is an exception stop.
+    pub last_exception: Property<Option<DapException>>,
 }
 
 impl Default for DebugViewModel {
@@ -44,6 +48,7 @@ impl DebugViewModel {
             evaluations: Property::new(Vec::new()),
             supports_data_breakpoints: Property::new(false),
             supports_step_back: Property::new(false),
+            last_exception: Property::new(None),
         }
     }
 
@@ -59,10 +64,17 @@ impl DebugViewModel {
         self.supports_step_back.set(step_back);
     }
 
-    /// The program resumed — clear the paused-line marker.
+    /// The program resumed — clear the paused-line marker and any exception.
     pub fn on_running(&self) {
         self.state.set(DebugState::Running);
         self.current_line.set(None);
+        self.last_exception.set(None);
+    }
+
+    /// Record the exception the run paused on (from the `exceptionInfo`
+    /// response after a `stopped` reason `"exception"`).
+    pub fn set_exception(&self, exc: DapException) {
+        self.last_exception.set(Some(exc));
     }
 
     /// A `stopped` event landed with a fetched stack + locals. The top frame
@@ -90,6 +102,7 @@ impl DebugViewModel {
         self.locals.set(Vec::new());
         self.current_line.set(None);
         self.current_source.set(None);
+        self.last_exception.set(None);
     }
 
     pub fn is_active(&self) -> bool {
@@ -154,6 +167,25 @@ mod tests {
         assert!(vm.stack_frames.get().is_empty());
         assert!(vm.current_line.get().is_none());
         assert!(!vm.is_active());
+    }
+
+    #[test]
+    fn exception_set_and_cleared_on_resume_and_terminate() {
+        use crate::models::DapException;
+        let vm = DebugViewModel::new();
+        vm.on_stopped(vec![frame(5)], vec![]);
+        vm.set_exception(DapException::new("matlab.error", "Index exceeds array bounds"));
+        assert_eq!(
+            vm.last_exception.get().map(|e| e.message),
+            Some("Index exceeds array bounds".to_string())
+        );
+        // Resuming clears it.
+        vm.on_running();
+        assert!(vm.last_exception.get().is_none());
+        // Terminate also clears it.
+        vm.set_exception(DapException::new("matlab.error", "boom"));
+        vm.terminate();
+        assert!(vm.last_exception.get().is_none());
     }
 
     #[test]
