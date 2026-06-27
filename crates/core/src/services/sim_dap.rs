@@ -33,6 +33,13 @@ pub struct SignalBreakpoint {
 pub enum SimRequest {
     /// Advance one major (solver) step.
     StepMajor,
+    /// Advance one statement inside a MATLAB Function body (DAP `next`). The
+    /// server replays the body one statement at a time while paused inside it
+    /// (compiler #386); outside a body it falls through to one major step.
+    StepStatement,
+    /// Finish the current MATLAB Function body (DAP `stepOut`, compiler #386),
+    /// returning the transport to major-step granularity.
+    StepOut,
     /// Advance one block within the current major step.
     StepBlock,
     /// Restore the previous major step from the snapshot ring.
@@ -67,6 +74,8 @@ impl SimRequest {
         let thread = || Some(json!({ "threadId": 1 }));
         match self {
             SimRequest::StepMajor => ("stepMajor", thread()),
+            SimRequest::StepStatement => ("next", thread()),
+            SimRequest::StepOut => ("stepOut", thread()),
             SimRequest::StepBlock => ("stepBlock", thread()),
             SimRequest::StepBackMajor => ("stepBackMajor", thread()),
             SimRequest::StepBackBlock => ("stepBackBlock", thread()),
@@ -230,6 +239,18 @@ mod tests {
         assert_eq!(args["threadId"], 1);
         assert_eq!(frame_command(&SimRequest::StepBackMajor).0, "stepBackMajor");
         assert_eq!(frame_command(&SimRequest::Continue).0, "continue");
+    }
+
+    #[test]
+    fn statement_step_uses_standard_dap_verbs() {
+        // Function-body statement stepping (compiler #386) rides the standard DAP
+        // `next`/`stepOut` verbs — distinct from the custom `stepMajor`.
+        let (next, next_args) = frame_command(&SimRequest::StepStatement);
+        assert_eq!(next, "next");
+        assert_eq!(next_args["threadId"], 1);
+        let (out, out_args) = frame_command(&SimRequest::StepOut);
+        assert_eq!(out, "stepOut");
+        assert_eq!(out_args["threadId"], 1);
     }
 
     #[test]

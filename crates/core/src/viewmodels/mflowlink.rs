@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use crate::models::flowchart::FlowchartDocument;
 use crate::observable::Property;
-use crate::services::sim_dap::SimEvent;
+use crate::services::sim_dap::{SimEvent, SimRequest};
 use crate::services::sim_trace::SimTrace;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -117,10 +117,13 @@ impl MflowLinkViewModel {
                     }
                     self.stop_reason
                         .set(Some(description.clone().unwrap_or_else(|| reason.clone())));
-                    // A `breakpoint` stop whose description is `<block_id>:<line>`
-                    // is a MATLAB Function source-line pause (#354). Record it so
-                    // the UI can fetch + show body locals; otherwise clear.
-                    let src = (reason == "breakpoint")
+                    // A `breakpoint` or `step` stop whose description is
+                    // `<block_id>:<line>` is a MATLAB Function source-line pause
+                    // (#354) — the first hit is `breakpoint`, each statement step
+                    // is `step` (#386). Record it so the UI can fetch + show body
+                    // locals; any other stop (`function returned`, major steps,
+                    // signal breakpoints) clears it.
+                    let src = matches!(reason.as_str(), "breakpoint" | "step")
                         .then(|| description.as_deref().and_then(parse_source_loc))
                         .flatten();
                     if src.is_some() {
@@ -155,6 +158,23 @@ impl MflowLinkViewModel {
 
     pub fn total_samples(&self) -> usize {
         self.trace.with(|t| t.rows.len())
+    }
+
+    /// The step verb the transport's Step button sends for a live session: a
+    /// statement step (DAP `next`) when paused inside a MATLAB Function body,
+    /// else one major (solver) step — matching the compiler's #386 routing.
+    pub fn live_step_request(&self) -> SimRequest {
+        if self.source_stop.get().is_some() {
+            SimRequest::StepStatement
+        } else {
+            SimRequest::StepMajor
+        }
+    }
+
+    /// True while paused inside a MATLAB Function body, where Step Out (finish
+    /// the body) is meaningful.
+    pub fn can_step_out(&self) -> bool {
+        self.source_stop.get().is_some()
     }
 
     /// Advance the playback cursor by one sample (clamped to the trace length).
@@ -465,6 +485,47 @@ mod tests {
         vm.resume();
         assert_eq!(vm.source_stop.get(), None);
         assert!(vm.locals.get().is_empty());
+    }
+
+    #[test]
+    fn statement_step_tracks_source_line_and_locals() {
+        use crate::services::sim_dap::{SimEvent, SimRequest};
+        let vm = vm();
+        vm.start_live();
+
+        // Outside a function body, Step is a major step and Step Out is disabled.
+        assert_eq!(vm.live_step_request(), SimRequest::StepMajor);
+        assert!(!vm.can_step_out());
+
+        // Hit a body breakpoint: now Step is a statement step + Step Out is live.
+        vm.on_sim_event(&SimEvent::Stopped {
+            reason: "breakpoint".into(),
+            description: Some("fcn:3".into()),
+        });
+        assert_eq!(vm.source_stop.get(), Some(("fcn".into(), 3)));
+        assert_eq!(vm.live_step_request(), SimRequest::StepStatement);
+        assert!(vm.can_step_out());
+
+        // A `step` stop (compiler #386) advances the source-line marker; the UI
+        // re-fetches locals off `source_stop` being set.
+        vm.on_sim_event(&SimEvent::Stopped {
+            reason: "step".into(),
+            description: Some("fcn:4".into()),
+        });
+        assert_eq!(vm.source_stop.get(), Some(("fcn".into(), 4)));
+        assert_eq!(vm.live_step_request(), SimRequest::StepStatement);
+
+        // The body returning clears the marker + locals and drops back to
+        // major-step granularity.
+        vm.locals.set(vec![("b".into(), "8".into())]);
+        vm.on_sim_event(&SimEvent::Stopped {
+            reason: "step".into(),
+            description: Some("function returned".into()),
+        });
+        assert_eq!(vm.source_stop.get(), None);
+        assert!(vm.locals.get().is_empty());
+        assert_eq!(vm.live_step_request(), SimRequest::StepMajor);
+        assert!(!vm.can_step_out());
     }
 
     #[test]

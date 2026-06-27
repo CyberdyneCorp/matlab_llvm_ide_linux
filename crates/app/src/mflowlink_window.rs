@@ -201,6 +201,14 @@ fn build_transport(
     pause.add_css_class("mf-tool");
     let step = Button::with_label("⏭ Step");
     step.add_css_class("mf-tool");
+    step.set_tooltip_text(Some(
+        "Step one statement inside a MATLAB Function body, else one major step (live --sim-dap)",
+    ));
+    let step_out = Button::with_label("⤴ Step Out");
+    step_out.add_css_class("mf-tool");
+    step_out.set_tooltip_text(Some("Finish the current MATLAB Function body (live --sim-dap)"));
+    // Only meaningful while paused inside a function body.
+    step_out.set_sensitive(false);
     let back = Button::with_label("⏮ Back");
     back.add_css_class("mf-tool");
     back.set_tooltip_text(Some("Step back one major step (live --sim-dap)"));
@@ -287,11 +295,31 @@ fn build_transport(
         step.connect_clicked(move |_| {
             stop_timer();
             if vm.live.get() {
-                send_sim(&dap, &SimRequest::StepMajor);
+                // Inside a MATLAB Function body this steps one statement; outside
+                // one, it advances a major step (#386).
+                send_sim(&dap, &vm.live_step_request());
             } else {
                 vm.step();
             }
         });
+    }
+    {
+        let vm = vm.clone();
+        let dap = dap.clone();
+        let stop_timer = stop_timer.clone();
+        step_out.connect_clicked(move |_| {
+            stop_timer();
+            if vm.live.get() && vm.can_step_out() {
+                send_sim(&dap, &SimRequest::StepOut);
+            }
+        });
+    }
+    {
+        // Enable Step Out only while paused inside a MATLAB Function body.
+        let step_out = step_out.clone();
+        let vm2 = vm.clone();
+        vm.source_stop
+            .bind(move |_| step_out.set_sensitive(vm2.can_step_out()));
     }
     {
         let vm = vm.clone();
@@ -345,6 +373,7 @@ fn build_transport(
     bar.append(&play);
     bar.append(&pause);
     bar.append(&step);
+    bar.append(&step_out);
     bar.append(&back);
     bar.append(&stop);
     bar.append(&reset);
