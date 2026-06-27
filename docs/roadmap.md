@@ -52,7 +52,10 @@ draws plots — all driven by the tested MVVM core.
   spectrum, biquad, low/high-pass, DC-block, DWT, image filter/threshold/color),
   **HDL** (D/T/JK/SR flip-flops, counter, shift register, RAM, ROM), and Kalman /
   LQR / DNN / RL / RF / pose / running-stats blocks — each with its simulator
-  ports and inspector parameters, grouped into new palette sections.
+  ports and inspector parameters, grouped into new palette sections. A
+  **Network I/O** section follows with the compiler's TCP/UDP blocks
+  (`signal_udp_send`/`recv`, `signal_tcp_send`/`recv`, matlab_llvm #421); the
+  receivers break algebraic loops so they can sit in a feedback path.
 * **MATLAB Function source-line breakpoints** — click the editor gutter to set a
   body-line breakpoint; the live simulation pauses there and the sim window's
   **Locals** panel shows the body's variables (matlab_llvm #354/#384/#385).

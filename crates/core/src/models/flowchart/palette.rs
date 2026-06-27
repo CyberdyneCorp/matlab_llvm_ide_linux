@@ -29,6 +29,7 @@ pub enum NodeCategory {
     SignalComms,
     SignalDsp,
     SignalHdl,
+    SignalNetwork,
     Signal3D,
     // State-chart document categories
     ChartStates,
@@ -58,6 +59,7 @@ impl NodeCategory {
             SignalComms => "Communications",
             SignalDsp => "DSP & Image",
             SignalHdl => "HDL",
+            SignalNetwork => "Network I/O",
             Signal3D => "3-D Scene",
             ChartStates => "States",
             ChartJunctions => "Junctions",
@@ -86,6 +88,7 @@ impl NodeCategory {
             SignalComms => palette::ACCENT_BLUE,
             SignalDsp => palette::ACCENT_CYAN,
             SignalHdl => palette::ACCENT_GREEN,
+            SignalNetwork => palette::ACCENT_CYAN,
             Signal3D => palette::ACCENT_BLUE,
             ChartStates => palette::ACCENT_ORANGE,
             ChartJunctions => palette::ACCENT_CYAN,
@@ -108,6 +111,7 @@ impl NodeCategory {
                 | SignalComms
                 | SignalDsp
                 | SignalHdl
+                | SignalNetwork
                 | Signal3D
         )
     }
@@ -124,7 +128,7 @@ impl NodeCategory {
     }
 
     /// Display order for the signal-flow palette.
-    pub fn signal_flow_order() -> [NodeCategory; 12] {
+    pub fn signal_flow_order() -> [NodeCategory; 13] {
         use NodeCategory::*;
         [
             SignalSources,
@@ -134,6 +138,7 @@ impl NodeCategory {
             SignalDsp,
             SignalComms,
             SignalHdl,
+            SignalNetwork,
             SignalRouting,
             SignalLookup,
             Signal3D,
@@ -392,6 +397,18 @@ impl SignalFlowParamSpec {
                 Self::d("radiusA", "Radius A", 0.5),
                 Self::d("radiusB", "Radius B", 0.5),
                 Self::d("stiffness", "Stiffness", 100.0),
+            ],
+            // Network I/O (compiler #421): send streams the input wire to a peer once
+            // per major step; receive holds the last packet (`initialValue` until one
+            // arrives).
+            SignalUdpSend | SignalTcpSend => vec![
+                Self::s("host", "Host", "127.0.0.1"),
+                Self::d("port", "Port", 5000.0).int(0),
+            ],
+            SignalUdpRecv | SignalTcpRecv => vec![
+                Self::s("host", "Host", "127.0.0.1"),
+                Self::d("port", "Port", 5000.0).int(0),
+                Self::d("initialValue", "Initial value", 0.0),
             ],
             // From Workspace: an inline `t v; t v; …` time-series replayed at sim
             // time (matlab_llvm#388), interpolated linearly or held (zoh).
@@ -716,7 +733,7 @@ mod tests {
     #[test]
     fn display_orders_are_complete() {
         assert_eq!(NodeCategory::control_flow_order().len(), 6);
-        assert_eq!(NodeCategory::signal_flow_order().len(), 12);
+        assert_eq!(NodeCategory::signal_flow_order().len(), 13);
         assert_eq!(NodeCategory::state_chart_order().len(), 3);
         // signal order starts with Sources, ends with Composite
         let order = NodeCategory::signal_flow_order();
@@ -751,6 +768,7 @@ mod tests {
             SignalComms,
             SignalDsp,
             SignalHdl,
+            SignalNetwork,
             ChartStates,
             ChartJunctions,
             ChartFunctions,

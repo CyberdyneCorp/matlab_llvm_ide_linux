@@ -180,6 +180,48 @@ mod tests {
     }
 
     #[test]
+    fn network_io_blocks_round_trip_losslessly() {
+        // The compiler's network-I/O blocks (#421) are first-class typed kinds:
+        // they load with their params and re-save verbatim.
+        use crate::models::flowchart::NodeKind;
+
+        let json = r#"{
+            "schema":"matforge.flowchart","version":"0.2.0",
+            "flows":[{"id":"f","kind":"program","name":"net",
+                "nodes":[
+                    {"id":"us","kind":"signal_udp_send","data":{"params":{"host":"10.0.0.2","port":"6000"}}},
+                    {"id":"ur","kind":"signal_udp_recv","data":{"params":{"port":"6001","initialValue":"0"}}},
+                    {"id":"ts","kind":"signal_tcp_send","data":{"params":{"host":"127.0.0.1","port":"7000"}}},
+                    {"id":"tr","kind":"signal_tcp_recv","data":{"params":{"host":"127.0.0.1","port":"7001"}}}
+                ],"edges":[]}]
+        }"#;
+
+        let doc = decode_str(json).expect("network-I/O model should load");
+        let nodes = &doc.flows[0].nodes;
+        assert_eq!(nodes.len(), 4, "no node should be dropped");
+        assert_eq!(nodes[0].kind, NodeKind::SignalUdpSend);
+        assert_eq!(nodes[1].kind, NodeKind::SignalUdpRecv);
+        assert_eq!(nodes[2].kind, NodeKind::SignalTcpSend);
+        assert_eq!(nodes[3].kind, NodeKind::SignalTcpRecv);
+
+        // Re-encode → every kind and param survives, no Unknown fallback.
+        let encoded = encode_string(&doc).unwrap();
+        for tag in [
+            "signal_udp_send",
+            "signal_udp_recv",
+            "signal_tcp_send",
+            "signal_tcp_recv",
+        ] {
+            assert!(encoded.contains(&format!("\"{tag}\"")), "{tag} lost on re-save");
+        }
+        assert!(encoded.contains("\"10.0.0.2\""));
+        assert!(!encoded.contains("\"unknown\""));
+
+        // Stable: re-decoding the re-encoded text yields an identical document.
+        assert_eq!(doc, decode_str(&encoded).unwrap());
+    }
+
+    #[test]
     fn decodes_hand_authored_minimal_doc() {
         // Only id + kind on the node; codec fills defaults.
         let json = r#"{
