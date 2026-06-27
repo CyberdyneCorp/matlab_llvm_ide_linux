@@ -56,9 +56,12 @@ draws plots — all driven by the tested MVVM core.
   **Network I/O** section follows with the compiler's TCP/UDP blocks
   (`signal_udp_send`/`recv`, `signal_tcp_send`/`recv`, matlab_llvm #421); the
   receivers break algebraic loops so they can sit in a feedback path.
-* **MATLAB Function source-line breakpoints** — click the editor gutter to set a
-  body-line breakpoint; the live simulation pauses there and the sim window's
-  **Locals** panel shows the body's variables (matlab_llvm #354/#384/#385).
+* **MATLAB Function source-line breakpoints + statement stepping** — click the
+  editor gutter to set a body-line breakpoint; the live simulation pauses there
+  and the sim window's **Locals** panel shows the body's variables
+  (matlab_llvm #354/#384/#385). While paused inside a body, **Step** advances one
+  statement (and the marker + Locals follow each line) and **Step Out** finishes
+  the body (matlab_llvm #386); outside a body, Step is one major solver step.
 * **Breakpoints** — per-wire signal breakpoints (persist on the edge, marker on
   the canvas, installed against the source block on a live run).
 * **Image & N-D signals** — vector / N-D wire signals already stream as one trace
