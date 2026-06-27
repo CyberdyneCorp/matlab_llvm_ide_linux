@@ -129,8 +129,22 @@ to populate the call stack, locals, and the editor's execution-line marker.
 Stepping (continue/pause/next/stepIn/stepOut/stepBack) and gutter-click
 breakpoints are all wired.
 
-> **Compiler-side blocker:** the shipped `matlabc -dap` currently **segfaults**
-> before sending a `stopped` event (verified with a standalone JSON-RPC driver,
-> not just the IDE), so pausing/locals can't be exercised yet. The IDE handles
-> the adapter exiting gracefully (`DAP_EXIT` → tear down + status message). Once
-> the adapter is fixed the existing client + UI work without changes.
+> **Status:** the `matlabc -dap` adapter is functional. The earlier
+> segfault-before-`stopped` blocker is resolved — the compiler's own DAP scenario
+> suite (`test/Debug/run_dap_tests.py`) passes 68/68 against the binary the IDE
+> uses by default, covering breakpoints, stepping (incl. step-back), the
+> `stackTrace → scopes → variables` chain, conditional/hit/log breakpoints,
+> function breakpoints, `evaluate`/`setVariable`, and exception breakpoints. The
+> IDE handles the adapter exiting gracefully (`DAP_EXIT` → tear down + status
+> message).
+
+### Exception breakpoints (matlab_llvm #404/#405)
+
+The adapter advertises an `error` entry in `exceptionBreakpointFilters`. The IDE
+sends `setExceptionBreakpoints` with the enabled filters (Debug panel toggle); an
+uncaught `error()` then surfaces as a `stopped` event with `reason: "exception"`.
+On that reason the IDE requests `exceptionInfo` and shows the MATLAB error
+identifier + message (`MException.identifier`/`.message`, populated by #404/#405)
+in the console, the status bar, and a banner at the top of the Debug panel. The
+exception clears on resume/terminate. A normal (`breakpoint`/`step`) stop clears
+any prior exception.
