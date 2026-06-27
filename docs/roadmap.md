@@ -77,6 +77,10 @@ draws plots — all driven by the tested MVVM core.
   finishes, each To Workspace sink is **published into the REPL workspace** by its
   `variableName`, so it shows in the Workspace panel and `whos` and can be
   inspected / plotted.
+* **sim3d trajectory capture** — a `sim3d.capture(world, actor)` result (an
+  `N`-by-7 `[t, x, y, z, rx, ry, rz]` matrix, matlab_llvm #420) can be plotted as
+  its X–Y ground track from the Workspace variable menu (**Plot Trajectory**),
+  instead of being flattened into one series or shown as a height field.
 * **Full simulator block parity** — the editor library now exposes **every**
   signal block the compiler implements, including the N-D axis utilities
   **Permute** / **Squeeze** and the **3-D Scope** (`signal_scope3d`). A 3-D scope's

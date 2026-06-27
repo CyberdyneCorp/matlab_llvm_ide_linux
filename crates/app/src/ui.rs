@@ -3895,6 +3895,25 @@ fn attach_var_menu(btn: &Button, app: &Rc<AppState>, name: &str) {
         menu.append(&b);
     }
 
+    // sim3d.capture trajectory (matlab_llvm #420): plot the X–Y ground track of
+    // an N×≥4 `[t,x,y,z,…]` capture matrix instead of a flattened series.
+    {
+        let traj = Button::with_label("Plot Trajectory (X–Y)");
+        traj.set_has_frame(false);
+        traj.set_halign(gtk::Align::Start);
+        traj.set_tooltip_text(Some(
+            "Plot the X–Y path of a sim3d.capture matrix [t, x, y, z, …]",
+        ));
+        let app = app.clone();
+        let name = name.to_string();
+        let pop = pop.clone();
+        traj.connect_clicked(move |_| {
+            app.plot_variable_trajectory(&name);
+            pop.popdown();
+        });
+        menu.append(&traj);
+    }
+
     // Data actions — Copy name / Rename / Save / Clear, each dispatched to the
     // REPL (or clipboard). MATLAB has no in-place rename, so it copies then
     // clears the old binding.

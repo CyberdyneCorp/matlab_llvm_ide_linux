@@ -47,6 +47,10 @@ pub struct MainViewModel {
     /// A `(variable, kind)` plot requested via "Plot As" — fulfilled when the
     /// variable's value arrives over the REPL value channel.
     pub pending_plot: Property<Option<(String, PlotKind)>>,
+    /// A variable whose value was requested for a "Plot Trajectory" — fulfilled
+    /// when its value arrives over the REPL value channel as a `sim3d.capture`
+    /// matrix (matlab_llvm #420).
+    pub pending_trajectory: Property<Option<String>>,
     /// The most recent video file path seen in program output (e.g. a
     /// `VideoWriter` "wrote …mp4/.avi" line). The GTK side plays it back.
     pub last_video: Property<Option<String>>,
@@ -83,6 +87,7 @@ impl MainViewModel {
             toast: ToastViewModel::new(),
             settings,
             pending_plot: Property::new(None),
+            pending_trajectory: Property::new(None),
             last_video: Property::new(None),
             last_scene3d: Property::new(None),
             fs,
@@ -232,6 +237,39 @@ impl MainViewModel {
         self.pending_plot.set(Some((name.into(), kind)));
     }
 
+    /// Request a "Plot Trajectory" for `name` — fulfilled as the X–Y ground track
+    /// when the variable's value arrives and is a `sim3d.capture` matrix (#420).
+    pub fn request_trajectory_plot(&self, name: impl Into<String>) {
+        self.pending_trajectory.set(Some(name.into()));
+    }
+
+    /// If a "Plot Trajectory" is pending for `name`, build an X–Y path figure
+    /// from the freshly inspected capture matrix. Returns whether a figure was
+    /// added (so the caller can report a non-trajectory selection).
+    fn fulfil_pending_trajectory(&self, name: &str) -> bool {
+        let Some(pname) = self.pending_trajectory.get() else {
+            return false;
+        };
+        if pname != name {
+            return false;
+        }
+        self.pending_trajectory.set(None);
+        let Some(m) = self.workspace.inspected_matrix.get() else {
+            return false;
+        };
+        let Some((xs, ys)) = m.capture_trajectory_xy() else {
+            self.status_bar.set_message(format!(
+                "{name}: not a sim3d.capture trajectory (needs N×≥4 [t,x,y,z,…])"
+            ));
+            return false;
+        };
+        let index = self.plots.figures.with(|f| f.len() as i32) + 1;
+        let title = format!("{pname} trajectory (X–Y)");
+        let fig = PlotFigure::series(index, title, PlotKind::Line2D, xs, ys).with_source(pname);
+        self.plots.add(fig);
+        true
+    }
+
     /// If a "Plot As" is pending for `name`, build a line-style figure from the
     /// freshly inspected matrix and add it to the Plots panel.
     fn fulfil_pending_plot(&self, name: &str) {
@@ -277,6 +315,7 @@ impl MainViewModel {
                     .unwrap_or_else(|| "ans".to_string());
                 self.workspace.set_matrix_from_disp(name.as_str(), &text);
                 self.fulfil_pending_plot(&name);
+                self.fulfil_pending_trajectory(&name);
             }
             ReplEvent::Figure {
                 runtime_id,
@@ -470,6 +509,41 @@ mod tests {
         assert_eq!(figs[0].kind, crate::models::PlotKind::Bar);
         assert_eq!(figs[0].ys.len(), 4);
         assert!(vm.pending_plot.get().is_none());
+    }
+
+    #[test]
+    fn plot_trajectory_creates_xy_path_from_capture_matrix() {
+        use crate::services::sentinels::{VAL_BEGIN, VAL_END};
+        let (vm, _, _) = main_vm(FakeFileSystem::new());
+        vm.workspace.select("traj");
+        vm.request_trajectory_plot("traj");
+        // An N×7 sim3d.capture matrix [t, x, y, z, rx, ry, rz] arrives.
+        vm.feed_repl_line(VAL_BEGIN);
+        vm.feed_repl_line("0 1 2 3 0 0 0");
+        vm.feed_repl_line("0.1 4 5 6 0 0 0");
+        vm.feed_repl_line(VAL_END);
+        let figs = vm.plots.figures.get();
+        assert_eq!(figs.len(), 1);
+        // The figure is the X–Y ground track: xs = x column, ys = y column.
+        assert_eq!(figs[0].kind, crate::models::PlotKind::Line2D);
+        assert_eq!(figs[0].xs, vec![1.0, 4.0]);
+        assert_eq!(figs[0].ys, vec![2.0, 5.0]);
+        assert!(vm.pending_trajectory.get().is_none());
+    }
+
+    #[test]
+    fn plot_trajectory_rejects_non_capture_matrix() {
+        use crate::services::sentinels::{VAL_BEGIN, VAL_END};
+        let (vm, _, _) = main_vm(FakeFileSystem::new());
+        vm.workspace.select("v");
+        vm.request_trajectory_plot("v");
+        // A plain 2-column matrix is not a capture trajectory → no figure.
+        vm.feed_repl_line(VAL_BEGIN);
+        vm.feed_repl_line("1 2");
+        vm.feed_repl_line("3 4");
+        vm.feed_repl_line(VAL_END);
+        assert!(vm.plots.figures.get().is_empty());
+        assert!(vm.pending_trajectory.get().is_none());
     }
 
     #[test]
