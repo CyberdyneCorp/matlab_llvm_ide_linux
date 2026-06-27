@@ -461,6 +461,15 @@ pub enum NodeKind {
     SignalSensor3D,
     #[serde(rename = "signal_collision3d")]
     SignalCollision3D,
+    // 6.6.5 Network I/O (compiler #421)
+    #[serde(rename = "signal_udp_send")]
+    SignalUdpSend,
+    #[serde(rename = "signal_udp_recv")]
+    SignalUdpRecv,
+    #[serde(rename = "signal_tcp_send")]
+    SignalTcpSend,
+    #[serde(rename = "signal_tcp_recv")]
+    SignalTcpRecv,
     // 6.7 State-chart
     #[serde(rename = "state")]
     State,
@@ -530,7 +539,7 @@ impl NodeKind {
     }
 
     /// Every kind, for palette enumeration + exhaustive tests.
-    pub const ALL: [NodeKind; 136] = [
+    pub const ALL: [NodeKind; 140] = [
         NodeKind::Start,
         NodeKind::End,
         NodeKind::Comment,
@@ -658,6 +667,10 @@ impl NodeKind {
         NodeKind::SignalCamera3D,
         NodeKind::SignalSensor3D,
         NodeKind::SignalCollision3D,
+        NodeKind::SignalUdpSend,
+        NodeKind::SignalUdpRecv,
+        NodeKind::SignalTcpSend,
+        NodeKind::SignalTcpRecv,
         NodeKind::State,
         NodeKind::JunctionConnective,
         NodeKind::JunctionHistory,
@@ -700,6 +713,7 @@ impl NodeKind {
             }
             SignalWorld3D | SignalActor3D | SignalLight3D | SignalCamera3D | SignalSensor3D
             | SignalCollision3D => C::Signal3D,
+            SignalUdpSend | SignalUdpRecv | SignalTcpSend | SignalTcpRecv => C::SignalNetwork,
             SignalAwgn | SignalPskMod | SignalPskDemod | SignalQamMod | SignalQamDemod
             | SignalErrorRate => C::SignalComms,
             SignalFft | SignalIfft | SignalWindow | SignalSpectrum | SignalBiquad
@@ -924,6 +938,10 @@ impl NodeKind {
             SignalCamera3D => "Camera 3-D",
             SignalSensor3D => "Sensor 3-D",
             SignalCollision3D => "Collision 3-D",
+            SignalUdpSend => "UDP Send",
+            SignalUdpRecv => "UDP Receive",
+            SignalTcpSend => "TCP Send",
+            SignalTcpRecv => "TCP Receive",
             State => "State",
             JunctionConnective => "Junction",
             JunctionHistory => "History Junction",
@@ -984,6 +1002,10 @@ impl NodeKind {
                 | SignalDiscreteFilter
                 | SignalRateTransition
                 | SignalTransportDelay
+                // Network receivers: output is the last packet received, decoupled
+                // from this step's input, so they break feedback loops (compiler #421).
+                | SignalUdpRecv
+                | SignalTcpRecv
         )
     }
 
@@ -1105,6 +1127,13 @@ impl NodeKind {
                 "out" | "force" => Some(Right),
                 _ => None,
             },
+            // Network send: input passed through to output. Receive: output only.
+            SignalUdpSend | SignalTcpSend => match id {
+                "in" => Some(Left),
+                "out" => Some(Right),
+                _ => None,
+            },
+            SignalUdpRecv | SignalTcpRecv => (id == "out").then_some(Right),
             SignalSubsystem | SignalEnabledSubsystem | SignalTriggeredSubsystem => {
                 if id.starts_with("out") {
                     Some(Right)
@@ -1258,6 +1287,16 @@ impl NodeKind {
             SignalCollision3D => FlowPorts {
                 inputs: vec![p("poseA"), p("poseB")],
                 outputs: vec![p("out"), p("force")],
+            },
+            // Network send: input wire passed through to output for chaining/logging.
+            SignalUdpSend | SignalTcpSend => FlowPorts {
+                inputs: vec![p("in")],
+                outputs: vec![p("out")],
+            },
+            // Network receive: emits the most recent packet (loop-breaker source).
+            SignalUdpRecv | SignalTcpRecv => FlowPorts {
+                inputs: vec![],
+                outputs: vec![p("out")],
             },
             SignalSubsystem | SignalEnabledSubsystem | SignalTriggeredSubsystem => FlowPorts {
                 inputs: vec![p("in1")],
@@ -1916,6 +1955,92 @@ mod tests {
         // Sources have no inputs.
         assert!(names(SignalImageSource).is_empty());
         assert!(names(SignalRepeatingSequence).is_empty());
+    }
+
+    #[test]
+    fn network_io_blocks_are_exposed_with_ports_and_params() {
+        use super::super::palette::{library_blocks, SignalFlowParamSpec};
+        use super::super::SchemaKind;
+        use NodeCategory as C;
+        use NodeKind::*;
+
+        let lib: Vec<NodeKind> = library_blocks(SchemaKind::SignalFlow)
+            .into_iter()
+            .flat_map(|(_, k)| k)
+            .collect();
+
+        // (kind, serde string) for every network-I/O block (compiler #421). All
+        // four belong to the Network I/O category.
+        let cases: &[(NodeKind, &str)] = &[
+            (SignalUdpSend, "signal_udp_send"),
+            (SignalUdpRecv, "signal_udp_recv"),
+            (SignalTcpSend, "signal_tcp_send"),
+            (SignalTcpRecv, "signal_tcp_recv"),
+        ];
+        assert_eq!(cases.len(), 4, "all 4 network-I/O blocks covered");
+
+        for &(k, name) in cases {
+            // serde name matches the compiler exactly and round-trips both ways.
+            assert_eq!(serde_json::to_string(&k).unwrap(), format!("\"{name}\""));
+            assert_eq!(
+                serde_json::from_str::<NodeKind>(&format!("\"{name}\"")).unwrap(),
+                k
+            );
+            // placeable in the editor library + categorized as Network I/O.
+            assert!(lib.contains(&k), "{k:?} missing from the library");
+            assert!(k.is_signal_flow(), "{k:?} not a signal-flow block");
+            assert_eq!(k.category(), C::SignalNetwork, "{k:?} wrong category");
+            // every port anchors to a face.
+            let ports = k.default_ports();
+            for port in ports.inputs.iter().chain(ports.outputs.iter()) {
+                assert!(
+                    k.signal_flow_port_anchor(&port.id).is_some(),
+                    "{k:?} port {} has no anchor",
+                    port.id
+                );
+            }
+            // every default parameter validates against its own constraint.
+            for f in SignalFlowParamSpec::fields(k) {
+                let v = f.default_value.display_string();
+                assert!(
+                    SignalFlowParamSpec::validate_field(k, f.key, &v).is_ok(),
+                    "{k:?} default {}={v:?} fails its own constraint",
+                    f.key
+                );
+            }
+        }
+
+        // Send blocks pass the input through to an output; receivers are sources.
+        let ins = |k: NodeKind| -> Vec<String> {
+            k.default_ports().inputs.iter().map(|p| p.id.clone()).collect()
+        };
+        let outs = |k: NodeKind| -> Vec<String> {
+            k.default_ports().outputs.iter().map(|p| p.id.clone()).collect()
+        };
+        assert_eq!(ins(SignalUdpSend), vec!["in"]);
+        assert_eq!(outs(SignalUdpSend), vec!["out"]);
+        assert_eq!(ins(SignalTcpSend), vec!["in"]);
+        assert_eq!(outs(SignalTcpSend), vec!["out"]);
+        assert!(ins(SignalUdpRecv).is_empty());
+        assert_eq!(outs(SignalUdpRecv), vec!["out"]);
+        assert!(ins(SignalTcpRecv).is_empty());
+        assert_eq!(outs(SignalTcpRecv), vec!["out"]);
+
+        // Receivers break algebraic loops (output decoupled from this step's input);
+        // senders are direct feedthrough and do not.
+        assert!(SignalUdpRecv.breaks_algebraic_loop());
+        assert!(SignalTcpRecv.breaks_algebraic_loop());
+        assert!(!SignalUdpSend.breaks_algebraic_loop());
+        assert!(!SignalTcpSend.breaks_algebraic_loop());
+
+        // Send params: host + port. Receive params additionally hold initialValue.
+        let keys = |k: NodeKind| -> Vec<&'static str> {
+            SignalFlowParamSpec::fields(k).iter().map(|f| f.key).collect()
+        };
+        assert_eq!(keys(SignalUdpSend), vec!["host", "port"]);
+        assert_eq!(keys(SignalTcpSend), vec!["host", "port"]);
+        assert_eq!(keys(SignalUdpRecv), vec!["host", "port", "initialValue"]);
+        assert_eq!(keys(SignalTcpRecv), vec!["host", "port", "initialValue"]);
     }
 
     #[test]
