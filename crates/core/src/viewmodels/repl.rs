@@ -45,6 +45,19 @@ impl ReplViewModel {
         self.is_running.set_if_changed(running);
     }
 
+    /// The backing `matlabc -repl` process exited or crashed: mark the REPL not
+    /// running and note it in the transcript. The next command starts a fresh
+    /// REPL (the app's lazy-start path).
+    pub fn on_process_exit(&self) {
+        self.set_running(false);
+        self.transcript.update(|t| {
+            t.push(ConsoleMessage::new(
+                ConsoleLevel::Warning,
+                "REPL process ended — it will restart on the next command.",
+            ))
+        });
+    }
+
     /// Submit the current input: record it in history + transcript, clear the
     /// input, and return the command for the caller to write to the process.
     /// Returns `None` for an empty/whitespace command.
@@ -238,6 +251,17 @@ mod tests {
         // Source-echo / caret context lines stay Plain.
         assert_eq!(matlab_style_line("  x = foo(3)").0, ConsoleLevel::Plain);
         assert_eq!(matlab_style_line("      ^").0, ConsoleLevel::Plain);
+    }
+
+    #[test]
+    fn process_exit_marks_not_running_and_notes_transcript() {
+        let vm = ReplViewModel::new();
+        vm.set_running(true);
+        vm.on_process_exit();
+        assert!(!vm.is_running.get());
+        let last = vm.transcript.get().last().unwrap().clone();
+        assert_eq!(last.level, ConsoleLevel::Warning);
+        assert!(last.text.contains("restart on the next command"));
     }
 
     #[test]

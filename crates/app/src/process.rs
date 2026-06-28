@@ -187,6 +187,10 @@ fn stream_child(
 
 // ---- Live REPL -------------------------------------------------------------
 
+/// Synthetic line the readers emit once the `matlabc -repl` pipes close, so the
+/// app can tear the session down + restart instead of going silently dead.
+pub const REPL_EXIT: &str = "___MF_REPL_EXIT___";
+
 /// A running `matlabc -repl` process.
 pub struct ReplSession {
     stdin: ChildStdin,
@@ -215,8 +219,15 @@ impl ReplSession {
         let stdin = child.stdin.take().expect("piped stdin");
 
         let (tx, rx) = mpsc::channel::<String>();
-        spawn_line_reader(stdout, tx.clone());
-        spawn_line_reader(stderr, tx);
+        let h_out = spawn_line_reader(stdout, tx.clone());
+        let h_err = spawn_line_reader(stderr, tx.clone());
+        // Once both pipes close (the process exited/crashed), emit a synthetic
+        // exit line so the app can recover instead of writing to a dead pipe.
+        thread::spawn(move || {
+            let _ = h_out.join();
+            let _ = h_err.join();
+            let _ = tx.send(REPL_EXIT.to_string());
+        });
         pump_to_main_loop(rx, on_line);
 
         Ok(ReplSession { stdin, child })

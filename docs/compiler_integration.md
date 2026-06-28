@@ -108,7 +108,10 @@ Run-ed file is); a future compiler-side `___MF_SCENE3D___ path=…` sentinel (li
 
 The live REPL is wired end-to-end. `app/src/process.rs::ReplSession` spawns
 `matlabc -repl`, reads its stdout/stderr on background threads, and marshals each
-line to the GTK main loop. Submitting a command also sends the workspace-sync
+line to the GTK main loop. If the process exits or crashes, the readers emit a
+synthetic `REPL_EXIT` line (like the DAP path's `DAP_EXIT`): the IDE clears the
+dead session, marks the REPL not-running, notes it in the transcript, and the
+next command transparently starts a fresh REPL. Submitting a command also sends the workspace-sync
 probe (`disp('___MF_WS_BEGIN___'); whos; disp('___MF_WS_END___')`). Output is
 routed through the [`SentinelRouter`](../crates/core/src/services/sentinels.rs),
 which separates console text from structured payloads wrapped in `___MF_WS___` /
