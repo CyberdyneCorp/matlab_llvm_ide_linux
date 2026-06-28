@@ -71,7 +71,14 @@ impl AppState {
             .unwrap_or_else(std::env::temp_dir);
         let app = self.clone();
         match ReplSession::start(&self.settings.matlabc_path, &cwd, move |line| {
-            app.vm.feed_repl_line(&line);
+            if line == crate::process::REPL_EXIT {
+                // The process exited/crashed: clear the dead session so the next
+                // command starts fresh, and tell the user.
+                *app.repl.borrow_mut() = None;
+                app.vm.repl.on_process_exit();
+            } else {
+                app.vm.feed_repl_line(&line);
+            }
         }) {
             Ok(session) => {
                 *self.repl.borrow_mut() = Some(session);
