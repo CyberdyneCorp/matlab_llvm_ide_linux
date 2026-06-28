@@ -71,9 +71,9 @@ impl ReplViewModel {
     pub fn feed_line(&self, line: &str) -> Option<ReplEvent> {
         match self.router.borrow_mut().consume(line) {
             Some(ReplEvent::Console(text)) => {
-                let level = classify(&text);
+                let (level, shown) = matlab_style_line(&text);
                 self.transcript
-                    .update(|t| t.push(ConsoleMessage::new(level, text)));
+                    .update(|t| t.push(ConsoleMessage::new(level, shown)));
                 None
             }
             other => other,
@@ -120,15 +120,46 @@ impl ReplViewModel {
     }
 }
 
-fn classify(text: &str) -> ConsoleLevel {
-    let lower = text.to_lowercase();
-    if lower.contains("error") {
-        ConsoleLevel::Error
-    } else if lower.contains("warning") {
-        ConsoleLevel::Warning
-    } else {
-        ConsoleLevel::Plain
+/// Present a REPL output line MATLAB-style. A compiler/runtime diagnostic — an
+/// `error:` / `warning:` token, optionally preceded by a `<loc>:line:col:`
+/// position — is classified Error / Warning with that clang-style prefix
+/// stripped, so the transcript reads like MATLAB's command window (e.g.
+/// `Unrecognized function or variable 'foo'.`). Other lines stay Plain.
+fn matlab_style_line(text: &str) -> (ConsoleLevel, String) {
+    for (kw, level) in [
+        ("error:", ConsoleLevel::Error),
+        ("warning:", ConsoleLevel::Warning),
+    ] {
+        let lower = text.to_ascii_lowercase();
+        if let Some(i) = lower.find(kw) {
+            // Only treat it as a diagnostic when the text before the keyword is
+            // empty or a `<loc>:line:col:` position — not an ordinary line that
+            // merely mentions "error".
+            if diagnostic_prefix(&text[..i]) {
+                let msg = text[i + kw.len()..].trim_start().to_string();
+                return (level, msg);
+            }
+        }
     }
+    (ConsoleLevel::Plain, text.to_string())
+}
+
+/// True when `prefix` (the text before an `error:`/`warning:` token) is blank or
+/// a `…:line:col:` source position — i.e. the token starts a real diagnostic.
+fn diagnostic_prefix(prefix: &str) -> bool {
+    let p = prefix.trim();
+    if p.is_empty() {
+        return true;
+    }
+    // Strip the trailing `:` that separates the position from the keyword, then
+    // require the last two `:`-separated fields to be line + column numbers.
+    let p = p.strip_suffix(':').unwrap_or(p);
+    let mut parts = p.rsplitn(3, ':');
+    matches!(
+        (parts.next(), parts.next()),
+        (Some(col), Some(line))
+            if col.trim().parse::<u32>().is_ok() && line.trim().parse::<u32>().is_ok()
+    )
 }
 
 #[cfg(test)]
@@ -169,6 +200,44 @@ mod tests {
             vm.transcript.get().last().unwrap().level,
             ConsoleLevel::Error
         );
+    }
+
+    #[test]
+    fn undefined_name_diagnostic_reads_like_matlab() {
+        // The compiler emits a located clang-style diagnostic; the transcript
+        // strips the position + `error:` prefix (matlab_llvm #423).
+        let (level, msg) = matlab_style_line(
+            "<repl:0>:1:5: error: Unrecognized function or variable 'foo'.",
+        );
+        assert_eq!(level, ConsoleLevel::Error);
+        assert_eq!(msg, "Unrecognized function or variable 'foo'.");
+    }
+
+    #[test]
+    fn runtime_raise_is_stripped() {
+        let (level, msg) =
+            matlab_style_line("error: Index exceeds the number of array elements. Index must not exceed 3.");
+        assert_eq!(level, ConsoleLevel::Error);
+        assert_eq!(
+            msg,
+            "Index exceeds the number of array elements. Index must not exceed 3."
+        );
+        let (wlevel, wmsg) = matlab_style_line("warning: something happened");
+        assert_eq!(wlevel, ConsoleLevel::Warning);
+        assert_eq!(wmsg, "something happened");
+    }
+
+    #[test]
+    fn ordinary_line_mentioning_error_stays_plain() {
+        // No `error:` diagnostic token → unchanged Plain (no false positive).
+        let (level, msg) = matlab_style_line("no error detected, 0 errors");
+        assert_eq!(level, ConsoleLevel::Plain);
+        assert_eq!(msg, "no error detected, 0 errors");
+        // A word ending in "error:" that is not a diagnostic prefix stays Plain.
+        assert_eq!(matlab_style_line("myerror: x").0, ConsoleLevel::Plain);
+        // Source-echo / caret context lines stay Plain.
+        assert_eq!(matlab_style_line("  x = foo(3)").0, ConsoleLevel::Plain);
+        assert_eq!(matlab_style_line("      ^").0, ConsoleLevel::Plain);
     }
 
     #[test]
