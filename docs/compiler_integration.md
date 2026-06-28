@@ -115,6 +115,19 @@ which separates console text from structured payloads wrapped in `___MF_WS___` /
 `___MF_VAL___` / `___MF_FIG___` sentinels — so typing a command updates the
 console **and** the Workspace table automatically.
 
+### Interpret-mode errors (matlab_llvm #423–#430)
+
+The interpreter raises MATLAB-style runtime errors instead of silently returning
+`0`/empty — undefined names (`Unrecognized function or variable 'foo'.`), out-of-
+bounds / invalid indexing (`Index exceeds the number of array elements. …`,
+`Array indices must be positive integers or logical values.`), and size
+mismatches (`Arrays have incompatible sizes for this operation.`). These print to
+stderr as clang-style diagnostics (`error: …`, or `<repl:0>:line:col: error: …`
+with a source caret for undefined names). The REPL transcript
+(`viewmodels/repl.rs::matlab_style_line`) recognizes the `error:`/`warning:`
+token (and any leading position), shows it at Error/Warning severity, and strips
+the clang-style prefix so the message reads like MATLAB's command window.
+
 ## Debug (`matlabc -dap`)
 
 DAP speaks JSON-RPC bodies in `Content-Length` frames over stdio. The pure framing
